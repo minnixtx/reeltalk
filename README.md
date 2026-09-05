@@ -18,7 +18,7 @@ The frozen original lives at **[minnixtx/reeltalk-legacy](https://github.com/min
 ## Roadmap
 
 - [x] Project seed (AGPLv3)
-- [ ] Functional spec from the frozen original
+- [x] Functional spec from the frozen original ([PLAN.md](PLAN.md), incl. dependency + asset license audit)
 - [ ] Core rewrite: film domain model + metadata (TMDB)
 - [ ] Federation (ActivityPub)
 - [ ] First public instance

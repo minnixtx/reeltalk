@@ -1,0 +1,19 @@
+# Secrets / local config
+.env
+.env.dev
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Collected static root (container volume; app assets live in reeltalk/static/)
+/static/
+
+# Runtime data dirs
+exports/
+backups/
+
+.qwen/

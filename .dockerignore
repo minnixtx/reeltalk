@@ -1,0 +1,11 @@
+.git
+.qwen
+.env
+.env.dev
+__pycache__/
+*.pyc
+node_modules/
+exports/
+backups/
+images/*
+!images/.gitkeep
