@@ -32,7 +32,12 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "reeltalk",
+    # Postgres field types (ArrayField for the plain name-list fields, D2).
+    "django.contrib.postgres",
+    # ReelTalk apps: the project package is no longer itself an app — real
+    # code lives in reeltalk.core (films/shelves) and reeltalk.social (users/
+    # statuses), which join as their milestones land (PLAN.md §5).
+    "reeltalk.core",
 ]
 
 MIDDLEWARE = [
@@ -53,7 +58,9 @@ ROOT_URLCONF = "reeltalk.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        # Shared cross-app templates (base.html, auth pages) live at the repo
+        # root; per-app templates use APP_DIRS under each app's templates/.
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
