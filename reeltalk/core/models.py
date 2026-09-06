@@ -8,7 +8,7 @@ binary watch state (D1) lives on the Shelf/ShelfFilm side, not here.
 import re
 
 from django.contrib.postgres.fields import ArrayField
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 # Leading article stripped for sort_title and the title/year dedup fallback
@@ -93,6 +93,105 @@ class Film(models.Model):
             if match is not None:
                 return match
         return None
+
+    # --- merge/absorb (§3.2) ------------------------------------------------
+
+    # Fields ``absorb_data_from`` may fill on the canonical row: metadata plus
+    # the dedup IDs — D7 backfills TMDB/IMDb IDs onto manual films. Never
+    # touched: title/sort_title (identity), origin_id/remote_id (the canonical
+    # keeps its own provenance), created_date/updated_date.
+    _ABSORB_SCALAR_FIELDS = (
+        "subtitle",
+        "description",
+        "year",
+        "runtime",
+        "poster",
+        "tmdb_id",
+        "imdb_id",
+    )
+    _ABSORB_ARRAY_FIELDS = ("genres", "directors", "cast")
+
+    def absorb_data_from(self, other: "Film") -> dict:
+        """Fill this row's empty fields from an absorbed film.
+
+        Scalar fields take the other value only when this one is empty; array
+        fields are unioned (this row's order kept, new values appended in the
+        other row's order). Returns ``{field: value}`` for what changed.
+        """
+        absorbed = {}
+        for name in self._ABSORB_SCALAR_FIELDS:
+            if not getattr(self, name) and getattr(other, name):
+                setattr(self, name, getattr(other, name))
+                absorbed[name] = getattr(other, name)
+        for name in self._ABSORB_ARRAY_FIELDS:
+            current = list(getattr(self, name) or [])
+            other_values = getattr(other, name) or []
+            additions = [v for v in other_values if v not in set(current)]
+            if additions:
+                setattr(self, name, current + additions)
+                absorbed[name] = additions
+        return absorbed
+
+    @transaction.atomic
+    def merge_into(self, canonical: "Film") -> dict:
+        """Merge this film into ``canonical`` and delete the absorbed row.
+
+        Empty metadata on the canonical row is backfilled from this one (D7),
+        every related row is re-pointed at the canonical, a MergedFilm row
+        keeps old-id → new-id so old URLs keep resolving, and this row is
+        deleted. All-or-nothing: any failure rolls the whole merge back.
+        """
+        if self.id == canonical.id:
+            raise ValueError("Cannot merge a film into itself")
+        absorbed = canonical.absorb_data_from(self)
+        self._repoint_related(canonical)
+        MergedFilm.objects.create(old_id=self.id, new_id=canonical.id)
+        # The absorbed row is deleted before the canonical is saved: a
+        # backfilled unique field (tmdb_id) would otherwise collide with the
+        # value this row still holds. Everything rolls back together on error.
+        self.delete()
+        canonical.save()
+        return absorbed
+
+    def _repoint_related(self, canonical: "Film") -> None:
+        """Re-point every row that references this film at the canonical one.
+
+        One block per related model; when Status lands (increment 4) it gets a
+        block here — statuses reference Film the same way shelves do.
+        """
+        self._repoint_shelf_films(canonical)
+        self._repoint_blocked_films(canonical)
+
+    def _repoint_shelf_films(self, canonical: "Film") -> None:
+        """Move shelf rows onto the canonical film.
+
+        A film already on a shelf absorbs its duplicate row instead of
+        violating the one-row-per-(film, shelf) constraint; shelved_date and
+        the acting user are preserved.
+        """
+        already_shelved = set(
+            ShelfFilm.objects.filter(film=canonical).values_list("shelf_id", flat=True)
+        )
+        for row in ShelfFilm.objects.filter(film=self):
+            if row.shelf_id in already_shelved:
+                row.delete()
+            else:
+                row.film = canonical
+                row.save(update_fields=["film"])
+
+    def _repoint_blocked_films(self, canonical: "Film") -> None:
+        """Carry film blocks over to the canonical film.
+
+        A block on an absorbed film keeps applying after the merge; if a user
+        had blocked both films, the duplicate falls out of the M2M.
+        """
+        # Local import: reeltalk.social imports this module (default shelves),
+        # so a module-level import would cycle.
+        from reeltalk.social.models import User
+
+        for user in User.objects.filter(blocked_films=self):
+            user.blocked_films.remove(self)
+            user.blocked_films.add(canonical)
 
 
 class MergedFilm(models.Model):
