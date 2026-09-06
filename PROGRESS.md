@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-06
 **Audience:** any new session picking up this project. Read [REWRITE.md](REWRITE.md) first (the binding clean-room rules), then [PLAN.md](PLAN.md) (functional spec + build plan + license audit), then this file for current state.
 
 ---
@@ -11,7 +11,7 @@
 |---|---|
 | M0 — functional spec, license audit, dev environment | ✅ Done 2026-09-05, verified (stack healthy, site on :3030, pytest green, ruff green) |
 | Stack audit (pre-M1) | ✅ Done 2026-09-05 — stack restructured to web+db; findings in PLAN.md §3.9, decisions R1–R8 below |
-| M1 — core film domain (first working version, part 1) | ⬜ Next session starts here |
+| M1 — core film domain (first working version, part 1) | 🔄 In progress — increment 1 of ~7 done: core app + Film domain (commit `cbf72c2`). **Next session starts at increment 2: social app + custom User model + auth + setup wizard.** Plan for the increments is in §2 below. |
 | M2 — TMDB integration | ⬜ Not started |
 | M3 — file import/export | ⬜ Not started |
 | M4 — federation (ActivityPub from spec) | ⬜ Not started |
@@ -55,6 +55,27 @@ Per AUDIT-BRIEF.md (consumed + deleted in that commit): audited the M0 stack aga
 
 **Decisions:** R1–R8 in §4 below (none owner-blocking; recorded for the record).
 
+### M1 increment 1 — core app + Film domain (executed 2026-09-06, commit `cbf72c2`)
+
+First increment of M1. New `reeltalk.core` app with the flat **Film** model (PLAN.md §3.2, D2) and **MergedFilm**. No new runtime deps — everything used was already in the audited set (`django.contrib.postgres` ArrayField is built into Django).
+
+**What landed:**
+- `Film`: title / `sort_title` (auto-derived on save — leading article stripped, lowercased) / subtitle / description (HTML) / year / runtime / `genres`+`directors`+`cast` as Postgres `ArrayField(text[])` (plain name-lists per D2) / poster / `tmdb_id`+`imdb_id` dedup identity / `origin_id`+`remote_id` (M4 federation identity, present but unused until M4).
+- `Film.find_match()` — the D7 dedup order: exact `tmdb_id`, then `imdb_id`, then normalized title+year. Returns the row to match/backfill onto, else None.
+- `MergedFilm` (old_id→new_id) + `resolve_film_id()` — keeps absorbed-film URLs redirecting (§3.2). The full merge/absorb *logic* (re-pointing shelves/statuses) is deferred to the Shelf increment (needs those models); only the id-mapping + resolution landed here.
+- `search_vector`: a **trigger-maintained Postgres tsvector column** added by raw-SQL migration `0002` — deliberately NOT a Django model field, so the ORM never reads/writes it and can't clobber it. Weights per §3.2: A=title, B=subtitle, C=directors+cast, D=genres; `simple` text-search config (titles are proper nouns — no stemming). M2's local search will query it via RawSQL.
+- Settings: registered `reeltalk.core` + `django.contrib.postgres`; added a shared top-level `templates/` dir (repo root) to TEMPLATES DIRS; the project package `reeltalk` is no longer itself an app.
+
+**Workflow note for future sessions (this box):** the image has **no live source mount** (`COPY . /app/` at build), so every code change needs `docker compose build web` before the container/tests see it. Fast loop that works:
+- Generate migrations locally (no rebuild): `docker run --rm -v /home/minnix/reeltalk:/src:z -w /src --entrypoint /app/.venv/bin/python reeltalk-web manage.py makemigrations <app>` (the `failed to resolve host 'db'` warning is harmless — makemigrations doesn't need the DB).
+- Lint/format local files without a rebuild: same `/src` mount with `--entrypoint /app/.venv/bin/ruff reeltalk-web check --fix --no-cache .` (and `format --no-cache .`). `--no-cache` is required — the bind-mounted `.ruff_cache` isn't writable by the container user.
+- Then `docker compose build web` and `docker compose run --rm web bash -c 'ruff check . && ruff format --check . && pytest'`.
+- If a test-DB migration fails mid-run, a stale `test_reeltalk` DB is left behind: drop it with `docker compose exec -T db psql -U reeltalk -d postgres -c 'DROP DATABASE IF EXISTS test_reeltalk;'` before re-running.
+
+**Test baseline:** before = 1 passed (smoke). After = **21 passed** (19 new: sort_title derivation, D7 dedup paths, merge-id resolution, tsvector trigger populate + recompute), ruff check + format green, `makemigrations --check` reports no drift, migrations apply to dev DB (`core_film`, `core_mergedfilm` + trigger present), site HTTP 200.
+
+**Decisions:** R9–R11 in §4 below (engineering calls, none owner-blocking; recorded so the owner can veto).
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -74,3 +95,6 @@ New owner decisions for the rewrite are recorded here, numbered R1, R2, … The 
 - **R6 — Frontend: vanilla JS, no framework, no build step** for v0.1 (search-as-you-type + one-click watchlist are ~50 lines of trivial JS). HTMX/Alpine rejected at this surface size; revisit if M5+ grows it.
 - **R7 — M4 federation written from spec.** No maintained Python ActivityPub library exists (verified 2026-09-05: PyPI's `activitypub` is 2018-era, Fedify is TypeScript); clean-room rules already mandate building against the W3C specs.
 - **R8 — Toolchain refresh.** ruff 0.16.6 (config modernized: +isort/+pyupgrade, legacy-carried ignores dropped), mypy 1.7.1 → 2.3.1 + django-stubs[compatible-mypy] 6.1.0, pytest 9.1.1 stack, responses 0.26.3.
+- **R9 — App structure: `reeltalk.core` + `reeltalk.social`.** The project package `reeltalk` is no longer itself an app; real code lives in sub-apps split by domain — `core` (Film/MergedFilm/Shelf/ShelfFilm) and `social` (User/Status, lands increment 2). M4 federation will add a third (`reeltalk.activitypub`). Shared cross-app templates live at the repo-root `templates/` dir (TEMPLATES DIRS), not inside the project package.
+- **R10 — Custom user model now.** `reeltalk.social.User` will be set as `AUTH_USER_MODEL` in increment 2, before any social migrations exist — it is very hard to change after the first migration. Defining it up front (with localname/display_name/summary/avatar/local-vs-remote + follow/block relations) keeps M4 federation clean instead of bolting on a separate profile model.
+- **R11 — Minimal original CSS for M1; visual design deferred to M6 with the owner (D17).** M1 pages use a small, deliberately neutral hand-written stylesheet (original AGPLv3 code) just enough to make forms/lists legible — not a design statement and no third-party framework. The Bulma re-vendoring option (license-cleared in PLAN.md §4.2) and all real styling/artwork happen at M6 *with* the owner per D17. Owner may veto; nothing here is hard to reverse.
