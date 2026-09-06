@@ -39,7 +39,7 @@ if [ -z "$domain" ] || [ "$domain" = "your-instance.example.com" ]; then
     set_var DOMAIN "$domain"
 fi
 
-for var in SECRET_KEY POSTGRES_PASSWORD REDIS_PASSWORD; do
+for var in SECRET_KEY POSTGRES_PASSWORD; do
     if [ -z "$(get_var "$var")" ]; then
         echo "Generating $var..."
         set_var "$var" "$(gen_secret)"

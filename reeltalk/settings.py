@@ -32,12 +32,14 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django_celery_beat",
     "reeltalk",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Serves collected static files from the web process — this stack has no
+    # separate static server (PLAN.md §3.8).
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -63,7 +65,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = "reeltalk.wsgi.application"
+ASGI_APPLICATION = "reeltalk.asgi.application"
 
 DATABASES = {
     "default": {
@@ -76,21 +78,15 @@ DATABASES = {
     }
 }
 
-# Single Redis container for the whole stack: DB 0 = cache, DB 1 = Celery broker.
-REDIS_HOST = env.str("REDIS_HOST", default="redis")
-REDIS_PASSWORD = env.str("REDIS_PASSWORD", default="")
-
+# No Redis in this stack (PLAN.md §3.9): the cache is a performance nicety at
+# single-instance scale, so it lives in process memory; sessions are DB-backed
+# by default. A task queue (Django-Q2) joins with M2 and uses Postgres as its
+# cluster — still no Redis.
 CACHES = {
     "default": {
-        "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:6379/0",
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
     }
 }
-
-CELERY_BROKER_URL = env.str(
-    "CELERY_BROKER_URL", default=f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:6379/1"
-)
-CELERY_TASK_TIME_LIMIT = 300
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -110,6 +106,16 @@ STATIC_ROOT = env.str("STATIC_ROOT", default=str(BASE_DIR / "static"))
 MEDIA_URL = "/images/"
 MEDIA_ROOT = env.str("MEDIA_ROOT", default=str(BASE_DIR / "images"))
 
+# Whitenoise serves the collected static files (compressed, immutable-cached)
+# from the web process. Media (/images/) is served by a URL pattern in
+# reeltalk/urls.py — same model, no separate server.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    },
+}
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LOGIN_URL = "/login/"
@@ -128,15 +134,25 @@ CSP_STYLE_SRC = ["'self'", "'unsafe-inline'"]
 CSP_SCRIPT_SRC = ["'self'"]
 
 # Email: SMTP when configured, console backend otherwise (safe dev default).
-EMAIL_HOST = env.str("EMAIL_HOST", default="")
-if EMAIL_HOST:
-    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-    EMAIL_PORT = env.int("EMAIL_PORT", default=587)
-    EMAIL_HOST_USER = env.str("EMAIL_HOST_USER", default="")
-    EMAIL_HOST_PASSWORD = env.str("EMAIL_HOST_PASSWORD", default="")
-    EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+# Django 6.1's MAILERS setting replaces the deprecated EMAIL_* settings —
+# and defining both at once is an error, so the env values are read into
+# plain locals, never EMAIL_* module attributes.
+smtp_host = env.str("EMAIL_HOST", default="")
+if smtp_host:
+    MAILERS = {
+        "default": {
+            "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+            "OPTIONS": {
+                "host": smtp_host,
+                "port": env.int("EMAIL_PORT", default=587),
+                "username": env.str("EMAIL_HOST_USER", default=""),
+                "password": env.str("EMAIL_HOST_PASSWORD", default=""),
+                "use_tls": env.bool("EMAIL_USE_TLS", default=True),
+            },
+        }
+    }
 else:
-    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+    MAILERS = {"default": {"BACKEND": "django.core.mail.backends.console.EmailBackend"}}
 
 DEFAULT_FROM_EMAIL = f"{env.str('EMAIL_SENDER_NAME', default='admin')}@{DOMAIN}"
 SERVER_EMAIL = DEFAULT_FROM_EMAIL

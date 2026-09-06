@@ -9,10 +9,10 @@ die() {
 
 trap exit TERM
 
-# The web container runs gunicorn, so it is the one that applies migrations
-# and collects static files. Celery containers start after it (depends_on)
-# and just run their commands.
-if [ "$1" = "gunicorn" ]; then
+# The web container runs uvicorn, so it is the one that applies migrations
+# and collects static files. Other roles (the M2+ qcluster worker) start
+# after it (depends_on) and just run their commands.
+if [ "$1" = "uvicorn" ]; then
     info "Applying database migrations"
     python manage.py migrate --no-input || die "failed to migrate"
 
