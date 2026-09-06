@@ -126,3 +126,86 @@ def resolve_film_id(film_id: int) -> int:
             return film_id
         film_id = merged.new_id
         seen += 1
+
+
+class Shelf(models.Model):
+    """A named collection of films owned by a user (§3.2).
+
+    D1's binary model keeps exactly two default shelves per local user —
+    Watchlist (``to-read``) and Watched (``read``); the identifiers are fixed
+    by the decision, not derived from the name. Shelves federate as
+    ActivityPub OrderedCollections in M4.
+    """
+
+    TO_READ = "to-read"
+    READ = "read"
+    # (identifier, name) pairs created for every new local user (D1).
+    DEFAULT_SHELVES = ((TO_READ, "Watchlist"), (READ, "Watched"))
+
+    name = models.CharField(max_length=100)
+    identifier = models.CharField(max_length=100)
+    description = models.TextField(blank=True, default="")
+    user = models.ForeignKey(
+        "social.User", on_delete=models.CASCADE, related_name="shelves"
+    )
+    films = models.ManyToManyField(
+        "Film",
+        through="ShelfFilm",
+        through_fields=("shelf", "film"),
+        related_name="shelves",
+    )
+
+    # ActivityPub origin identity (M4) — same day-one pattern as Film.
+    origin_id = models.PositiveBigIntegerField(null=True, blank=True)
+    remote_id = models.PositiveBigIntegerField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "identifier"], name="unique_shelf_identifier_per_user"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user.localname}: {self.name}"
+
+    @classmethod
+    def create_default_shelves(cls, user) -> None:
+        """Create the two D1 default shelves for a new local user."""
+        for identifier, name in cls.DEFAULT_SHELVES:
+            cls.objects.create(name=name, identifier=identifier, user=user)
+
+
+class ShelfFilm(models.Model):
+    """Through row joining a film to a shelf (§3.2).
+
+    ``user`` is the actor who shelved — always the shelf's owner until M4,
+    carried separately because the ActivityPub wire type needs an actor. It
+    defaults to the shelf's owner on save; note the M2M manager's ``.add()``
+    bypasses this save(), so shelving code creates rows explicitly (or passes
+    ``through_defaults``).
+    """
+
+    shelf = models.ForeignKey(Shelf, on_delete=models.CASCADE)
+    # PROTECT: a film cannot be deleted while it sits on a shelf. Merge/absorb
+    # re-points these rows before deleting the absorbed film, so merges are
+    # unaffected.
+    film = models.ForeignKey(Film, on_delete=models.PROTECT)
+    user = models.ForeignKey("social.User", on_delete=models.CASCADE)
+    shelved_date = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name_plural = "shelf films"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["film", "shelf"], name="unique_film_per_shelf"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.film} on {self.shelf}"
+
+    def save(self, *args, **kwargs):
+        if self.user_id is None and self.shelf_id is not None:
+            self.user = Shelf.objects.get(pk=self.shelf_id).user
+        super().save(*args, **kwargs)

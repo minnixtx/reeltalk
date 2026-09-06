@@ -13,6 +13,8 @@ from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
 from django.utils import timezone
 
+from reeltalk.core.models import Shelf
+
 
 class UserManager(BaseUserManager):
     def _create_user(self, localname, password, **extra_fields):
@@ -86,6 +88,14 @@ class User(AbstractBaseUser, PermissionsMixin):
     class Meta:
         verbose_name = "user"
         verbose_name_plural = "users"
+
+    def save(self, *args, **kwargs):
+        creating = self.pk is None
+        super().save(*args, **kwargs)
+        if creating and self.local:
+            # Every local user starts with the two binary shelves (D1). Remote
+            # mirrors (M4) receive their shelves from federation instead.
+            Shelf.create_default_shelves(self)
 
     @property
     def username(self) -> str:
