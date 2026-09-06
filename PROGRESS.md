@@ -34,9 +34,9 @@ Milestone definitions and exit bars: [PLAN.md §5](PLAN.md).
 
 **Test baseline:** 1 passed (smoke only — real coverage starts with M1).
 
-### Stack audit (executed 2026-09-05)
+### Stack audit (executed 2026-09-05, commit `95b332c`)
 
-Per AUDIT-BRIEF.md (consumed + deleted in the closing commit): audited the M0 stack against current best practice and applied changes in-repo. Full findings table + rejected alternatives: PLAN.md §3.9; license verdicts for new/changed deps: PLAN.md §4.4.
+Per AUDIT-BRIEF.md (consumed + deleted in that commit): audited the M0 stack against current best practice and applied changes in-repo. Full findings table + rejected alternatives: PLAN.md §3.9; license verdicts for new/changed deps: PLAN.md §4.4.
 
 **What changed (applied):**
 - **Python 3.11 → 3.13**, pip → **uv** with committed `uv.lock` (51 packages, resolves in <1 s).
