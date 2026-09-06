@@ -22,6 +22,20 @@ Milestone definitions and exit bars: [PLAN.md §5](PLAN.md).
 
 ## 2. Execution record
 
+### M1 — increment plan (forward-looking; ~7 increments across sessions)
+
+M1 = "core film domain, first working version, part 1" (PLAN.md §5). It is built as small verified increments; **each ends in a committed green checkpoint** (pytest + ruff clean) with this file updated, then the session stops. Scope per increment:
+
+1. ✅ **Core app + Film domain** — `reeltalk.core`: Film + MergedFilm models, `sort_title`, D7 dedup (`find_match`), tsvector trigger. *(done 2026-09-06, `cbf72c2`.)*
+2. ⬜ **Social app + User + auth** — `reeltalk.social`: custom `User` model set as `AUTH_USER_MODEL` (R10), signup/login/logout views, first-run setup wizard. Migrations + tests.
+3. ⬜ **Shelf/ShelfFilm + binary defaults** — Shelf + ShelfFilm models; default shelves (`to-read`=Watchlist, `read`=Watched) created on user save; the full merge/absorb *logic* (re-point shelves/statuses onto a canonical Film) lands here now that related models exist.
+4. ⬜ **Status/Review/ReviewRating + watch rules** — Status base + Comment/Review/ReviewRating subtypes; §3.3 rules: rating required to mark watched, one Review per user per film, rating-only ReviewRating.
+5. ⬜ **Film pages + shelve controls + finish flow** — create/edit/view film views + templates; shelve/unshelve; "mark watched" finish flow that enforces the rating requirement; edit-review.
+6. ⬜ **User films page (3 tabs) + minimal feed** — All / Watchlist / Watched tabs on the user's films page; minimal home feed/timeline.
+7. ⬜ **Admin basics + landing/about + exit-bar verification** — admin registration polish, landing/about page, end-to-end check of the full loop, final PROGRESS.md.
+
+**M1 exit bar (across all sessions):** owner can sign up on the local instance and run the whole watchlist→watched→review loop. No new runtime deps or services may be introduced in M1 (web + db only; Django templates + vanilla JS). Conventions to follow are recorded in §4 — especially R9 (app structure), R10 (custom user model now), R11 (minimal neutral CSS; real styling deferred to M6 with the owner per D17).
+
 ### M0 (executed 2026-09-05)
 
 **Spec + audit:** `PLAN.md` written — functional spec distilled from the legacy `PROGRESS.md` feature inventory, a walk of the legacy codebase (Film model, `tmdb.py`, AP wire types, deployment files), and the owner decision log (legacy §8 #1–34, renumbered D1–D17 in PLAN.md §2). License audit of every legacy dependency (PyPI metadata + GitHub where sparse) and every static asset/font — verdicts in PLAN.md §4. Key results: **no dependency is license-blocked**; `bw-file-resubmit` (the flagged first target) is **MIT** → compatible, but a native ~20-line widget is recommended instead; the icomoon icon font and all BookWyrm artwork are ❌ do-not-carry-over.
