@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}Set up ReelTalk{% endblock %}
+
+{% block content %}
+<h1>Welcome — set up your instance</h1>
+<p>This is a fresh ReelTalk instance. Create the first account (the instance
+admin) to get started.</p>
+<form method="post">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit">Create admin account</button>
+</form>
+{% endblock %}

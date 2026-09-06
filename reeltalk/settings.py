@@ -36,8 +36,9 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     # ReelTalk apps: the project package is no longer itself an app — real
     # code lives in reeltalk.core (films/shelves) and reeltalk.social (users/
-    # statuses), which join as their milestones land (PLAN.md §5).
+    # statuses); more apps join as their milestones land (PLAN.md §5, R9).
     "reeltalk.core",
+    "reeltalk.social",
 ]
 
 MIDDLEWARE = [
@@ -95,6 +96,11 @@ CACHES = {
     }
 }
 
+# Custom user model (R10): set before any social migration exists — it is
+# very hard to change after the first one. localname@domain identity, defined
+# in reeltalk.social.models.
+AUTH_USER_MODEL = "social.User"
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
@@ -115,18 +121,26 @@ MEDIA_ROOT = env.str("MEDIA_ROOT", default=str(BASE_DIR / "images"))
 
 # Whitenoise serves the collected static files (compressed, immutable-cached)
 # from the web process. Media (/images/) is served by a URL pattern in
-# reeltalk/urls.py — same model, no separate server.
+# reeltalk/urls.py — same model, no separate server. Production uses manifest
+# (hashed-name) storage; under DEBUG whitenoise serves straight from the source
+# directories via finders, so tests and local runs need no collectstatic step
+# (the entrypoint only collects when it starts uvicorn).
+if DEBUG:
+    _STATICFILES_BACKEND = "whitenoise.storage.CompressedStaticFilesStorage"
+else:
+    _STATICFILES_BACKEND = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"
-    },
+    "staticfiles": {"BACKEND": _STATICFILES_BACKEND},
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/"
+# Django >=5 logout is POST-only; this is where the form redirects after.
+LOGOUT_REDIRECT_URL = "/"
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = (
     env.int("DATA_UPLOAD_MAX_MEMORY_MiB", default=100) * 1024 * 1024

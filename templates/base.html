@@ -1,0 +1,38 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}ReelTalk{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/reeltalk.css' %}">
+</head>
+<body>
+<header class="site-header">
+  <div class="container nav">
+    <a class="brand" href="{% url 'index' %}">ReelTalk</a>
+    <nav>
+      {% if user.is_authenticated %}
+        <span class="who">{{ user.localname }}</span>
+        <form method="post" action="{% url 'logout' %}" class="inline">
+          {% csrf_token %}
+          <button type="submit">Log out</button>
+        </form>
+      {% else %}
+        <a href="{% url 'login' %}">Log in</a>
+        <a href="{% url 'signup' %}">Sign up</a>
+      {% endif %}
+    </nav>
+  </div>
+</header>
+<main class="container">
+  {% if messages %}
+    <ul class="messages">
+      {% for message in messages %}
+        <li class="{{ message.tags }}">{{ message }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

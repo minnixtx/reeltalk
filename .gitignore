@@ -9,7 +9,7 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Collected static root (container volume; app assets live in reeltalk/static/)
+# Collected static root (container volume; source assets live in each app's static/ dir)
 /static/
 
 # Runtime data dirs
