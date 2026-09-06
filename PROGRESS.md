@@ -11,7 +11,7 @@
 |---|---|
 | M0 — functional spec, license audit, dev environment | ✅ Done 2026-09-05, verified (stack healthy, site on :3030, pytest green, ruff green) |
 | Stack audit (pre-M1) | ✅ Done 2026-09-05 — stack restructured to web+db; findings in PLAN.md §3.9, decisions R1–R8 below |
-| M1 — core film domain (first working version, part 1) | 🔄 In progress — increment 1 of ~7 done: core app + Film domain (commit `cbf72c2`). **Next session starts at increment 2: social app + custom User model + auth + setup wizard.** Plan for the increments is in §2 below. |
+| M1 — core film domain (first working version, part 1) | 🔄 In progress — increment 2 of ~7 done: core app + Film domain (`cbf72c2`), social app + custom User + auth + setup wizard (`a41c87b`). **Next session starts at increment 3: Shelf/ShelfFilm + binary default shelves.** Plan for the increments is in §2 below. |
 | M2 — TMDB integration | ⬜ Not started |
 | M3 — file import/export | ⬜ Not started |
 | M4 — federation (ActivityPub from spec) | ⬜ Not started |
@@ -27,7 +27,7 @@ Milestone definitions and exit bars: [PLAN.md §5](PLAN.md).
 M1 = "core film domain, first working version, part 1" (PLAN.md §5). It is built as small verified increments; **each ends in a committed green checkpoint** (pytest + ruff clean) with this file updated, then the session stops. Scope per increment:
 
 1. ✅ **Core app + Film domain** — `reeltalk.core`: Film + MergedFilm models, `sort_title`, D7 dedup (`find_match`), tsvector trigger. *(done 2026-09-06, `cbf72c2`.)*
-2. ⬜ **Social app + User + auth** — `reeltalk.social`: custom `User` model set as `AUTH_USER_MODEL` (R10), signup/login/logout views, first-run setup wizard. Migrations + tests.
+2. ✅ **Social app + User + auth** — `reeltalk.social`: custom `User` model set as `AUTH_USER_MODEL` (R10), signup/login/logout views, first-run setup wizard. *(done 2026-09-06, `a41c87b`.)*
 3. ⬜ **Shelf/ShelfFilm + binary defaults** — Shelf + ShelfFilm models; default shelves (`to-read`=Watchlist, `read`=Watched) created on user save; the full merge/absorb *logic* (re-point shelves/statuses onto a canonical Film) lands here now that related models exist.
 4. ⬜ **Status/Review/ReviewRating + watch rules** — Status base + Comment/Review/ReviewRating subtypes; §3.3 rules: rating required to mark watched, one Review per user per film, rating-only ReviewRating.
 5. ⬜ **Film pages + shelve controls + finish flow** — create/edit/view film views + templates; shelve/unshelve; "mark watched" finish flow that enforces the rating requirement; edit-review.
@@ -90,6 +90,29 @@ First increment of M1. New `reeltalk.core` app with the flat **Film** model (PLA
 
 **Decisions:** R9–R11 in §4 below (engineering calls, none owner-blocking; recorded so the owner can veto).
 
+### M1 increment 2 — social app + User + auth (executed 2026-09-06, commit `a41c87b`)
+
+Second increment of M1. New `reeltalk.social` app with the custom **User** model now set as `AUTH_USER_MODEL` (R10 — done before any social migration existed), core auth views, and the first-run setup wizard (PLAN.md §3.7). No new runtime deps.
+
+**What landed:**
+- `User` (`AbstractBaseUser` + `PermissionsMixin`, `USERNAME_FIELD = "localname"`): localname (max 30, unique) / display_name / email (optional, not yet unique — password reset lands later in M1 and needs it) / summary (HTML-from-markdown like Film.description; no UI writes it until profile edit) / avatar / `local` flag (remote mirrors are M4) / is_staff (custom users must define it — PermissionsMixin only provides is_superuser/groups/permissions) / date_joined. Follow/block relations per R10: `follows` (M2M self, related_name followers), `blocks` (M2M self, related_name blocked_by), `blocked_films` (M2M core.Film). Server-level blocking, feed filters, 2FA, email verification deferred to M4/M5 (R13).
+- `UserManager` with create_user/create_superuser; `username` property = `localname@DOMAIN` (§3.2 identity; M4 refines for remote users); `get_full_name()` falls back to localname.
+- Auth: signup view + `SignupForm` (localname regex `[a-zA-Z0-9][a-zA-Z0-9._-]*`, case-insensitive uniqueness at signup, Django password validators, confirm-match), built-in LoginView/LogoutView (Django ≥5 logout is POST-only; `LOGOUT_REDIRECT_URL = "/"`), templates `base/login/signup/home` at the repo-root `templates/` dir and `social/setup.html` in the app.
+- First-run setup wizard (R12): while no superuser exists, both `/` and `/signup/` redirect to `/setup/`; POST there creates the first account as admin (is_staff + is_superuser) and logs it in; afterwards the wizard redirects away and signup opens. The §3.7 open/invite-gated policy lands with site settings (increment 7).
+- R11 stylesheet: `reeltalk/social/static/css/reeltalk.css` — small, deliberately neutral, hand-written (~150 lines); app-dir static picked up by collectstatic via APP_DIRS.
+- Settings: `reeltalk.social` in INSTALLED_APPS, `AUTH_USER_MODEL = "social.User"`, DEBUG-conditional staticfiles storage (below).
+
+**Gotchas hit & fixed:**
+- **Strict manifest storage broke the test loop.** The entrypoint only runs collectstatic when it starts uvicorn, so `docker compose run --rm web ... pytest` rendered `{% static %}` against a stale/absent manifest → `ValueError: Missing staticfiles manifest entry`. Fix: under DEBUG use `whitenoise.storage.CompressedStaticFilesStorage` (whitenoise serves from finders in DEBUG anyway); production keeps `CompressedManifestStaticFilesStorage` — no change to the verified M0 prod path.
+- **Dev DB recreated.** The M0 dev DB had been migrated with the *default* user model: orphaned `auth_user` + `django_admin_log` FK pointing at it, which would have broken admin log writes after the AUTH_USER_MODEL switch (and `makemigrations --check` reported InconsistentMigrationHistory). Verified zero user-data rows first; dropped + recreated the DB and let the entrypoint re-migrate. Also cleared M0's leftover `django_celery_beat_*` tables.
+- **Django 6 custom-user details** (for future increments): AuthenticationForm always names its field `username` (label from USERNAME_FIELD) and maps it onto localname internally; session auth keys are private (`_auth_user_id`, …) — assert with the public `django.contrib.auth.SESSION_KEY` constant.
+
+**Test baseline:** before = 21 passed. After = **49 passed** (28 new: user manager/model + relations, signup validation paths, login/logout incl. POST-only 405, setup wizard lifecycle, admin-site auth with the custom user; smoke test updated to assert the first-run redirect), ruff check + format green, `makemigrations --check` no drift, dev DB re-migrated clean (`social_user` + through tables, no orphan `auth_user`).
+
+**Site check:** `/` → 302 `/setup/` (fresh instance), `/setup/` 200, `/login/` 200, hashed CSS served by whitenoise 200. The live dev instance is intentionally left at the first-run wizard so the owner gets the real setup flow.
+
+**Decisions:** R12–R13 in §4 below (engineering calls, none owner-blocking; recorded so the owner can veto).
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -112,3 +135,5 @@ New owner decisions for the rewrite are recorded here, numbered R1, R2, … The 
 - **R9 — App structure: `reeltalk.core` + `reeltalk.social`.** The project package `reeltalk` is no longer itself an app; real code lives in sub-apps split by domain — `core` (Film/MergedFilm/Shelf/ShelfFilm) and `social` (User/Status, lands increment 2). M4 federation will add a third (`reeltalk.activitypub`). Shared cross-app templates live at the repo-root `templates/` dir (TEMPLATES DIRS), not inside the project package.
 - **R10 — Custom user model now.** `reeltalk.social.User` will be set as `AUTH_USER_MODEL` in increment 2, before any social migrations exist — it is very hard to change after the first migration. Defining it up front (with localname/display_name/summary/avatar/local-vs-remote + follow/block relations) keeps M4 federation clean instead of bolting on a separate profile model.
 - **R11 — Minimal original CSS for M1; visual design deferred to M6 with the owner (D17).** M1 pages use a small, deliberately neutral hand-written stylesheet (original AGPLv3 code) just enough to make forms/lists legible — not a design statement and no third-party framework. The Bulma re-vendoring option (license-cleared in PLAN.md §4.2) and all real styling/artwork happen at M6 *with* the owner per D17. Owner may veto; nothing here is hard to reverse.
+- **R12 — First-run flow: setup wizard gates the instance until an admin exists.** While no superuser exists, `/` and `/signup/` redirect to `/setup/`; the first account created there becomes the instance admin (is_staff + is_superuser) and the wizard then disappears. Rationale: an instance without an admin isn't operational, and open signup on a fresh public instance would otherwise race the wizard for the admin slot. Consequences: on a truly fresh instance "signing up" means going through the wizard first (still satisfies the M1 exit bar — one account-creation step); after setup, signup is open (the §3.7 open/invite-gated policy lands with site settings in increment 7). Localname rules fixed here: 1–30 chars of `[a-zA-Z0-9._-]` starting with a letter/digit; uniqueness enforced case-insensitively at signup (DB stays case-sensitive); email optional and non-unique until password reset needs it. Owner may veto.
+- **R13 — User field scope for M1.** Per R10 the model carries localname/display_name/summary/avatar/local flag plus follow + user/film block relations now. Deliberately deferred: server-level blocking (a federation concept — lands with M4), feed filters, 2FA and email verification (§3.7 marks them later; M5). Adding these later is a plain migration on an existing model — no AUTH_USER_MODEL risk remains. Owner may veto.
