@@ -41,7 +41,8 @@ def render_markdown(text: str) -> str:
     """
     if not text:
         return ""
-    html = mistune.html(text)
+    # mistune appends a trailing newline; strip so stored HTML stays tidy.
+    html = mistune.html(text).strip()
     return bleach.clean(
         html,
         tags=_ALLOWED_TAGS,

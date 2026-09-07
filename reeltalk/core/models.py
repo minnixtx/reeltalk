@@ -29,8 +29,11 @@ class Film(models.Model):
     # Auto-derived from title on save; used for ordering and title/year dedup.
     sort_title = models.CharField(max_length=512, db_index=True, editable=False)
     subtitle = models.CharField(max_length=512, blank=True, default="")
-    # HTML rendered from markdown at write time (§3.2).
+    # HTML rendered from markdown at write time (§3.2); ``raw_description``
+    # keeps the markdown source so an edit form can pre-fill it (mirrors
+    # Status.content / raw_content).
     description = models.TextField(blank=True, default="")
+    raw_description = models.TextField(blank=True, default="")
     year = models.PositiveIntegerField(null=True, blank=True)
     runtime = models.PositiveIntegerField(
         null=True, blank=True, help_text="Runtime in minutes."

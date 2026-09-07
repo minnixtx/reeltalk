@@ -27,6 +27,12 @@
   </div>
 </article>
 
+{% if user.is_authenticated and not film.tmdb_id %}
+  <div class="film-actions">
+    <a class="btn" href="{% url 'film-edit' film.id %}">Edit</a>
+  </div>
+{% endif %}
+
 {% if film.description %}
   <section class="film-description">
     <h2>About</h2>
