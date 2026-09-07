@@ -15,10 +15,12 @@ from .models import (
     Shelf,
     ShelfFilm,
     Status,
+    mark_watched,
     resolve_film_id,
     shelve_to_watchlist,
     unshelve_from_watchlist,
 )
+from .utils import render_markdown
 
 
 def film_detail(request, film_id):
@@ -42,7 +44,45 @@ def film_detail(request, film_id):
         )
         data["on_watchlist"] = Shelf.TO_READ in shelf_ids
         data["is_watched"] = Shelf.READ in shelf_ids
+        # The user's own review/rating (D5) pre-fills the finish/edit modal.
+        data["user_review"] = (
+            Status.objects.filter(
+                user=request.user,
+                film=film,
+                status_type__in=list(Status.REVIEW_TYPES),
+                deleted=False,
+            )
+            .order_by("id")
+            .first()
+        )
     return render(request, "core/film/detail.html", data)
+
+
+@login_required
+@require_POST
+def mark_watched_view(request, film_id):
+    """Finish flow (§3.3): mark a film watched with a required star rating.
+
+    The view is thin — rating validation, shelving (Watched + off Watchlist),
+    and the create-or-update-in-place review rule (D5) all live in
+    ``mark_watched``. A missing/invalid rating raises before any write; we
+    surface it as a message and send the user back to the film page.
+    """
+    film = get_object_or_404(Film, id=resolve_film_id(film_id))
+    raw_content = request.POST.get("content", "")
+    try:
+        mark_watched(
+            request.user,
+            film,
+            rating=request.POST.get("rating"),
+            content=render_markdown(raw_content),
+            raw_content=raw_content,
+        )
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("film", film_id=film.id)
+    messages.success(request, "Marked as watched.")
+    return redirect("film", film_id=film.id)
 
 
 @login_required

@@ -1,5 +1,7 @@
 """Film page view tests (PLAN.md §3.7) — detail, create/edit, D4 lock."""
 
+from decimal import Decimal
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
@@ -282,3 +284,96 @@ def test_detail_shows_correct_shelve_button(login, film):
     body = login.get(f"/film/{film.id}/").content.decode()
     assert "Remove from Watchlist" in body
     assert "Add to Watchlist" not in body
+
+
+# --- finish flow: mark watched (rating required) + edit review (D5) ---------
+
+
+@pytest.mark.django_db
+def test_mark_watched_requires_login(client, film):
+    resp = client.post(f"/film/{film.id}/watched/", {"rating": "4"})
+    assert resp.status_code == 302
+    assert "/login/" in resp["Location"]
+
+
+@pytest.mark.django_db
+def test_mark_watched_is_post_only(login, film):
+    assert login.get(f"/film/{film.id}/watched/").status_code == 405
+
+
+@pytest.mark.django_db
+def test_mark_watched_rating_only_creates_reviewrating_and_shelves(login, film):
+    resp = login.post(f"/film/{film.id}/watched/", {"rating": "4.5", "content": ""})
+    assert resp.status_code == 302
+    assert resp["Location"] == f"/film/{film.id}/"
+    entry = Status.objects.get(user__localname="alice", film=film)
+    assert entry.status_type == Status.Type.REVIEW_RATING
+    assert entry.rating == Decimal("4.5")
+    assert entry.content == ""
+    # Shelved onto Watched.
+    row = ShelfFilm.objects.get(film=film)
+    assert row.shelf.identifier == "read"
+
+
+@pytest.mark.django_db
+def test_mark_watched_with_text_creates_written_review(login, film):
+    login.post(
+        f"/film/{film.id}/watched/", {"rating": "3", "content": "A **great** film."}
+    )
+    entry = Status.objects.get(film=film)
+    assert entry.status_type == Status.Type.REVIEW
+    assert entry.content == "<p>A <strong>great</strong> film.</p>"
+    assert entry.raw_content == "A **great** film."
+
+
+@pytest.mark.django_db
+def test_mark_watched_removes_from_watchlist(login, film):
+    login.post(f"/film/{film.id}/shelve/")
+    assert ShelfFilm.objects.filter(shelf__identifier="to-read", film=film).exists()
+    login.post(f"/film/{film.id}/watched/", {"rating": "5"})
+    # D1: now only on Watched.
+    assert not ShelfFilm.objects.filter(shelf__identifier="to-read", film=film).exists()
+    assert ShelfFilm.objects.filter(shelf__identifier="read", film=film).exists()
+
+
+@pytest.mark.django_db
+def test_mark_watched_without_rating_writes_nothing(login, film):
+    resp = login.post(f"/film/{film.id}/watched/", {"rating": "", "content": ""})
+    assert resp.status_code == 302  # back to the film page with an error message
+    assert Status.objects.count() == 0
+    assert ShelfFilm.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_mark_watched_rejects_invalid_rating(login, film):
+    for bad in ("0", "5.5", "3.25"):
+        login.post(f"/film/{film.id}/watched/", {"rating": bad})
+    assert Status.objects.count() == 0
+    assert ShelfFilm.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_refinishing_updates_the_review_in_place(login, film):
+    login.post(f"/film/{film.id}/watched/", {"rating": "3", "content": ""})
+    first = Status.objects.get(film=film)
+    login.post(f"/film/{film.id}/watched/", {"rating": "4.5", "content": "Loved it."})
+    # D5 rule 4: same row, updated in place.
+    assert Status.objects.filter(film=film).count() == 1
+    entry = Status.objects.get(pk=first.pk)
+    assert entry.rating == Decimal("4.5")
+    assert entry.content == "<p>Loved it.</p>"
+    assert entry.edited_date is not None
+
+
+@pytest.mark.django_db
+def test_detail_prefills_edit_review_modal(login, film):
+    login.post(f"/film/{film.id}/watched/", {"rating": "4.5", "content": "Great."})
+    body = login.get(f"/film/{film.id}/").content.decode()
+    # Now watched: the action is "Edit review" (not "Mark as watched"), and no
+    # watchlist buttons remain.
+    assert "Edit review" in body
+    assert "Mark as watched" not in body
+    assert "Add to Watchlist" not in body
+    # The modal is pre-filled with the existing rating and raw markdown.
+    assert 'data-value="4.5"' in body
+    assert ">Great.</textarea>" in body

@@ -10,4 +10,9 @@ urlpatterns = [
     path("film/<int:film_id>/edit/", views.film_edit, name="film-edit"),
     path("film/<int:film_id>/shelve/", views.shelve, name="film-shelve"),
     path("film/<int:film_id>/unshelve/", views.unshelve, name="film-unshelve"),
+    path(
+        "film/<int:film_id>/watched/",
+        views.mark_watched_view,
+        name="film-mark-watched",
+    ),
 ]

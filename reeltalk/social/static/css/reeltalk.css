@@ -280,3 +280,80 @@ ul.errorlist {
 .film-actions .btn {
   margin-top: 0;
 }
+
+/* Interactive star rating: the read-only .stars fill plus a layer of ten
+   invisible half-star hit zones (see reeltalk.js). */
+.star-rating {
+  position: relative;
+  display: inline-block;
+}
+
+.star-hits {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  cursor: pointer;
+}
+
+.star-hits span {
+  flex: 1 1 0;
+  height: 100%;
+}
+
+/* Finish-flow modal (mark watched / edit review). */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 24, 30, 0.5);
+}
+
+.modal-dialog {
+  position: relative;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.25rem 1.5rem 1.5rem;
+  width: 100%;
+  max-width: 26rem;
+}
+
+.modal-dialog h2 {
+  margin-top: 0;
+  font-size: 1.2rem;
+}
+
+.modal-dialog .star-rating .stars {
+  font-size: 2rem;
+}
+
+.modal-dialog textarea {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-top: 0.25rem;
+}
+
+.modal-dialog button {
+  margin-top: 1rem;
+}
+
+.required {
+  color: var(--error);
+}

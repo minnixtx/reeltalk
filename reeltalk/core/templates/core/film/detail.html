@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load film_tags %}
+{% load static film_tags %}
 
 {% block title %}{{ film.title }}{% if film.year %} ({{ film.year }}){% endif %}{% endblock %}
 
@@ -35,6 +35,9 @@
       {% else %}
         <form method="post" action="{% url 'film-shelve' film.id %}">{% csrf_token %}<button type="submit">Add to Watchlist</button></form>
       {% endif %}
+      <button type="button" data-open-modal="mark-watched-modal">Mark as watched</button>
+    {% else %}
+      <button type="button" data-open-modal="mark-watched-modal">Edit review</button>
     {% endif %}
     {% if not film.tmdb_id %}<a class="btn" href="{% url 'film-edit' film.id %}">Edit</a>{% endif %}
   </div>
@@ -66,4 +69,26 @@
     <p class="muted">No reviews yet.</p>
   {% endif %}
 </section>
+
+{% if user.is_authenticated %}
+<div class="modal" id="mark-watched-modal" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-dialog">
+    <h2>{% if user_review %}Edit your review of “{{ film.title }}”{% else %}Mark “{{ film.title }}” as watched{% endif %}</h2>
+    <form method="post" action="{% url 'film-mark-watched' film.id %}">
+      {% csrf_token %}
+      <label>Rating <span class="required">*</span></label>
+      <div class="star-rating" data-value="{% if user_review and user_review.rating %}{{ user_review.rating|floatformat:"-1" }}{% endif %}">
+        <span class="stars"><span class="stars-bg">★★★★★</span><span class="stars-fg" style="width:0%">★★★★★</span></span>
+        <div class="star-hits"></div>
+        <input type="hidden" name="rating" value="">
+      </div>
+      <label for="id_review_content">Review <span class="muted">(optional)</span></label>
+      <textarea name="content" id="id_review_content" rows="4" placeholder="What did you think?">{% if user_review %}{{ user_review.raw_content }}{% endif %}</textarea>
+      <button type="submit" disabled>{% if user_review %}Save changes{% else %}Mark as watched{% endif %}</button>
+    </form>
+  </div>
+</div>
+<script src="{% static 'js/reeltalk.js' %}"></script>
+{% endif %}
 {% endblock %}
