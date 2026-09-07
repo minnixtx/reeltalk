@@ -6,9 +6,12 @@ binary watch state (D1) lives on the Shelf/ShelfFilm side, not here.
 """
 
 import re
+from decimal import Decimal
 
 from django.contrib.postgres.fields import ArrayField
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 # Leading article stripped for sort_title and the title/year dedup fallback
@@ -156,10 +159,10 @@ class Film(models.Model):
     def _repoint_related(self, canonical: "Film") -> None:
         """Re-point every row that references this film at the canonical one.
 
-        One block per related model; when Status lands (increment 4) it gets a
-        block here — statuses reference Film the same way shelves do.
+        One block per related model (R16).
         """
         self._repoint_shelf_films(canonical)
+        self._repoint_statuses(canonical)
         self._repoint_blocked_films(canonical)
 
     def _repoint_shelf_films(self, canonical: "Film") -> None:
@@ -192,6 +195,10 @@ class Film(models.Model):
         for user in User.objects.filter(blocked_films=self):
             user.blocked_films.remove(self)
             user.blocked_films.add(canonical)
+
+    def _repoint_statuses(self, canonical: "Film") -> None:
+        """Carry comments/reviews/ratings over to the canonical film."""
+        Status.objects.filter(film=self).update(film=canonical)
 
 
 class MergedFilm(models.Model):
@@ -308,3 +315,196 @@ class ShelfFilm(models.Model):
         if self.user_id is None and self.shelf_id is not None:
             self.user = Shelf.objects.get(pk=self.shelf_id).user
         super().save(*args, **kwargs)
+
+
+class Status(models.Model):
+    """A post on a film — or standalone (§3.2).
+
+    The spec's Comment/Review/ReviewRating subtypes are one table with a
+    ``status_type`` discriminator rather than per-subtype tables (R17): D5's
+    one-review-per-user-per-film constraint must coexist with soft-delete,
+    and the partial unique index enforcing it needs both columns in the same
+    table. A ``review_rating`` row is a review without content — it always
+    carries its rating, is editable in place, and can later gain text while
+    keeping its type.
+
+    ``content`` holds HTML rendered from markdown at write time (like
+    Film.description); ``raw_content`` keeps the markdown source so an edit
+    can pre-fill a form. Standalone notes (no film) have no v0.1 composer;
+    the fields stay open for them per §3.2.
+    """
+
+    class Type(models.TextChoices):
+        COMMENT = "comment", "Comment"
+        REVIEW = "review", "Review"
+        REVIEW_RATING = "review_rating", "Rating-only review"
+
+    # The types that count as the user's review of a film for D5.
+    REVIEW_TYPES = (Type.REVIEW, Type.REVIEW_RATING)
+
+    user = models.ForeignKey(
+        "social.User", on_delete=models.PROTECT, related_name="statuses"
+    )
+    film = models.ForeignKey(
+        Film,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="statuses",
+    )
+    status_type = models.CharField(
+        max_length=20, choices=Type.choices, null=True, blank=True
+    )
+    content = models.TextField(blank=True, default="")
+    raw_content = models.TextField(blank=True, default="")
+    rating = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[
+            MinValueValidator(Decimal("0.5")),
+            MaxValueValidator(Decimal("5")),
+        ],
+    )
+    published_date = models.DateTimeField(default=timezone.now, db_index=True)
+    edited_date = models.DateTimeField(null=True, blank=True)
+    # Soft-delete (§3.2): the row is kept as a tombstone with its identity
+    # intact (federation consistency in M4) and its content cleared.
+    deleted = models.BooleanField(default=False)
+    deleted_date = models.DateTimeField(null=True, blank=True)
+    reply_parent = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT, related_name="replies"
+    )
+    # Remote statuses (M4) are mirrors; local ones are full rows.
+    local = models.BooleanField(default=True)
+
+    # ActivityPub origin identity (M4) — same day-one pattern as Film/Shelf.
+    origin_id = models.PositiveBigIntegerField(null=True, blank=True)
+    remote_id = models.PositiveBigIntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-published_date"]
+        constraints = [
+            # D5: one review per user per film — written reviews and
+            # rating-only entries alike. Soft-deleted reviews don't count, so
+            # a deleted review can be replaced (partial index; Postgres).
+            models.UniqueConstraint(
+                fields=["user", "film"],
+                # Literals: Meta has its own namespace, so Type is not visible here.
+                condition=Q(
+                    status_type__in=["review", "review_rating"],
+                    deleted=False,
+                ),
+                name="unique_review_per_user_per_film",
+            )
+        ]
+
+    def __str__(self) -> str:
+        if self.film:
+            kind = self.get_status_type_display()
+            return f"{self.user.localname}: {kind} on {self.film}"
+        return f"{self.user.localname}: status"
+
+    def save(self, *args, **kwargs):
+        if self.status_type == Status.Type.REVIEW_RATING and not self.rating:
+            raise ValueError("A rating-only entry must carry a star rating")
+        if self.status_type and not self.film_id:
+            kind = self.get_status_type_display().lower()
+            raise ValueError(f"A {kind} status must be anchored to a film")
+        super().save(*args, **kwargs)
+
+    @property
+    def is_review(self) -> bool:
+        """True for reviews and rating-only entries — the D5 review types."""
+        return self.status_type in self.REVIEW_TYPES
+
+    def delete(self, *args, **kwargs):
+        """Soft-delete (§3.2): keep the row as a tombstone with its identity
+        intact (M4 federation consistency) and clear the user content."""
+        if self.deleted:
+            return
+        self.deleted = True
+        self.content = ""
+        self.raw_content = ""
+        self.deleted_date = timezone.now()
+        self.save(update_fields=["deleted", "content", "raw_content", "deleted_date"])
+
+
+def validate_star_rating(rating) -> Decimal:
+    """D3/§3.3: a film cannot be marked watched without a star rating.
+
+    Accepts the int/float/str/Decimal forms a form can submit; the value must
+    be 0.5–5 in half-star steps (half steps keep D10's export — rating ×2 —
+    an integer). Raises ValueError; callers run it before any database write.
+    """
+    if rating is None or rating == "":
+        raise ValueError("A star rating is required to mark a film as watched")
+    value = Decimal(str(rating))
+    if not (Decimal("0.5") <= value <= Decimal("5")):
+        raise ValueError("Rating must be between 0.5 and 5 stars")
+    if (value * 2) % 1 != 0:
+        raise ValueError("Rating must use half-star steps")
+    return value
+
+
+@transaction.atomic
+def mark_watched(
+    user, film: Film, *, rating, content: str = "", raw_content: str = ""
+) -> Status:
+    """Mark ``film`` as watched for ``user`` (§3.3 rules 3–4).
+
+    The star rating is validated before any database write (D3). Shelves the
+    film onto the user's Watched shelf and off their Watchlist — D1's binary
+    model: a film is either watched or not — then creates or updates the
+    user's review entry: a written review when text is given, a rating-only
+    entry otherwise. Re-finishing a film that already has a review updates it
+    in place (D5); empty text keeps the existing content. Posts no automatic
+    feed note (D3) — only the review itself exists.
+    """
+    star_rating = validate_star_rating(rating)
+    watched_shelf = Shelf.objects.get(user=user, identifier=Shelf.READ)
+    watchlist_shelf = Shelf.objects.get(user=user, identifier=Shelf.TO_READ)
+
+    existing = (
+        Status.objects.filter(
+            user=user,
+            film=film,
+            status_type__in=list(Status.REVIEW_TYPES),
+            deleted=False,
+        )
+        .order_by("id")
+        .first()
+    )
+
+    ShelfFilm.objects.get_or_create(
+        shelf=watched_shelf, film=film, defaults={"user": user}
+    )
+    # D1: Watchlist and Watched are mutually exclusive.
+    ShelfFilm.objects.filter(shelf=watchlist_shelf, film=film).delete()
+
+    if existing is not None:
+        update_fields = []
+        if existing.rating != star_rating:
+            existing.rating = star_rating
+            update_fields.append("rating")
+        if content and (
+            existing.content != content or existing.raw_content != raw_content
+        ):
+            existing.content = content
+            existing.raw_content = raw_content
+            existing.edited_date = timezone.now()
+            update_fields += ["content", "raw_content", "edited_date"]
+        if update_fields:
+            existing.save(update_fields=update_fields)
+        return existing
+
+    status_type = Status.Type.REVIEW if content else Status.Type.REVIEW_RATING
+    return Status.objects.create(
+        user=user,
+        film=film,
+        status_type=status_type,
+        rating=star_rating,
+        content=content,
+        raw_content=raw_content,
+    )
