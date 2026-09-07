@@ -150,7 +150,7 @@ Fourth increment of M1. `Status` model in `reeltalk.core` (owner direction; amen
 
 **Test baseline:** before = 68 passed. After = **99 passed** (31 new: ordering, soft-delete tombstone semantics + idempotency, rating-only invariant, film anchoring, rating field bounds, D5 partial index incl. deleted-review replacement and comment exemption, mark_watched paths incl. validate-before-write and watchlist removal, update-in-place re-finish, empty-text-keeps-content, post-deletion re-finish, validate_star_rating input matrix, merge re-pointing, PROTECT), ruff check + format green, `makemigrations --check` no drift, dev DB migrated (`core_status` + partial index verified in pg_indexes).
 
-**Site check:** dev instance restarted with the new image; entrypoint applied `core/0004`. Instance still at the first-run `/setup/` wizard (302 from `/`, zero users) — the owner's admin account will get its default shelves automatically on creation; no backfill needed.
+**Site check:** dev instance restarted with the new image; entrypoint applied `core/0004`. **Since then (2026-09-07) the owner completed the `/setup/` wizard in a browser**: admin account `minnix` exists (is_staff + is_superuser) with both default shelves (verified in DB), `/` serves 200, `/setup/` redirects to `/`, and signup is now open. Do not assume first-run/zero-user state.
 
 **Decisions:** R17 in §4 below (engineering call, recorded so the owner can veto).
 
