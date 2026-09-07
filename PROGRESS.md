@@ -157,6 +157,7 @@ Fourth increment of M1. `Status` model in `reeltalk.core` (owner direction; amen
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
+- Owner's browser reaches the instance at **http://192.168.1.138:3030** — `.env` (gitignored) carries `ALLOWED_HOSTS=localhost,127.0.0.1,192.168.1.138` + `CSRF_TRUSTED_ORIGINS=http://192.168.1.138:3030`; if the workstation's LAN IP changes, update both or browser requests 400 (DisallowedHost) / form POSTs 403 (CSRF).
 - Legacy insurance: six named volumes `reeltalk-work_*` kept until the new instance is proven, then `docker volume rm`. Pre-freeze DB dump at `/home/minnix/backups/reeltalk/pre-freeze-20260905.sql.gz`.
 - Binding host quirks (all in PLAN.md §6): `:z` on bind mounts; `curl -4` (IPv6 docker-proxy resets); artifact volumes (`static_volume`, `media_volume`) re-initialize from the image after a runtime-user change — never touch `pgdata`. (The nginx-restart-after-web-rebuild and rebuild-all-celery-images quirks are gone with those services.)
 - Resource constraint: local LLM inference on a separate server — at most ONE background subagent at a time; serialize heavy docker/pytest runs.
