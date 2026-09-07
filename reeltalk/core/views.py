@@ -7,9 +7,18 @@ layer (``mark_watched``, the shelf helpers, D5's partial index).
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
 from .forms import FilmForm
-from .models import Film, Status, resolve_film_id
+from .models import (
+    Film,
+    Shelf,
+    ShelfFilm,
+    Status,
+    resolve_film_id,
+    shelve_to_watchlist,
+    unshelve_from_watchlist,
+)
 
 
 def film_detail(request, film_id):
@@ -23,7 +32,44 @@ def film_detail(request, film_id):
         .select_related("user")
         .order_by("-published_date")
     )
-    return render(request, "core/film/detail.html", {"film": film, "reviews": reviews})
+    data = {"film": film, "reviews": reviews}
+    if request.user.is_authenticated:
+        # D1 binary state drives the shelve controls on the page.
+        shelf_ids = set(
+            ShelfFilm.objects.filter(user=request.user, film=film)
+            .select_related("shelf")
+            .values_list("shelf__identifier", flat=True)
+        )
+        data["on_watchlist"] = Shelf.TO_READ in shelf_ids
+        data["is_watched"] = Shelf.READ in shelf_ids
+    return render(request, "core/film/detail.html", data)
+
+
+@login_required
+@require_POST
+def shelve(request, film_id):
+    """Add a film to the user's Watchlist (D1 mutual exclusion enforced)."""
+    film = get_object_or_404(Film, id=resolve_film_id(film_id))
+    notices = {
+        "added": ("success", "Added to your watchlist."),
+        "already": ("info", "Already on your watchlist."),
+        "watched": ("warning", "This film is in your Watched list."),
+    }
+    level, text = notices[shelve_to_watchlist(request.user, film)]
+    getattr(messages, level)(request, text)
+    return redirect("film", film_id=film.id)
+
+
+@login_required
+@require_POST
+def unshelve(request, film_id):
+    """Remove a film from the user's Watchlist."""
+    film = get_object_or_404(Film, id=resolve_film_id(film_id))
+    if unshelve_from_watchlist(request.user, film):
+        messages.success(request, "Removed from your watchlist.")
+    else:
+        messages.info(request, "Not on your watchlist.")
+    return redirect("film", film_id=film.id)
 
 
 @login_required

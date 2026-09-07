@@ -4,7 +4,13 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 
-from reeltalk.core.models import Film, Shelf, ShelfFilm
+from reeltalk.core.models import (
+    Film,
+    Shelf,
+    ShelfFilm,
+    shelve_to_watchlist,
+    unshelve_from_watchlist,
+)
 
 User = get_user_model()
 
@@ -94,3 +100,46 @@ def test_film_shelves_reverse_relation(user):
     assert list(film.shelves.all()) == [watchlist]
     ShelfFilm.objects.create(shelf=watched, film=film)
     assert set(film.shelves.all()) == {watchlist, watched}
+
+
+# --- Watchlist shelve/unshelve helpers (D1 mutual exclusion) -----------------
+
+
+@pytest.mark.django_db
+def test_shelve_to_watchlist_adds_a_row(user):
+    film = Film.objects.create(title="Dune", year=2021)
+    assert shelve_to_watchlist(user, film) == "added"
+    row = ShelfFilm.objects.get(film=film)
+    assert row.shelf.identifier == Shelf.TO_READ
+    assert row.user == user
+
+
+@pytest.mark.django_db
+def test_shelve_to_watchlist_is_idempotent(user):
+    film = Film.objects.create(title="Dune", year=2021)
+    shelve_to_watchlist(user, film)
+    assert shelve_to_watchlist(user, film) == "already"
+    assert ShelfFilm.objects.filter(film=film).count() == 1
+
+
+@pytest.mark.django_db
+def test_shelve_to_watchlist_refused_when_watched(user):
+    """D1: a watched film cannot also be on the watchlist."""
+    film = Film.objects.create(title="Dune", year=2021)
+    watched = shelf_of(user, Shelf.READ)
+    ShelfFilm.objects.create(shelf=watched, film=film)
+    assert shelve_to_watchlist(user, film) == "watched"
+    # No watchlist row was created.
+    assert not ShelfFilm.objects.filter(
+        shelf__identifier=Shelf.TO_READ, film=film
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_unshelve_from_watchlist_removes_and_reports(user):
+    film = Film.objects.create(title="Dune", year=2021)
+    shelve_to_watchlist(user, film)
+    assert unshelve_from_watchlist(user, film) is True
+    assert not ShelfFilm.objects.filter(film=film).exists()
+    # Second call: nothing left to remove.
+    assert unshelve_from_watchlist(user, film) is False

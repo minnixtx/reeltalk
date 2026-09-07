@@ -27,9 +27,16 @@
   </div>
 </article>
 
-{% if user.is_authenticated and not film.tmdb_id %}
+{% if user.is_authenticated %}
   <div class="film-actions">
-    <a class="btn" href="{% url 'film-edit' film.id %}">Edit</a>
+    {% if not is_watched %}
+      {% if on_watchlist %}
+        <form method="post" action="{% url 'film-unshelve' film.id %}">{% csrf_token %}<button type="submit">Remove from Watchlist</button></form>
+      {% else %}
+        <form method="post" action="{% url 'film-shelve' film.id %}">{% csrf_token %}<button type="submit">Add to Watchlist</button></form>
+      {% endif %}
+    {% endif %}
+    {% if not film.tmdb_id %}<a class="btn" href="{% url 'film-edit' film.id %}">Edit</a>{% endif %}
   </div>
 {% endif %}
 

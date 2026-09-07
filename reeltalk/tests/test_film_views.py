@@ -4,7 +4,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
 
-from reeltalk.core.models import Film, Status
+from reeltalk.core.models import Film, Shelf, ShelfFilm, Status
 
 User = get_user_model()
 
@@ -228,3 +228,57 @@ def test_film_edit_resolves_merged_film(login, film):
     resp = login.get(f"/film/{old_id}/edit/")
     assert resp.status_code == 200
     assert 'value="Dune Part Two"' in resp.content.decode()
+
+
+# --- shelve / unshelve (D1 mutual exclusion) ---------------------------------
+
+
+@pytest.mark.django_db
+def test_shelve_requires_login(client, film):
+    resp = client.post(f"/film/{film.id}/shelve/")
+    assert resp.status_code == 302
+    assert "/login/" in resp["Location"]
+
+
+@pytest.mark.django_db
+def test_shelve_is_post_only(login, film):
+    assert login.get(f"/film/{film.id}/shelve/").status_code == 405
+
+
+@pytest.mark.django_db
+def test_shelve_adds_to_watchlist(login, film):
+    resp = login.post(f"/film/{film.id}/shelve/")
+    assert resp.status_code == 302
+    assert resp["Location"] == f"/film/{film.id}/"
+    row = ShelfFilm.objects.get(film=film)
+    assert row.shelf.identifier == "to-read"
+
+
+@pytest.mark.django_db
+def test_shelve_refused_when_watched(login, user, film):
+    # Put the film on the user's Watched shelf directly.
+    watched_shelf = Shelf.objects.get(user=user, identifier=Shelf.READ)
+    ShelfFilm.objects.create(shelf=watched_shelf, film=film)
+    resp = login.post(f"/film/{film.id}/shelve/")
+    assert resp.status_code == 302
+    # No watchlist row created (mutual exclusion).
+    assert not ShelfFilm.objects.filter(shelf__identifier="to-read", film=film).exists()
+
+
+@pytest.mark.django_db
+def test_unshelve_removes_from_watchlist(login, film):
+    login.post(f"/film/{film.id}/shelve/")
+    assert ShelfFilm.objects.filter(film=film).count() == 1
+    resp = login.post(f"/film/{film.id}/unshelve/")
+    assert resp.status_code == 302
+    assert not ShelfFilm.objects.filter(film=film).exists()
+
+
+@pytest.mark.django_db
+def test_detail_shows_correct_shelve_button(login, film):
+    body = login.get(f"/film/{film.id}/").content.decode()
+    assert "Add to Watchlist" in body
+    login.post(f"/film/{film.id}/shelve/")
+    body = login.get(f"/film/{film.id}/").content.decode()
+    assert "Remove from Watchlist" in body
+    assert "Add to Watchlist" not in body

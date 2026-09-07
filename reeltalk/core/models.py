@@ -511,3 +511,35 @@ def mark_watched(
         content=content,
         raw_content=raw_content,
     )
+
+
+# --- Watchlist shelve/unshelve (D1 binary model) -----------------------------
+
+
+def shelve_to_watchlist(user, film: Film) -> str:
+    """Add ``film`` to ``user``'s Watchlist. Returns the outcome.
+
+    D1 keeps Watchlist and Watched mutually exclusive — a film is either
+    watched or not — so a film already on the user's Watched shelf is refused
+    (unwatching is out of v0.1 scope). Outcomes: ``"added"`` (new row),
+    ``"already"`` (idempotent no-op), or ``"watched"`` (refused).
+    """
+    watchlist = Shelf.objects.get(user=user, identifier=Shelf.TO_READ)
+    watched = Shelf.objects.get(user=user, identifier=Shelf.READ)
+    if ShelfFilm.objects.filter(shelf=watched, film=film).exists():
+        return "watched"
+    # get_or_create is race-safe against the unique (film, shelf) constraint.
+    _, created = ShelfFilm.objects.get_or_create(
+        shelf=watchlist, film=film, defaults={"user": user}
+    )
+    return "added" if created else "already"
+
+
+def unshelve_from_watchlist(user, film: Film) -> bool:
+    """Remove ``film`` from ``user``'s Watchlist. True if a row was removed."""
+    watchlist = Shelf.objects.get(user=user, identifier=Shelf.TO_READ)
+    row = ShelfFilm.objects.filter(shelf=watchlist, film=film).first()
+    if row is None:
+        return False
+    row.delete()
+    return True

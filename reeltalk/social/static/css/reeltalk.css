@@ -262,3 +262,21 @@ ul.errorlist {
 .review-author {
   font-weight: 600;
 }
+
+/* Shelve/edit controls under the film header. */
+.film-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.film-actions form {
+  margin: 0;
+}
+
+.film-actions button,
+.film-actions .btn {
+  margin-top: 0;
+}
