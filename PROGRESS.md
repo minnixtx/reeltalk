@@ -154,6 +154,10 @@ Fourth increment of M1. `Status` model in `reeltalk.core` (owner direction; amen
 
 **Decisions:** R17 in §4 below (engineering call, recorded so the owner can veto).
 
+### Clean-room guard (added 2026-09-07)
+
+Owner asked for assurance that no BookWyrm code is in the repo. Verified clean: git provenance (16 commits since the AGPLv3 seed `0f3c520`, no BookWyrm/legacy ancestry, single remote `minnixtx/reeltalk`), zero BookWyrm markers in any `.py`/template/static file or dependency — the only mentions are the attribution prose REWRITE.md rule 5 requires. To keep that guarantee self-enforcing, `reeltalk/tests/test_clean_room.py` scans every project file for telltale strings (`bookwyrm`, `mouse reeve`, `anti-capitalist`, word-boundary `acrl`, case-insensitive). Discovery is a filesystem walk — the suite also runs inside the built image where there is no `.git`; top-level `static/`+`images/` (build artifacts/volumes), caches, `.venv`, and gitignored local files are skipped. Only the four attribution docs and the guard itself are whitelisted, deliberately by hand. Suite baseline: **145 passed + 5 skipped** (the whitelist).
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
