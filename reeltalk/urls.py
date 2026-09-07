@@ -3,7 +3,7 @@
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
-from django.urls import path, re_path
+from django.urls import include, path, re_path
 from django.views.static import serve
 
 from reeltalk.social import views as social_views
@@ -19,6 +19,8 @@ urlpatterns = [
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("signup/", social_views.signup, name="signup"),
     path("setup/", social_views.setup, name="setup"),
+    # Film domain (detail now; create/edit/shelve/finish join in later pieces).
+    path("", include("reeltalk.core.urls")),
 ]
 
 # User-uploaded media (posters, avatars) is served by the web process itself —

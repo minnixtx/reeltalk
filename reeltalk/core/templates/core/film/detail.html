@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% load film_tags %}
+
+{% block title %}{{ film.title }}{% if film.year %} ({{ film.year }}){% endif %}{% endblock %}
+
+{% block content %}
+<article class="film">
+  <div class="film-poster">
+    {% if film.poster %}
+      <img src="{{ film.poster.url }}" alt="{{ film.title }} poster">
+    {% else %}
+      <div class="poster-placeholder">No poster</div>
+    {% endif %}
+  </div>
+  <div class="film-meta">
+    <h1>{{ film.title }}{% if film.year %} <span class="muted">({{ film.year }})</span>{% endif %}</h1>
+    {% if film.subtitle %}<p class="subtitle">{{ film.subtitle }}</p>{% endif %}
+    <dl class="meta-list">
+      {% if film.runtime %}<div><dt>Runtime</dt><dd>{{ film.runtime }} min</dd></div>{% endif %}
+      {% if film.genres %}<div><dt>Genres</dt><dd>{{ film.genres|join:", " }}</dd></div>{% endif %}
+      {% if film.directors %}<div><dt>Directors</dt><dd>{{ film.directors|join:", " }}</dd></div>{% endif %}
+      {% if film.cast %}<div><dt>Cast</dt><dd>{{ film.cast|join:", " }}</dd></div>{% endif %}
+    </dl>
+    {% if film.tmdb_id %}
+      <p class="film-links"><a href="https://www.themoviedb.org/movie/{{ film.tmdb_id }}" rel="noopener">View on TMDB</a></p>
+    {% endif %}
+  </div>
+</article>
+
+{% if film.description %}
+  <section class="film-description">
+    <h2>About</h2>
+    <div>{{ film.description|safe }}</div>
+  </section>
+{% endif %}
+
+<section class="film-reviews">
+  <h2>Reviews ({{ reviews|length }})</h2>
+  {% if reviews %}
+    <ul class="review-list">
+      {% for review in reviews %}
+        <li class="review">
+          <div class="review-head">
+            <span class="review-author">{{ review.user.localname }}</span>
+            {% if review.rating %}<span class="rating" title="{{ review.rating|floatformat:'-1' }} / 5">{{ review.rating|stars }}</span>{% endif %}
+            <span class="muted">{{ review.published_date|date:"Y-m-d" }}</span>
+          </div>
+          {% if review.content %}<div class="review-body">{{ review.content|safe }}</div>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">No reviews yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

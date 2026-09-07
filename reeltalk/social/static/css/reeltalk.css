@@ -161,3 +161,104 @@ ul.errorlist {
   margin: 0.25rem 0 0;
   padding-left: 1.2rem;
 }
+
+/* --- Film page (M1 increment 5) ------------------------------------------ */
+
+.muted {
+  color: var(--muted);
+}
+
+.film {
+  display: flex;
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.film-poster img,
+.poster-placeholder {
+  width: 10rem;
+  height: 15rem;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.poster-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eef3f8;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.film-meta h1 {
+  margin-top: 0;
+}
+
+.meta-list div {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.15rem 0;
+}
+
+.meta-list dt {
+  font-weight: 600;
+  min-width: 6rem;
+  color: var(--muted);
+}
+
+.meta-list dd {
+  margin: 0;
+}
+
+/* Star rating: a gray background row with a gold foreground row clipped to the
+   rating's width. Shared by read-only display and the interactive widget. */
+.stars {
+  position: relative;
+  display: inline-block;
+  font-size: 1.25rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.stars-bg,
+.stars-fg {
+  letter-spacing: 0;
+}
+
+.stars-bg {
+  color: var(--border);
+}
+
+.stars-fg {
+  color: #f5a623;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  overflow: hidden;
+}
+
+.review-list {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0;
+}
+
+.review {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.review-head {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 0.25rem;
+  font-size: 0.95rem;
+}
+
+.review-author {
+  font-weight: 600;
+}
