@@ -1,10 +1,11 @@
 {% extends "base.html" %}
 {% load film_tags %}
 
-{% block title %}ReelTalk{% endblock %}
+{% block title %}{{ site.name }}{% endblock %}
 
 {% block content %}
-<h1>ReelTalk</h1>
+<h1>{{ site.name }}</h1>
+{% if site.description %}<p class="landing-desc">{{ site.description }}</p>{% endif %}
 <p>A federated home for tracking, reviewing, and discovering films.</p>
 {% if user.is_authenticated %}
   <p>Signed in as <strong>{{ user.localname }}</strong>.</p>
@@ -31,6 +32,6 @@
     {% endif %}
   </section>
 {% else %}
-  <p><a href="{% url 'signup' %}">Sign up</a> to get started.</p>
+  <p><a class="btn" href="{% url 'signup' %}">Sign up</a> to get started.</p>
 {% endif %}
 {% endblock %}

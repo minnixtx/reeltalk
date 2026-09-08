@@ -449,3 +449,34 @@ ul.errorlist {
   margin: 0.25rem 0;
   font-weight: 600;
 }
+
+/* --- Landing/about + footer (M1 increment 7) --------------------------------- */
+
+.landing-desc {
+  font-size: 1.05rem;
+}
+
+.about-instance h2 {
+  margin-top: 1.5rem;
+  font-size: 1.2rem;
+}
+
+.site-footer {
+  border-top: 1px solid var(--border);
+  margin-top: 2rem;
+}
+
+.site-footer .container {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.site-footer a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.site-footer a:hover {
+  color: var(--accent);
+}

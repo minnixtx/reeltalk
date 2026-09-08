@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}About — {{ site.name }}{% endblock %}
+
+{% block content %}
+<h1>About</h1>
+<p>{{ site.description|default:"A federated home for tracking, reviewing, and discovering films." }}</p>
+<section class="about-instance">
+  <h2>This instance</h2>
+  <dl class="meta-list">
+    <div><dt>Name</dt><dd>{{ site.name }}</dd></div>
+    <div><dt>Domain</dt><dd>{{ domain }}</dd></div>
+    <div><dt>Software</dt><dd>ReelTalk {{ version }}</dd></div>
+  </dl>
+</section>
+<p class="muted">ReelTalk is free software, licensed under the AGPL-3.0.</p>
+{% endblock %}

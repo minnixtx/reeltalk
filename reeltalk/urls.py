@@ -19,6 +19,7 @@ urlpatterns = [
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("signup/", social_views.signup, name="signup"),
     path("setup/", social_views.setup, name="setup"),
+    path("about/", social_views.about, name="about"),
     path(
         "user/<str:localname>/films/",
         social_views.user_films,

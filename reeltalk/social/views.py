@@ -6,10 +6,12 @@ instance admin. Once a superuser exists, signup follows the site settings'
 policy (§3.7): open, or closed until an admin creates the account.
 """
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
 from django.shortcuts import get_object_or_404, redirect, render
 
+import reeltalk
 from reeltalk.core.models import Shelf, Status
 
 from .forms import SignupForm
@@ -23,12 +25,25 @@ def has_admin() -> bool:
 def index(request):
     if not has_admin():
         return redirect("setup")
-    data = {}
+    data = {"site": SiteSettings.get_instance()}
     if request.user.is_authenticated:
         # The minimal v0.1 timeline (§3.6/§3.7); anonymous visitors get the
         # landing page only.
         data["feed"] = Status.feed_for(request.user)
     return render(request, "home.html", data)
+
+
+def about(request):
+    """Instance info page (§3.7 v0.1): name, domain, software, version."""
+    return render(
+        request,
+        "about.html",
+        {
+            "site": SiteSettings.get_instance(),
+            "domain": settings.DOMAIN,
+            "version": reeltalk.__version__,
+        },
+    )
 
 
 def signup(request):
