@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load film_tags %}
 
 {% block title %}ReelTalk{% endblock %}
 
@@ -7,6 +8,28 @@
 <p>A federated home for tracking, reviewing, and discovering films.</p>
 {% if user.is_authenticated %}
   <p>Signed in as <strong>{{ user.localname }}</strong>.</p>
+  <section class="feed">
+    <h2>Feed</h2>
+    {% if feed %}
+      <ul class="review-list">
+        {% for status in feed %}
+          <li class="review">
+            <div class="review-head">
+              <span class="review-author">{{ status.user.localname }}</span>
+              {% if status.rating %}<span title="{{ status.rating|floatformat:'-1' }} / 5">{{ status.rating|stars }}</span>{% endif %}
+              <span class="muted">{{ status.published_date|date:"Y-m-d" }}</span>
+            </div>
+            {% if status.film %}
+              <p class="feed-film"><a href="{% url 'film' status.film.id %}">{{ status.film.title }}{% if status.film.year %} ({{ status.film.year }}){% endif %}</a></p>
+            {% endif %}
+            {% if status.content %}<div class="review-body">{{ status.content|safe }}</div>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No posts yet — mark a film watched to share your first review.</p>
+    {% endif %}
+  </section>
 {% else %}
   <p><a href="{% url 'signup' %}">Sign up</a> to get started.</p>
 {% endif %}

@@ -438,3 +438,14 @@ ul.errorlist {
 .film-row a:hover {
   color: var(--accent);
 }
+
+/* --- Home feed (M1 increment 6) -------------------------------------------- */
+
+.feed h2 {
+  margin-top: 1.5rem;
+}
+
+.feed-film {
+  margin: 0.25rem 0;
+  font-weight: 600;
+}

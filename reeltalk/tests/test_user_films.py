@@ -1,15 +1,19 @@
-"""User films page tests (M1 increment 6; PLAN.md §3.3 rule 1, D1).
+"""User films page + minimal feed tests (M1 increment 6).
 
-Covers the User films-page query API (films_on_shelf / all_films with the
-rating annotation) and the view: exactly three tabs — All films / Watchlist /
-Watched — plus tab filtering and public readability.
+The films page (PLAN.md §3.3 rule 1, D1): the User query API
+(films_on_shelf / all_films with the rating annotation) and the view —
+exactly three tabs, All films / Watchlist / Watched, tab filtering, public
+readability. The minimal home feed (§3.6/§3.7 v0.1): Status.feed_for (own +
+followed users' statuses, newest first, no deleted) and the home page.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
+from django.utils import timezone
 
 from reeltalk.core.models import Film, Shelf, ShelfFilm, Status, mark_watched
 
@@ -35,6 +39,13 @@ def login(client, user):
 @pytest.fixture
 def film(db):
     return Film.objects.create(title="Dune", year=2021)
+
+
+@pytest.fixture
+def admin(db):
+    # R12: / is gated behind the setup wizard until a superuser exists, so
+    # home-page tests need one in place.
+    return User.objects.create_superuser(localname="admin", password="s3cretpass")
 
 
 # --- model query API ----------------------------------------------------------
@@ -160,3 +171,105 @@ def test_user_films_links_to_film_pages(login, user, film):
     login.post(f"/film/{film.id}/shelve/")
     body = login.get("/user/alice/films/").content.decode()
     assert f'href="/film/{film.id}/"' in body
+
+
+# --- minimal home feed (§3.6/§3.7 v0.1) ---------------------------------------
+
+
+@pytest.mark.django_db
+def test_feed_for_includes_own_and_followed(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    alice.follows.add(bob)
+    dune = Film.objects.create(title="Dune", year=2021)
+    blade = Film.objects.create(title="Blade Runner", year=1982)
+    arrival = Film.objects.create(title="Arrival", year=2016)
+    own = Status.objects.create(
+        user=alice, film=dune, status_type=Status.Type.REVIEW_RATING, rating="4"
+    )
+    followed = Status.objects.create(
+        user=bob,
+        film=blade,
+        status_type=Status.Type.REVIEW,
+        rating="3",
+        content="<p>Neo-noir.</p>",
+    )
+    stranger = Status.objects.create(
+        user=carol, film=arrival, status_type=Status.Type.REVIEW_RATING, rating="5"
+    )
+    feed_ids = {s.id for s in Status.feed_for(alice)}
+    assert feed_ids == {own.id, followed.id}
+    assert stranger.id not in feed_ids
+
+
+@pytest.mark.django_db
+def test_feed_for_orders_newest_first(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    film = Film.objects.create(title="Dune", year=2021)
+    old = Status.objects.create(
+        user=alice,
+        film=film,
+        status_type=Status.Type.REVIEW_RATING,
+        rating="4",
+        published_date=timezone.now() - timedelta(days=1),
+    )
+    new = Status.objects.create(
+        user=alice,
+        film=film,
+        status_type=Status.Type.COMMENT,
+        content="<p>Second thought.</p>",
+    )
+    feed = list(Status.feed_for(alice))
+    assert [s.id for s in feed] == [new.id, old.id]
+
+
+@pytest.mark.django_db
+def test_feed_for_excludes_deleted(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    alice.follows.add(bob)
+    film = Film.objects.create(title="Dune", year=2021)
+    entry = Status.objects.create(
+        user=bob, film=film, status_type=Status.Type.REVIEW_RATING, rating="3"
+    )
+    assert {s.id for s in Status.feed_for(alice)} == {entry.id}
+    entry.delete()  # soft — tombstones don't reach the feed
+    assert list(Status.feed_for(alice)) == []
+
+
+@pytest.mark.django_db
+def test_home_feed_shows_own_and_followed(login, user, film, admin):
+    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    user.follows.add(bob)
+    mark_watched(user, film, rating="4.5")  # alice's own rating-only entry
+    other = Film.objects.create(title="Blade Runner", year=1982)
+    Status.objects.create(
+        user=bob,
+        film=other,
+        status_type=Status.Type.REVIEW,
+        rating="3",
+        content="<p>Neo-noir classic.</p>",
+    )
+    body = login.get("/").content.decode()
+    assert "Dune" in body  # own entry with its film link
+    assert "Neo-noir classic." in body  # followed user's review
+
+
+@pytest.mark.django_db
+def test_home_feed_excludes_strangers(login, user, film, admin):
+    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    Status.objects.create(
+        user=carol, film=film, status_type=Status.Type.REVIEW_RATING, rating="5"
+    )
+    body = login.get("/").content.decode()
+    assert "carol" not in body
+
+
+@pytest.mark.django_db
+def test_home_anonymous_has_no_feed(client, admin):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    assert 'class="feed"' not in body
+    assert "Sign up" in body

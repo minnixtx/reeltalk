@@ -10,7 +10,7 @@ from django.contrib import messages
 from django.contrib.auth import login
 from django.shortcuts import get_object_or_404, redirect, render
 
-from reeltalk.core.models import Shelf
+from reeltalk.core.models import Shelf, Status
 
 from .forms import SignupForm
 from .models import User
@@ -23,7 +23,12 @@ def has_admin() -> bool:
 def index(request):
     if not has_admin():
         return redirect("setup")
-    return render(request, "home.html")
+    data = {}
+    if request.user.is_authenticated:
+        # The minimal v0.1 timeline (§3.6/§3.7); anonymous visitors get the
+        # landing page only.
+        data["feed"] = Status.feed_for(request.user)
+    return render(request, "home.html", data)
 
 
 def signup(request):

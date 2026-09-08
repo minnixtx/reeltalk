@@ -433,6 +433,20 @@ class Status(models.Model):
         self.deleted_date = timezone.now()
         self.save(update_fields=["deleted", "content", "raw_content", "deleted_date"])
 
+    @classmethod
+    def feed_for(cls, user):
+        """The user's minimal timeline (§3.6/§3.7 v0.1).
+
+        The user's own non-deleted statuses plus those of the users they
+        follow, newest first (Meta ordering). Groups join the union when they
+        land (M5); blocks and feed filters are M4/M5 (R13). D3 stands: no
+        automatic notes exist — only reviews/ratings/comments are shareable.
+        """
+        followed = list(user.follows.values_list("id", flat=True))
+        return cls.objects.filter(
+            Q(user=user) | Q(user_id__in=followed), deleted=False
+        ).select_related("user", "film")
+
 
 def validate_star_rating(rating) -> Decimal:
     """D3/§3.3: a film cannot be marked watched without a star rating.
