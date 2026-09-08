@@ -4,9 +4,13 @@
 
 {% block content %}
 <h1>Sign up</h1>
+{% if closed %}
+<p class="muted">This instance is not accepting new signups right now.</p>
+{% else %}
 <form method="post">
   {% csrf_token %}
   {{ form.as_p }}
   <button type="submit">Create account</button>
 </form>
+{% endif %}
 {% endblock %}

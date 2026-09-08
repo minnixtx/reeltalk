@@ -151,3 +151,68 @@ class User(AbstractBaseUser, PermissionsMixin):
             .values("rating")[:1]
         )
         return films.annotate(user_rating=Subquery(rating))
+
+
+class SiteSettings(models.Model):
+    """Instance-wide settings — a single row (pk=1), admin-managed (§3.2).
+
+    The signup policy gates /signup/ once the instance is operational (R12's
+    wizard covers first run, which happens before any settings exist). In
+    v0.1 ``invite`` means closed: accounts are created by an admin — the
+    invite mechanism itself is a later, deliberate step.
+    """
+
+    OPEN = "open"
+    INVITE = "invite"
+    SIGNUP_POLICIES = ((OPEN, "Open"), (INVITE, "Invite-only"))
+
+    name = models.CharField(max_length=100, default="ReelTalk")
+    description = models.TextField(blank=True, default="")
+    signup_policy = models.CharField(
+        max_length=20, choices=SIGNUP_POLICIES, default=OPEN
+    )
+
+    class Meta:
+        verbose_name_plural = "site settings"
+
+    def __str__(self) -> str:
+        return self.name
+
+    @classmethod
+    def get_instance(cls) -> "SiteSettings":
+        """The single settings row, created on first use with defaults."""
+        instance, _ = cls.objects.get_or_create(pk=1)
+        return instance
+
+
+class LinkDomain(models.Model):
+    """One outbound-link domain the instance allows (§3.2 site settings).
+
+    User-authored markdown renders a link's ``href`` only when its host
+    matches an allowed domain — exactly or as a subdomain of it. With no
+    domains allowed, every external link in user content is stripped (the
+    anchor text stays). Checked at write time in ``render_markdown``.
+    """
+
+    domain = models.CharField(max_length=253, unique=True)
+
+    def save(self, *args, **kwargs):
+        self.domain = self.domain.strip().lower()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return self.domain
+
+    @classmethod
+    def is_allowed(cls, host: str) -> bool:
+        """True when ``host`` (a URL netloc) matches an allowed domain."""
+        host = host.lower().strip(".")
+        # Deny-by-default on anything odd: userinfo and ports are stripped so
+        # "user@evil.com" / "example.com:8080" reduce to their bare host.
+        if "@" in host:
+            host = host.rsplit("@", 1)[-1]
+        host = host.split(":", 1)[0]
+        if not host:
+            return False
+        allowed = set(cls.objects.values_list("domain", flat=True))
+        return any(host == d or host.endswith("." + d) for d in allowed)

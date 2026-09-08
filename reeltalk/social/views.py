@@ -2,8 +2,8 @@
 
 First-run flow (R12): a fresh instance with no superuser redirects both the
 index and signup to /setup/, where the first account is created as the
-instance admin. Once a superuser exists, signup opens to everyone (the
-open/invite-gated policy of §3.7 lands with site settings in increment 7).
+instance admin. Once a superuser exists, signup follows the site settings'
+policy (§3.7): open, or closed until an admin creates the account.
 """
 
 from django.contrib import messages
@@ -13,7 +13,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from reeltalk.core.models import Shelf, Status
 
 from .forms import SignupForm
-from .models import User
+from .models import SiteSettings, User
 
 
 def has_admin() -> bool:
@@ -36,6 +36,10 @@ def signup(request):
         return redirect("setup")
     if request.user.is_authenticated:
         return redirect("index")
+    site = SiteSettings.get_instance()
+    if site.signup_policy != SiteSettings.OPEN:
+        # Invite-only in v0.1 means closed: an admin creates the account.
+        return render(request, "signup.html", {"closed": True})
     form = SignupForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         data = form.cleaned_data
