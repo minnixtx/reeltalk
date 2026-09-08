@@ -11,9 +11,10 @@ from django.conf import settings
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
+from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
-from reeltalk.core.models import Shelf
+from reeltalk.core.models import Film, Shelf, ShelfFilm, Status
 
 
 class UserManager(BaseUserManager):
@@ -108,3 +109,45 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self) -> str:
         return self.get_full_name()
+
+    # --- Films-page query API (PLAN.md §3.3 rule 1) -------------------------
+
+    def films_on_shelf(self, identifier: str):
+        """Films on one of this user's shelves — a tab on the films page."""
+        return self._films_with_rating(
+            Film.objects.filter(shelves__identifier=identifier, shelves__user=self)
+        )
+
+    def all_films(self):
+        """Every film this user has a relationship with (the §3.5/D10 set).
+
+        Films on any of the user's shelves plus films carrying one of their
+        non-deleted statuses — the same set the export emits rows for.
+        """
+        ids = set(
+            ShelfFilm.objects.filter(shelf__user=self).values_list("film_id", flat=True)
+        )
+        ids |= set(
+            Status.objects.filter(user=self, deleted=False)
+            .exclude(film=None)
+            .values_list("film_id", flat=True)
+        )
+        return self._films_with_rating(Film.objects.filter(id__in=ids))
+
+    def _films_with_rating(self, films):
+        """Annotate films with this user's current star rating.
+
+        D5 allows at most one live review per user per film, so the subquery
+        is unambiguous; ``user_rating`` is None when the user hasn't reviewed.
+        """
+        rating = (
+            Status.objects.filter(
+                user=self,
+                film=OuterRef("pk"),
+                status_type__in=list(Status.REVIEW_TYPES),
+                deleted=False,
+            )
+            .order_by("-id")
+            .values("rating")[:1]
+        )
+        return films.annotate(user_rating=Subquery(rating))

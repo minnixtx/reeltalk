@@ -19,6 +19,11 @@ urlpatterns = [
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("signup/", social_views.signup, name="signup"),
     path("setup/", social_views.setup, name="setup"),
+    path(
+        "user/<str:localname>/films/",
+        social_views.user_films,
+        name="user-films",
+    ),
     # Film domain (detail now; create/edit/shelve/finish join in later pieces).
     path("", include("reeltalk.core.urls")),
 ]

@@ -357,3 +357,84 @@ ul.errorlist {
 .required {
   color: var(--error);
 }
+
+/* --- User films page (M1 increment 6) ------------------------------------- */
+
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.avatar {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border);
+}
+
+.profile-head h1 {
+  margin: 0.5rem 0 0;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-top: 1.25rem;
+}
+
+.tabs a {
+  padding: 0.4rem 0.9rem;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.tabs a:hover {
+  color: var(--accent);
+}
+
+.tabs a.active {
+  color: var(--fg);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.film-list {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0;
+}
+
+.film-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.film-row .thumb,
+.thumb-placeholder {
+  width: 2.5rem;
+  height: 3.75rem;
+  object-fit: cover;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.thumb-placeholder {
+  background: #eef3f8;
+}
+
+.film-row a {
+  text-decoration: none;
+}
+
+.film-row a:hover {
+  color: var(--accent);
+}

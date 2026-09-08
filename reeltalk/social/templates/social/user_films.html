@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% load film_tags %}
+
+{% block title %}{{ profile_user.localname }}'s films — ReelTalk{% endblock %}
+
+{% block content %}
+<header class="profile-head">
+  {% if profile_user.avatar %}
+    <img class="avatar" src="{{ profile_user.avatar.url }}" alt="">
+  {% endif %}
+  <h1>{{ profile_user.get_full_name }}</h1>
+</header>
+
+<nav class="tabs">
+  <a href="{% url 'user-films' profile_user.localname %}"{% if tab == "all" %} class="active"{% endif %}>All films</a>
+  <a href="?tab=watchlist"{% if tab == "watchlist" %} class="active"{% endif %}>Watchlist</a>
+  <a href="?tab=watched"{% if tab == "watched" %} class="active"{% endif %}>Watched</a>
+</nav>
+
+{% if films %}
+<ul class="film-list">
+  {% for film in films %}
+    <li class="film-row">
+      {% if film.poster %}
+        <img class="thumb" src="{{ film.poster.url }}" alt="">
+      {% else %}
+        <span class="thumb thumb-placeholder"></span>
+      {% endif %}
+      <a href="{% url 'film' film.id %}">{{ film.title }}{% if film.year %} <span class="muted">({{ film.year }})</span>{% endif %}</a>
+      {% if film.user_rating %}<span title="{{ film.user_rating|floatformat:'-1' }} / 5">{{ film.user_rating|stars }}</span>{% endif %}
+    </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">No films here yet.</p>
+{% endif %}
+{% endblock %}
