@@ -1,0 +1,18 @@
+{% extends "admin/base_site.html" %}
+
+{% block title %}Merge films | ReelTalk admin{% endblock %}
+
+{% block content %}
+<h1>Film merge / absorb</h1>
+<p>
+  Merge duplicate film rows into one. Empty metadata on the canonical film is
+  filled from the absorbed rows, every shelf and review moves across, the old
+  URLs keep resolving, and the absorbed rows are deleted. This cannot be
+  undone.
+</p>
+<form method="post">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit" class="default">Merge</button>
+</form>
+{% endblock %}
