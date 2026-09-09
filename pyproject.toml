@@ -7,9 +7,7 @@ requires-python = ">=3.12"
 
 # Lean v0.1 dependency set — every package license-audited for AGPLv3
 # compatibility in PLAN.md §4 (audit date 2026-09-05, refreshed by the stack
-# audit in §3.9). Re-verify before adding anything new. The task queue is
-# deliberately absent: M1 has zero background tasks; Django-Q2 lands with M2
-# (PLAN.md §3.9, decision R4).
+# audit in §3.9). Re-verify before adding anything new.
 #
 # Runtime deps live in [project.dependencies], not a group named "main": PEP 735
 # reserves that name for this table, and uv silently skips a custom
@@ -17,6 +15,9 @@ requires-python = ">=3.12"
 # switch to uv).
 dependencies = [
     "Django==6.1.1",
+    # Task queue (M2, R4): Django-Q2 with a Postgres cluster replaces celery +
+    # django-celery-beat + the redis broker in one package — no Redis service.
+    "django-q2==1.11.1",
     "psycopg[binary]==3.3.5",
     "uvicorn==0.52.4",
     "whitenoise==6.12.0",

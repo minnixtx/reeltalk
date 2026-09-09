@@ -55,6 +55,21 @@ services:
     networks:
       - main
 
+  # Worker role (M2): Django-Q2 qcluster from the same image. The entrypoint
+  # only migrates + collectstatics when it starts uvicorn, so this waits for
+  # web to be healthy — by then migrations have run and the django_q cluster
+  # tables exist. No broker: the queue lives in Postgres (settings.Q_CLUSTER).
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    command: python manage.py qcluster
+    depends_on:
+      web:
+        condition: service_healthy
+    networks:
+      - main
+
 volumes:
   pgdata:
   static_volume:

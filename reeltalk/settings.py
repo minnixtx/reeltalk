@@ -39,6 +39,9 @@ INSTALLED_APPS = [
     # statuses); more apps join as their milestones land (PLAN.md §5, R9).
     "reeltalk.core",
     "reeltalk.social",
+    # Task queue (M2, R4): Django-Q2's ORM cluster tables. The worker service
+    # runs `qcluster` from the same image; its cluster lives in Postgres.
+    "django_q",
 ]
 
 MIDDLEWARE = [
@@ -88,12 +91,30 @@ DATABASES = {
 
 # No Redis in this stack (PLAN.md §3.9): the cache is a performance nicety at
 # single-instance scale, so it lives in process memory; sessions are DB-backed
-# by default. A task queue (Django-Q2) joins with M2 and uses Postgres as its
-# cluster — still no Redis.
+# by default. The task queue (Django-Q2, M2) uses Postgres as its cluster —
+# still no Redis.
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
     }
+}
+
+# Django-Q2 cluster (M2, R4): tasks are queued and tracked in Postgres via the
+# default ORM connection — no broker service. The `worker` compose service
+# runs `qcluster`; it starts after web is healthy, so the django_q tables
+# exist by then (the entrypoint migrates only when it starts uvicorn).
+Q_CLUSTER = {
+    "name": "reeltalk",
+    # One long backfill at a time plus headroom for periodic jobs (M3+).
+    "workers": 2,
+    # A full import backfill runs ~15 minutes under D11 pacing; keep the
+    # default 1-hour timeout explicit so a long job is never killed mid-run.
+    "timeout": 3600,
+    # Must be >= timeout or django-q warns at startup: how long an enqueued
+    # task waits for acknowledgement before being considered undelivered.
+    "retry": 7200,
+    "orm": "default",
+    "backend": "postgresql",
 }
 
 # Custom user model (R10): set before any social migration exists — it is

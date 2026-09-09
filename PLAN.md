@@ -252,6 +252,12 @@ New and changed dependencies from the stack audit (§3.9), same method as §4.1 
 | mypy 2.3.1, ruff 0.16.6, pytest 9.1.1 stack, responses 0.26.3 (dev group) | MIT / MIT / MIT + Apache-class / Apache-2.0 | ✅ Dev-only; licenses unchanged from the §4.1 dev-group verdict. |
 | gunicorn, celery[redis], django-celery-beat, redis, hiredis | — | ⚠️ **Removed from the M1 stack** (§3.9). The §4.1 verdicts remain valid if any is ever re-introduced; none are license-blocked. |
 
+### 4.5 M2 additions (2026-09-09)
+
+| Package | License (verified) | Verdict |
+|---|---|---|
+| **django-picklefield** (3.4.0) — new, transitive via django-q2 | MIT (PyPI `license_expression`) | ✅ Small field helper django-q2 uses to serialize task arguments; AGPLv3-compatible. |
+
 ## 5. Build plan (milestones for this repo)
 
 Sizing note: federation-from-spec (M4) is the largest single chunk of new code; it was inherited for free in the legacy fork and must be written here against the W3C specs.
