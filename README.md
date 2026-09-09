@@ -28,3 +28,13 @@ Discuss the project on Matrix: `#reeltalk:minnix.dev`
 ## License
 
 [GNU AGPLv3](LICENSE). ReelTalk is functionally inspired by [BookWyrm](https://github.com/bookwyrm-social/bookwyrm); no BookWyrm code is included in this repository.
+
+## AI Disclosure:
+
+ReelTalk was written in conjunction with local AI using the llama.cpp application to load and serve the local model to a custom coding harness all in network. No code was written by or exposed to an external provider. Most of the scaffolding and planning was built in tandem with Qwen 27b, Qwen providing basic framework suggestions and a module map based on features I wrote specs for, and me providing the Python code and Django framework. Qwen would then build the testing suite for each phase and milestone and I would run the tests and troubleshoot the results using Qwen as a reference.
+
+I am not an application developer by trade, but a DevOps engineer, so local AI has been instrumental in allowing me to contribute to the open source software community. Many people have their reasons for opposing AI, and I fully respect those beliefs. I have done my best to minimize the impact that my use of AI has contributed to the environment during this project. 
+
+No external API provider has had any part in the ReelTalk project. All inference has been ran in-house.
+
+The inference server used is based on AMD's Strix Halo platform and idles at ~ 5 watts, with the power limited to 90 watts at full load. My energy provider is 100% renewable energy. 
