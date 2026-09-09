@@ -12,8 +12,8 @@
 | M0 — functional spec, license audit, dev environment | ✅ Done 2026-09-05, verified (stack healthy, site on :3030, pytest green, ruff green) |
 | Stack audit (pre-M1) | ✅ Done 2026-09-05 — stack restructured to web+db; findings in PLAN.md §3.9, decisions R1–R8 below |
 | M1 — core film domain (first working version, part 1) | ✅ Done 2026-09-08, verified — all 7 increments committed; exit bar run live end-to-end over HTTP (signup → manual film → watchlist → watched + review → feed), see §2 increment 7. |
-| M2 — TMDB integration | ✅ Done 2026-09-09, verified — all 4 increments committed (client `1914534`; create-or-match + backfill `26756be`; worker service `effd01e`; search surface `02f2ff5`); exit bar run live end-to-end over HTTP against the **real TMDB API** (search Blade Runner → add to watchlist → mark watched with a rating), see §2 increment 4, and confirmed by the owner in a browser the same day. Stack is now web + db + worker. Owner backlog R31–R34 done 2026-09-09 (record below). **Next: M3 — file import/export** (PLAN.md §5). Milestone-boundary push to origin awaits the owner's go-ahead (standing rule: no push unless told). |
-| Owner backlog R31–R34 (dropdown posters + keyboard nav, feed shelf events + posters) | ✅ Done 2026-09-09, verified — four increments (`c21b3be`, `65fb212`, `4fc1e35`, `bba9e02`); live-verified over HTTP against the real TMDB API plus a headless-Chromium run of the served dropdown JS (10/10 checks); feed design decision recorded as R35. |
+| M2 — TMDB integration | ✅ Done 2026-09-09, verified — all 4 increments committed (client `1914534`; create-or-match + backfill `26756be`; worker service `c5c611f`; search surface `c2a76d7`); exit bar run live end-to-end over HTTP against the **real TMDB API** (search Blade Runner → add to watchlist → mark watched with a rating), see §2 increment 4, and confirmed by the owner in a browser the same day. Stack is now web + db + worker. Owner backlog R31–R34 done 2026-09-09 (record below). **Next: M3 — file import/export** (PLAN.md §5). Milestone-boundary push to origin awaits the owner's go-ahead (standing rule: no push unless told). |
+| Owner backlog R31–R34 (dropdown posters + keyboard nav, feed shelf events + posters) | ✅ Done 2026-09-09, verified — four increments (`5075b03`, `77bbb1a`, `339d7e5`, `68bce8c`); live-verified over HTTP against the real TMDB API plus a headless-Chromium run of the served dropdown JS (10/10 checks); feed design decision recorded as R35. |
 | M3 — file import/export | ⬜ Not started |
 | M4 — federation (ActivityPub from spec) | ⬜ Not started |
 | M5 — social surface | ⬜ Not started |
@@ -219,8 +219,8 @@ M2 = "TMDB integration (first working version, part 2)" (PLAN.md §5): the TMDB 
 
 1. ✅ **TMDB client** — `reeltalk.core.tmdb`: v3 `search_films` (paginated) / `get_film_details` (credits+images) / `download_poster` / `film_fields_from_tmdb`; `TmdbError` subtypes (auth 401 / rate-limit 429 / network); settings read `REELTALK_TMDB_API_KEY` (D8). *(done 2026-09-08, `1914534`.)*
 2. ✅ **Create-or-match (D7) + backfill function** — find-or-create the local Film for a TMDB hit (tmdb_id → title+year fallback that backfills a manual film), plus the D11 backfill loop (fetch details + poster, fill empty fields, 0.25 s pacing, per-film skip-on-error). *(done 2026-09-08, `26756be`.)*
-3. ✅ **Worker service** — `django-q2` dep, `Q_CLUSTER` (Postgres backend, no Redis), a `worker` compose service (same image, `qcluster`) that starts after web; the backfill task wrapper. Live check the worker comes up. *(done 2026-09-09, `effd01e`.)*
-4. ✅ **Search views + suggest + dropdown** — global search page (TMDB-backed with local fallback, D6), click-through create-or-match route, one-click Watchlist POST per row, `/search/suggest/` JSON endpoint + header dropdown JS. **Exit bar: live-verify "search Blade Runner → add to watchlist → mark watched with a rating"** (the TMDB key is now configured in `.env`). *(done 2026-09-09, `02f2ff5`; exit bar verified live against the real TMDB API.)*
+3. ✅ **Worker service** — `django-q2` dep, `Q_CLUSTER` (Postgres backend, no Redis), a `worker` compose service (same image, `qcluster`) that starts after web; the backfill task wrapper. Live check the worker comes up. *(done 2026-09-09, `c5c611f`.)*
+4. ✅ **Search views + suggest + dropdown** — global search page (TMDB-backed with local fallback, D6), click-through create-or-match route, one-click Watchlist POST per row, `/search/suggest/` JSON endpoint + header dropdown JS. **Exit bar: live-verify "search Blade Runner → add to watchlist → mark watched with a rating"** (the TMDB key is now configured in `.env`). *(done 2026-09-09, `c2a76d7`; exit bar verified live against the real TMDB API.)*
 
 ### M2 increment 1 — TMDB client (executed 2026-09-08, commit `1914534`)
 
@@ -256,7 +256,7 @@ Second increment of M2. `reeltalk.core.catalog` is where the TMDB client meets t
 
 **Decisions:** none new (implements D7/D11 as specified; catalog placement is consistent with R27).
 
-### M2 increment 3 — worker service (executed 2026-09-09, commit `effd01e`)
+### M2 increment 3 — worker service (executed 2026-09-09, commit `c5c611f`)
 
 Third increment of M2. The task queue lands per R4: **Django-Q2 on a Postgres cluster** replaces the deferred celery + django-celery-beat + redis broker in one package — no Redis service at any milestone. No model changes; the first (and only) real task is the D11 backfill wrapper.
 
@@ -277,7 +277,7 @@ Third increment of M2. The task queue lands per R4: **Django-Q2 on a Postgres cl
 
 **Decisions:** R28 in §4 below (engineering call, recorded so the owner can veto).
 
-### M2 increment 4 — search surface + exit bar (executed 2026-09-09, commit `02f2ff5`)
+### M2 increment 4 — search surface + exit bar (executed 2026-09-09, commit `c2a76d7`)
 
 Fourth and final increment of M2. The D6 search surface: global search as the primary add-film flow, click-through create-or-match, one-click Watchlist, and the header suggest dropdown (R29 for the shape, R30 for the local-search implementation). No model changes, no new runtime deps; frontend is Django templates + ~150 lines of vanilla JS (R6).
 
@@ -305,7 +305,7 @@ At the owner's request, all work up to this checkpoint was pushed to `origin/mai
 
 How it was done, with safety nets: confirmed clean tree + single remote; backup tag `backup/pre-attribution-fix` created at the pre-rewrite tip (`bcc022c`); verified all four trailer-bearing M1 commits were already pushed (ancestors of old `origin/main`); `git filter-branch -f --msg-filter 'sed "/^Co-authored-by: Qwen-Coder/d"' c496e83^..HEAD` rewrote the nine commits in that range (only the four carried trailers; the rest changed hash by ancestry alone); verified zero remaining trailers on `main`, an empty `git diff --stat backup/pre-attribution-fix HEAD` (messages only — no content change), and equal commit counts (36 = 36); force-pushed with lease (`--force-with-lease`). `origin/main` now equals local `main` at `248156a`. The backup tag is kept until the owner confirms satisfaction, then can be deleted. **All commit hashes cited in this file were updated to their post-rewrite values** (M1 increments 1–6 are unchanged — they predate the rewritten range).
 
-### Owner backlog R31–R34 (executed 2026-09-09, commits `c21b3be`, `65fb212`, `4fc1e35`, `bba9e02`)
+### Owner backlog R31–R34 (executed 2026-09-09, commits `5075b03`, `77bbb1a`, `339d7e5`, `68bce8c`)
 
 The four owner-requested improvements from the post-M2 browser run, completed before M3 per the owner's 2026-09-09 decision. Built as four green increments; **no migrations, no new runtime deps** — R35 records the feed design call.
 
@@ -324,6 +324,8 @@ The four owner-requested improvements from the post-M2 browser run, completed be
 **Test baseline:** before = 303 passed + 5 skipped. After = **319 passed, 5 skipped** (+16: R31 suggest posters 2; R33 `feed_entries` 9 + home shelf-event rendering 3; R34 feed poster rows 2). ruff check + format green; `makemigrations --check` no drift (no model changes beyond the new `FeedEntry` dataclass — not a model, no migration).
 
 **Decisions:** R35 in §4 below (engineering call, recorded so the owner can veto).
+
+**Git note (2026-09-09):** the owner added an "AI Disclosure" section to README.md via the GitHub web UI (`e39666e`, on top of `f4b0422`), which the local repo did not have — remote and local had diverged at `f4b0422`. Local main (the 11 commits from M2 increment 3 through this record) was rebased onto it with `git pull --rebase origin main`; no files overlapped, so it was clean. **All hashes cited in this file for those 11 commits are the post-rebase values.** Nothing was pushed — the next milestone-boundary push (owner's go-ahead required) sends the whole linear history including the owner's README commit.
 
 ### Clean-room guard (added 2026-09-07)
 
