@@ -16,4 +16,8 @@ htmlcov/
 exports/
 backups/
 
+# Runtime media (MEDIA_ROOT) — keep the empty-dir placeholder tracked
+/images/*
+!/images/.gitkeep
+
 .qwen/
