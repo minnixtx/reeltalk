@@ -217,7 +217,7 @@ Seventh and final increment of M1. The §3.2 site-settings domain object (admin-
 M2 = "TMDB integration (first working version, part 2)" (PLAN.md §5): the TMDB client, global search as the primary add-film surface with click-through + one-click Watchlist (D6/D7), the suggest endpoint + dropdown, and the async backfill task (D11) — with the `worker` service (Django-Q2 on Postgres) joining the stack. Built as small verified increments; **each ends in a committed green checkpoint** with this file updated, then the session stops. Scope per increment:
 
 1. ✅ **TMDB client** — `reeltalk.core.tmdb`: v3 `search_films` (paginated) / `get_film_details` (credits+images) / `download_poster` / `film_fields_from_tmdb`; `TmdbError` subtypes (auth 401 / rate-limit 429 / network); settings read `REELTALK_TMDB_API_KEY` (D8). *(done 2026-09-08, `a4a6833`.)*
-2. ⬜ **Create-or-match (D7) + backfill function** — find-or-create the local Film for a TMDB hit (tmdb_id → title+year fallback that backfills a manual film), plus the D11 backfill loop (fetch details + poster, fill empty fields, 0.25 s pacing, per-film skip-on-error).
+2. ✅ **Create-or-match (D7) + backfill function** — find-or-create the local Film for a TMDB hit (tmdb_id → title+year fallback that backfills a manual film), plus the D11 backfill loop (fetch details + poster, fill empty fields, 0.25 s pacing, per-film skip-on-error). *(done 2026-09-08, `99a1f4e`.)*
 3. ⬜ **Worker service** — `django-q2` dep, `Q_CLUSTER` (Postgres backend, no Redis), a `worker` compose service (same image, `qcluster`) that starts after web; the backfill task wrapper. Live check the worker comes up.
 4. ⬜ **Search views + suggest + dropdown** — global search page (TMDB-backed with local fallback, D6), click-through create-or-match route, one-click Watchlist POST per row, `/search/suggest/` JSON endpoint + header dropdown JS. **Exit bar: live-verify "search Blade Runner → add to watchlist → mark watched with a rating" — needs a TMDB API key in `.env`.**
 
@@ -237,6 +237,23 @@ First increment of M2. The server-side TMDB v3 client in `reeltalk.core.tmdb` (R
 **Test baseline:** before = 241 passed + 5 skipped. After = **258 passed, 5 skipped** (15 new client tests — config, search success/empty/401/429/network/500, details, poster download, field mapping incl. cast cap — plus 2 clean-room guard cases for the two new files). ruff check + format green; `makemigrations --check` no drift (no model changes).
 
 **Decisions:** R27 in §4 below (engineering call, recorded so the owner can veto).
+
+### M2 increment 2 — create-or-match + import backfill (executed 2026-09-08, commits `99a1f4e`, `793d81c`)
+
+Second increment of M2. `reeltalk.core.catalog` is where the TMDB client meets the database — turning a TMDB film into a local `Film` row and keeping imported films current (R27 keeps the pure HTTP client separate). No model changes, no new runtime deps.
+
+**What landed:**
+- **`create_or_match_film(tmdb_id, *, title=None, year=None)`** (D7): (1) a row already carrying this `tmdb_id` is returned as-is with **no API call**; (2) otherwise the detail payload is fetched and a normalized title+year match against an existing manual film **backfills** that row's empty metadata + the `tmdb_id` instead of creating a duplicate; (3) with no match, a new `Film` is created from the details + poster. `title`/`year` are optional matching hints that only matter when the detail payload lacks one of them.
+- **`backfill_films(film_ids)`** (D11): the import backfill loop — skips films without a `tmdb_id` or already complete (poster + description), fetches details + poster, fills empty fields, paces at `BACKFILL_REQUEST_INTERVAL = 0.25 s`, logs + skips per-film `TmdbError`s so the batch always runs to the end, and is a no-op without a key. Returns per-outcome counts. Plain + directly testable — the Django-Q2 task wrapper joins with the worker service (increment 3).
+- **Housekeeping (`793d81c`):** `.gitignore` now ignores runtime media under `images/` (MEDIA_ROOT) except the tracked `.gitkeep` — bind-mount test runs were dropping poster files into the source tree. Matches the existing `/static/`, `exports/`, `backups/` ignores.
+
+**Gotchas hit & fixed:**
+- **`responses` needs `@responses.activate` on every test that makes a call.** A `responses.add(...)` registration alone does not intercept — without the decorator the client made *real* TMDB calls (fake key → 401). Added it to all catalog tests. Also, `assert responses.calls == []` is unreliable (a `CallList` vs a plain list); use `len(responses.calls) == 0`.
+- **Poster attachment in tests needs a real image.** `ImageField.save()` runs Pillow validation, so the mock poster bytes must be a valid JPEG — tests generate a tiny one with Pillow.
+
+**Test baseline:** before = 258 passed + 5 skipped. After = **269 passed, 5 skipped** (9 new catalog tests — create-or-match existing/backfill/keeps-metadata/create-new, backfill no-key/no-tmdb_id/already-complete/fetches-fills/per-film-failure — plus 2 clean-room guard cases for the two new files). ruff check + format green; no model changes.
+
+**Decisions:** none new (implements D7/D11 as specified; catalog placement is consistent with R27).
 
 ### Clean-room guard (added 2026-09-07)
 
