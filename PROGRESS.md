@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-09-08
+**Last updated:** 2026-09-09
 **Audience:** any new session picking up this project. Read [REWRITE.md](REWRITE.md) first (the binding clean-room rules), then [PLAN.md](PLAN.md) (functional spec + build plan + license audit), then this file for current state.
 
 ---
@@ -12,7 +12,7 @@
 | M0 — functional spec, license audit, dev environment | ✅ Done 2026-09-05, verified (stack healthy, site on :3030, pytest green, ruff green) |
 | Stack audit (pre-M1) | ✅ Done 2026-09-05 — stack restructured to web+db; findings in PLAN.md §3.9, decisions R1–R8 below |
 | M1 — core film domain (first working version, part 1) | ✅ Done 2026-09-08, verified — all 7 increments committed; exit bar run live end-to-end over HTTP (signup → manual film → watchlist → watched + review → feed), see §2 increment 7. **Next session starts at M2 — TMDB integration** (PLAN.md §5: search as the primary add-film surface per D6; the `worker` service + Django-Q2 join here). |
-| M2 — TMDB integration | 🟨 In progress — increment 1 (TMDB client) done 2026-09-08 (`a4a6833`); next: create-or-match (D7), worker service, search views. **Live search verification needs a TMDB API key in `.env`** (see §2 M2 note). |
+| M2 — TMDB integration | 🟨 In progress — increments 1–2 done 2026-09-08 (client `1914534`; create-or-match + backfill `26756be`); next: worker service, search views. **TMDB API key configured in `.env`** and verified live against the real API (2026-09-09). |
 | M3 — file import/export | ⬜ Not started |
 | M4 — federation (ActivityPub from spec) | ⬜ Not started |
 | M5 — social surface | ⬜ Not started |
@@ -32,7 +32,7 @@ M1 = "core film domain, first working version, part 1" (PLAN.md §5). It is buil
 4. ✅ **Status/Review/ReviewRating + watch rules** — single-table `Status` with a type discriminator (R17); §3.3 rules at model level: rating required to mark watched (validated before any write), one Review per user per film (D5, partial unique index), rating-only entries; `mark_watched()` finish-flow helper; merge re-points statuses (R16). *(done 2026-09-06, `495469a`.)*
 5. ✅ **Film pages + shelve controls + finish flow** — create/edit/view film views + templates; shelve/unshelve with D1 mutual exclusion; "mark watched" finish flow (rating required) wired to `mark_watched()`; edit-review per D5. *(done 2026-09-07, `313c6e1` + `4faf81b` + `2c00ba7` + `ba0b94f`.)*
 6. ✅ **User films page (3 tabs) + minimal feed** — `GET /user/<localname>/films/` with exactly three tabs (All films / Watchlist / Watched per §3.3 rule 1 + D1), publicly readable; minimal home feed of own + followed users' statuses (§3.6 v0.1). *(done 2026-09-07, `dbfc206` + `f68599e`.)*
-7. ✅ **Admin basics + landing/about + exit-bar verification** — site settings + link-domain allowlist (`c496e83`), landing/about pages (`0df4994`), admin branding + film merge/absorb tool (`7c8e83f`); M1 exit bar verified live end-to-end over HTTP and this file finalized. *(done 2026-09-08.)*
+7. ✅ **Admin basics + landing/about + exit-bar verification** — site settings + link-domain allowlist (`622c34f`), landing/about pages (`75ad1fd`), admin branding + film merge/absorb tool (`ad5c465`); M1 exit bar verified live end-to-end over HTTP and this file finalized. *(done 2026-09-08.)*
 
 **M1 exit bar (across all sessions):** owner can sign up on the local instance and run the whole watchlist→watched→review loop. **Verified 2026-09-08** with a throwaway account over live HTTP (increment 7 record below); verification data was removed afterwards, so the instance is clean for the owner's own run. No new runtime deps or services were introduced in M1 (web + db only; Django templates + vanilla JS). Conventions to follow are recorded in §4 — especially R9 (app structure), R10 (custom user model now), R11 (minimal neutral CSS; real styling deferred to M6 with the owner per D17).
 
@@ -192,7 +192,7 @@ Sixth increment of M1. The user's films page with exactly three tabs (§3.3 rule
 
 **Decisions:** R23 in §4 below (engineering call, recorded so the owner can veto).
 
-### M1 increment 7 — admin basics + landing/about + exit-bar verification (executed 2026-09-08, commits `c496e83`, `0df4994`, `7c8e83f`)
+### M1 increment 7 — admin basics + landing/about + exit-bar verification (executed 2026-09-08, commits `622c34f`, `75ad1fd`, `ad5c465`)
 
 Seventh and final increment of M1. The §3.2 site-settings domain object (admin-managed, with the §3.7 signup policy gate and the link-domain allowlist), landing/about pages, the §3.7 v0.1 admin surface (branding + film merge/absorb tool), and the live end-to-end verification of the M1 exit bar. No new runtime deps; one migration (`social/0002`). Built as three green sub-commits plus this record.
 
@@ -216,12 +216,12 @@ Seventh and final increment of M1. The §3.2 site-settings domain object (admin-
 
 M2 = "TMDB integration (first working version, part 2)" (PLAN.md §5): the TMDB client, global search as the primary add-film surface with click-through + one-click Watchlist (D6/D7), the suggest endpoint + dropdown, and the async backfill task (D11) — with the `worker` service (Django-Q2 on Postgres) joining the stack. Built as small verified increments; **each ends in a committed green checkpoint** with this file updated, then the session stops. Scope per increment:
 
-1. ✅ **TMDB client** — `reeltalk.core.tmdb`: v3 `search_films` (paginated) / `get_film_details` (credits+images) / `download_poster` / `film_fields_from_tmdb`; `TmdbError` subtypes (auth 401 / rate-limit 429 / network); settings read `REELTALK_TMDB_API_KEY` (D8). *(done 2026-09-08, `a4a6833`.)*
-2. ✅ **Create-or-match (D7) + backfill function** — find-or-create the local Film for a TMDB hit (tmdb_id → title+year fallback that backfills a manual film), plus the D11 backfill loop (fetch details + poster, fill empty fields, 0.25 s pacing, per-film skip-on-error). *(done 2026-09-08, `99a1f4e`.)*
+1. ✅ **TMDB client** — `reeltalk.core.tmdb`: v3 `search_films` (paginated) / `get_film_details` (credits+images) / `download_poster` / `film_fields_from_tmdb`; `TmdbError` subtypes (auth 401 / rate-limit 429 / network); settings read `REELTALK_TMDB_API_KEY` (D8). *(done 2026-09-08, `1914534`.)*
+2. ✅ **Create-or-match (D7) + backfill function** — find-or-create the local Film for a TMDB hit (tmdb_id → title+year fallback that backfills a manual film), plus the D11 backfill loop (fetch details + poster, fill empty fields, 0.25 s pacing, per-film skip-on-error). *(done 2026-09-08, `26756be`.)*
 3. ⬜ **Worker service** — `django-q2` dep, `Q_CLUSTER` (Postgres backend, no Redis), a `worker` compose service (same image, `qcluster`) that starts after web; the backfill task wrapper. Live check the worker comes up.
-4. ⬜ **Search views + suggest + dropdown** — global search page (TMDB-backed with local fallback, D6), click-through create-or-match route, one-click Watchlist POST per row, `/search/suggest/` JSON endpoint + header dropdown JS. **Exit bar: live-verify "search Blade Runner → add to watchlist → mark watched with a rating" — needs a TMDB API key in `.env`.**
+4. ⬜ **Search views + suggest + dropdown** — global search page (TMDB-backed with local fallback, D6), click-through create-or-match route, one-click Watchlist POST per row, `/search/suggest/` JSON endpoint + header dropdown JS. **Exit bar: live-verify "search Blade Runner → add to watchlist → mark watched with a rating"** (the TMDB key is now configured in `.env`).
 
-### M2 increment 1 — TMDB client (executed 2026-09-08, commit `a4a6833`)
+### M2 increment 1 — TMDB client (executed 2026-09-08, commit `1914534`)
 
 First increment of M2. The server-side TMDB v3 client in `reeltalk.core.tmdb` (R27) and the settings hook for the operator's key (D8). No model changes, no new runtime deps (`requests` was already in the audited set).
 
@@ -238,14 +238,14 @@ First increment of M2. The server-side TMDB v3 client in `reeltalk.core.tmdb` (R
 
 **Decisions:** R27 in §4 below (engineering call, recorded so the owner can veto).
 
-### M2 increment 2 — create-or-match + import backfill (executed 2026-09-08, commits `99a1f4e`, `793d81c`)
+### M2 increment 2 — create-or-match + import backfill (executed 2026-09-08, commits `26756be`, `dd65b01`)
 
 Second increment of M2. `reeltalk.core.catalog` is where the TMDB client meets the database — turning a TMDB film into a local `Film` row and keeping imported films current (R27 keeps the pure HTTP client separate). No model changes, no new runtime deps.
 
 **What landed:**
 - **`create_or_match_film(tmdb_id, *, title=None, year=None)`** (D7): (1) a row already carrying this `tmdb_id` is returned as-is with **no API call**; (2) otherwise the detail payload is fetched and a normalized title+year match against an existing manual film **backfills** that row's empty metadata + the `tmdb_id` instead of creating a duplicate; (3) with no match, a new `Film` is created from the details + poster. `title`/`year` are optional matching hints that only matter when the detail payload lacks one of them.
 - **`backfill_films(film_ids)`** (D11): the import backfill loop — skips films without a `tmdb_id` or already complete (poster + description), fetches details + poster, fills empty fields, paces at `BACKFILL_REQUEST_INTERVAL = 0.25 s`, logs + skips per-film `TmdbError`s so the batch always runs to the end, and is a no-op without a key. Returns per-outcome counts. Plain + directly testable — the Django-Q2 task wrapper joins with the worker service (increment 3).
-- **Housekeeping (`793d81c`):** `.gitignore` now ignores runtime media under `images/` (MEDIA_ROOT) except the tracked `.gitkeep` — bind-mount test runs were dropping poster files into the source tree. Matches the existing `/static/`, `exports/`, `backups/` ignores.
+- **Housekeeping (`dd65b01`):** `.gitignore` now ignores runtime media under `images/` (MEDIA_ROOT) except the tracked `.gitkeep` — bind-mount test runs were dropping poster files into the source tree. Matches the existing `/static/`, `exports/`, `backups/` ignores.
 
 **Gotchas hit & fixed:**
 - **`responses` needs `@responses.activate` on every test that makes a call.** A `responses.add(...)` registration alone does not intercept — without the decorator the client made *real* TMDB calls (fake key → 401). Added it to all catalog tests. Also, `assert responses.calls == []` is unreliable (a `CallList` vs a plain list); use `len(responses.calls) == 0`.
@@ -254,6 +254,12 @@ Second increment of M2. `reeltalk.core.catalog` is where the TMDB client meets t
 **Test baseline:** before = 258 passed + 5 skipped. After = **269 passed, 5 skipped** (9 new catalog tests — create-or-match existing/backfill/keeps-metadata/create-new, backfill no-key/no-tmdb_id/already-complete/fetches-fills/per-film-failure — plus 2 clean-room guard cases for the two new files). ruff check + format green; no model changes.
 
 **Decisions:** none new (implements D7/D11 as specified; catalog placement is consistent with R27).
+
+### Push to origin + contributor attribution fix (2026-09-09)
+
+At the owner's request, all work up to this checkpoint was pushed to `origin/main`, and a wrong contributor attribution in four earlier M1 commit messages was fixed. Previous pushes had added a `Co-authored-by: Qwen-Coder <qwen-coder@alibabacloud.com>` trailer that GitHub renders as an unrelated random account (`github.com/qwencoder`); the owner chose to **remove the trailer entirely** (no replacement line) so those commits show only the repo identity.
+
+How it was done, with safety nets: confirmed clean tree + single remote; backup tag `backup/pre-attribution-fix` created at the pre-rewrite tip (`bcc022c`); verified all four trailer-bearing M1 commits were already pushed (ancestors of old `origin/main`); `git filter-branch -f --msg-filter 'sed "/^Co-authored-by: Qwen-Coder/d"' c496e83^..HEAD` rewrote the nine commits in that range (only the four carried trailers; the rest changed hash by ancestry alone); verified zero remaining trailers on `main`, an empty `git diff --stat backup/pre-attribution-fix HEAD` (messages only — no content change), and equal commit counts (36 = 36); force-pushed with lease (`--force-with-lease`). `origin/main` now equals local `main` at `248156a`. The backup tag is kept until the owner confirms satisfaction, then can be deleted. **All commit hashes cited in this file were updated to their post-rewrite values** (M1 increments 1–6 are unchanged — they predate the rewritten range).
 
 ### Clean-room guard (added 2026-09-07)
 
