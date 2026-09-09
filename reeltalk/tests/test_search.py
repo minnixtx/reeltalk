@@ -10,6 +10,7 @@ from io import BytesIO
 import pytest
 import responses
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
 from django.test import Client, override_settings
 from PIL import Image
 
@@ -349,9 +350,43 @@ def test_suggest_tmdb_rows_link_to_clickthrough_for_users(login):
     assert data["results"][0] == {
         "title": "Blade Runner",
         "year": 1982,
+        "poster_url": None,  # the mock row carries no poster_path
         "tmdb_id": 78,
         "url": "/search/film/78/",
     }
+
+
+@responses.activate
+@override_settings(TMDB_API_KEY="fake-key")
+@pytest.mark.django_db
+def test_suggest_tmdb_rows_carry_the_poster_url(login):
+    _mock_search(
+        [
+            {
+                "tmdb_id": 78,
+                "title": "Blade Runner",
+                "year": 1982,
+                "poster_path": "/br-poster.jpg",
+            }
+        ]
+    )
+    resp = login.get("/search/suggest/?q=blade")
+    assert (
+        resp.json()["results"][0]["poster_url"]
+        == "https://image.tmdb.org/t/p/w500/br-poster.jpg"
+    )
+
+
+@responses.activate
+@override_settings(TMDB_API_KEY="fake-key")
+@pytest.mark.django_db
+def test_suggest_local_rows_carry_the_film_poster(login):
+    film = Film.objects.create(title="Dune", year=2021)
+    film.poster.save("dune.jpg", ContentFile(_tiny_jpeg()), save=True)
+    _mock_search([])  # empty TMDB hit list -> local fallback rows
+    resp = login.get("/search/suggest/?q=dune")
+    data = resp.json()
+    assert data["results"][0]["poster_url"] == film.poster.url
 
 
 @responses.activate
@@ -385,7 +420,13 @@ def test_suggest_local_when_no_key(client):
     resp = client.get("/search/suggest/?q=dune")
     data = resp.json()
     assert data["results"] == [
-        {"title": "Dune", "year": 2021, "tmdb_id": None, "url": f"/film/{film.id}/"}
+        {
+            "title": "Dune",
+            "year": 2021,
+            "poster_url": None,
+            "tmdb_id": None,
+            "url": f"/film/{film.id}/",
+        }
     ]
     assert len(responses.calls) == 0
 

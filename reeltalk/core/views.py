@@ -322,6 +322,7 @@ def search_suggest(request):
                     {
                         "title": hit.title,
                         "year": hit.year,
+                        "poster_url": hit.poster_url,
                         "tmdb_id": hit.tmdb_id,
                         "url": (
                             reverse("search-clickthrough", args=[hit.tmdb_id])
@@ -340,6 +341,7 @@ def search_suggest(request):
                 {
                     "title": film.title,
                     "year": film.year,
+                    "poster_url": film.poster.url if film.poster else None,
                     "tmdb_id": None,
                     "url": reverse("film", args=[film.id]),
                 }

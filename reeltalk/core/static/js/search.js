@@ -36,7 +36,22 @@
         var li = document.createElement("li");
         var a = document.createElement("a");
         a.href = row.url;
-        a.textContent = row.title + (row.year ? " (" + row.year + ")" : "");
+        // R31: a small poster beside the title so a film can be recognized by
+        // its artwork; a placeholder keeps the row shape when there is none.
+        if (row.poster_url) {
+          var img = document.createElement("img");
+          img.className = "suggest-thumb";
+          img.src = row.poster_url;
+          img.alt = "";
+          a.appendChild(img);
+        } else {
+          var ph = document.createElement("span");
+          ph.className = "suggest-thumb suggest-thumb-placeholder";
+          a.appendChild(ph);
+        }
+        var label = document.createElement("span");
+        label.textContent = row.title + (row.year ? " (" + row.year + ")" : "");
+        a.appendChild(label);
         li.appendChild(a);
         list.appendChild(li);
       });

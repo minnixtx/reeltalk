@@ -518,13 +518,29 @@ ul.errorlist {
 }
 
 .suggest-list a {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   padding: 0.35rem 0.75rem;
   color: var(--fg);
   text-decoration: none;
 }
 
 .suggest-list a:hover {
+  background: #eef3f8;
+}
+
+/* R31: poster thumbnail in the dropdown rows (placeholder when missing). */
+.suggest-thumb {
+  width: 1.6rem;
+  height: 2.4rem;
+  object-fit: cover;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.suggest-thumb-placeholder {
   background: #eef3f8;
 }
 
