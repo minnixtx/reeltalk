@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Search — ReelTalk{% endblock %}
+
+{% block content %}
+<h1>Search</h1>
+
+{% if not query %}
+  <p class="muted">Use the search box above to find films.</p>
+  {% if user.is_authenticated %}
+    <p class="muted"><a href="{% url 'film-create' %}">Can’t find it? Add a film manually.</a></p>
+  {% endif %}
+{% elif rows %}
+  {% if source == "tmdb" and total_pages > 1 %}
+    <p class="muted">Page {{ page }} of {{ total_pages }}</p>
+  {% endif %}
+  <ul class="film-list search-results">
+    {% for row in rows %}
+      <li class="film-row search-row">
+        {% if row.poster_url %}
+          <img class="thumb" src="{{ row.poster_url }}" alt="">
+        {% else %}
+          <span class="thumb thumb-placeholder"></span>
+        {% endif %}
+        <div class="search-row-main">
+          {% if row.link %}
+            <a href="{{ row.link }}">{{ row.title }}</a>
+          {% else %}
+            {{ row.title }}
+          {% endif %}
+          {% if row.year %}<span class="muted">({{ row.year }})</span>{% endif %}
+        </div>
+        {% if user.is_authenticated and row.tmdb_id is not None %}
+          <button type="button" class="watchlist-btn" data-url="{% url 'search-watchlist' row.tmdb_id %}">Add to watchlist</button>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+  {% if source == "tmdb" and total_pages > 1 %}
+    <nav class="search-pager">
+      {% if page > 1 %}<a href="?q={{ query|urlencode }}&amp;page={{ page|add:"-1" }}">← Previous</a>{% endif %}
+      {% if page < total_pages %}<a href="?q={{ query|urlencode }}&amp;page={{ page|add:"1" }}">Next →</a>{% endif %}
+    </nav>
+  {% endif %}
+{% else %}
+  <p class="muted">No films found for “{{ query }}”.</p>
+{% endif %}
+{% endblock %}

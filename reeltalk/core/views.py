@@ -1,14 +1,20 @@
-"""Film views: detail, create, and edit pages (PLAN.md §3.7).
+"""Film views: detail, create, edit, and global search (PLAN.md §3.4/§3.7).
 
 Views stay thin — watch-state, shelving, and review rules live in the model
-layer (``mark_watched``, the shelf helpers, D5's partial index).
+layer (``mark_watched``, the shelf helpers, D5's partial index), and the
+TMDB/catalog logic lives in ``tmdb``/``catalog``.
 """
+
+from urllib.parse import quote
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
+from .catalog import create_or_match_film, search_local
 from .forms import FilmForm
 from .models import (
     Film,
@@ -20,6 +26,7 @@ from .models import (
     shelve_to_watchlist,
     unshelve_from_watchlist,
 )
+from .tmdb import TmdbError, is_configured, search_films
 from .utils import render_markdown
 
 
@@ -150,3 +157,191 @@ def film_edit(request, film_id):
     else:
         form = FilmForm(instance=film)
     return render(request, "core/film/form.html", {"form": form, "film": film})
+
+
+# --- Global search (M2, D6) -------------------------------------------------
+
+SUGGEST_LIMIT = 8
+
+
+def _blocked_tmdb_ids(user) -> set:
+    """tmdb_ids of films this user has blocked locally (§3.4 exclusion)."""
+    return set(
+        Film.objects.filter(id__in=user.blocked_films.values_list("id", flat=True))
+        .exclude(tmdb_id__isnull=True)
+        .values_list("tmdb_id", flat=True)
+    )
+
+
+def _local_film_ids(user) -> set:
+    """Ids of films this user has blocked locally (§3.4 exclusion)."""
+    if not user.is_authenticated:
+        return set()
+    return set(user.blocked_films.values_list("id", flat=True))
+
+
+def _tmdb_rows(results, user) -> list[dict]:
+    """Normalize a TMDB search page into template rows (D6).
+
+    Anonymous users see results without actions — no click-through link.
+    Locally blocked films are excluded by tmdb_id.
+    """
+    blocked = _blocked_tmdb_ids(user) if user.is_authenticated else set()
+    rows = []
+    for hit in results.rows:
+        if hit.tmdb_id in blocked:
+            continue
+        rows.append(
+            {
+                "title": hit.title,
+                "year": hit.year,
+                "poster_url": hit.poster_url,
+                "tmdb_id": hit.tmdb_id,
+                "link": (
+                    reverse("search-clickthrough", args=[hit.tmdb_id])
+                    if user.is_authenticated
+                    else None
+                ),
+            }
+        )
+    return rows
+
+
+def _local_rows(films, user) -> list[dict]:
+    """Normalize local films into the same row shape as TMDB results."""
+    blocked = _local_film_ids(user)
+    rows = []
+    for film in films:
+        if film.id in blocked:
+            continue
+        rows.append(
+            {
+                "title": film.title,
+                "year": film.year,
+                "poster_url": film.poster.url if film.poster else None,
+                "tmdb_id": film.tmdb_id,
+                # Film pages are public — the link is available to everyone.
+                "link": reverse("film", args=[film.id]),
+            }
+        )
+    return rows
+
+
+def film_search(request):
+    """Global search page (D6): TMDB when a key is configured, else local.
+
+    With a key, a TMDB failure (bad key / rate limit / network) degrades to
+    the local library with a user-facing message instead of an error page.
+    """
+    query = request.GET.get("q", "").strip()
+    try:
+        page = max(1, int(request.GET.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    data = {"query": query, "rows": [], "source": None, "page": page, "total_pages": 0}
+    if not query:
+        return render(request, "core/search.html", data)
+
+    if is_configured():
+        try:
+            results = search_films(query, page)
+        except TmdbError as exc:
+            messages.error(request, str(exc))
+            data["rows"] = _local_rows(search_local(query), request.user)
+            data["source"] = "local"
+        else:
+            data["rows"] = _tmdb_rows(results, request.user)
+            data["source"] = "tmdb"
+            data["page"] = results.page
+            data["total_pages"] = results.total_pages
+    else:
+        data["rows"] = _local_rows(search_local(query), request.user)
+        data["source"] = "local"
+    return render(request, "core/search.html", data)
+
+
+@login_required
+def search_clickthrough(request, tmdb_id):
+    """D6 click-through: run D7 create-or-match and land on the film page."""
+    existed = Film.objects.filter(tmdb_id=tmdb_id).exists()
+    try:
+        film = create_or_match_film(tmdb_id)
+    except TmdbError as exc:
+        messages.error(request, str(exc))
+        return redirect("film-search")
+    if not existed:
+        messages.success(request, f"Added “{film.title}” to your library.")
+    return redirect("film", film_id=film.id)
+
+
+@login_required
+@require_POST
+def search_watchlist(request, tmdb_id):
+    """D6 one-click watchlist: materialize the TMDB hit (D7), then shelve.
+
+    JSON for the results-page button — ``status`` is the shelf outcome
+    (added/already/watched); a TMDB failure comes back as an error payload.
+    """
+    try:
+        film = create_or_match_film(tmdb_id)
+    except TmdbError as exc:
+        return JsonResponse({"error": str(exc)}, status=502)
+    outcome = shelve_to_watchlist(request.user, film)
+    if outcome == "watched":
+        # D1: a watched film can't also be wanted — refuse with 409.
+        return JsonResponse({"status": outcome}, status=409)
+    return JsonResponse({"status": outcome})
+
+
+def search_suggest(request):
+    """JSON suggestions for the header dropdown (search-as-you-type, D6).
+
+    TMDB when a key is configured (falling back to the local library on a
+    TMDB failure or empty hit list), local only without a key. Anonymous
+    users' TMDB rows link to the search page rather than the login-gated
+    click-through route. Locally blocked films are excluded.
+    """
+    query = request.GET.get("q", "").strip()
+    if len(query) < 2:
+        return JsonResponse({"results": []})
+
+    rows = []
+    if is_configured():
+        try:
+            results = search_films(query)
+        except TmdbError:
+            results = None
+        if results is not None:
+            authenticated = request.user.is_authenticated
+            blocked = _blocked_tmdb_ids(request.user) if authenticated else set()
+            for hit in results.rows[:SUGGEST_LIMIT]:
+                if hit.tmdb_id in blocked:
+                    continue
+                rows.append(
+                    {
+                        "title": hit.title,
+                        "year": hit.year,
+                        "tmdb_id": hit.tmdb_id,
+                        "url": (
+                            reverse("search-clickthrough", args=[hit.tmdb_id])
+                            if authenticated
+                            else f"/search/?q={quote(hit.title)}"
+                        ),
+                    }
+                )
+    if not rows:
+        films = search_local(query, limit=SUGGEST_LIMIT)
+        blocked = _local_film_ids(request.user)
+        for film in films:
+            if film.id in blocked:
+                continue
+            rows.append(
+                {
+                    "title": film.title,
+                    "year": film.year,
+                    "tmdb_id": None,
+                    "url": reverse("film", args=[film.id]),
+                }
+            )
+    return JsonResponse({"results": rows[:SUGGEST_LIMIT]})

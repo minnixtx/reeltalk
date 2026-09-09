@@ -6,12 +6,14 @@ where that client meets the database — turning a TMDB film into a local
 
 - :func:`create_or_match_film` — D7 find-or-create for a search hit or
   click-through (exact ``tmdb_id`` → normalized title+year fallback that
-  backfills a manual film → new row), and
+  backfills a manual film → new row),
 - :func:`backfill_films` — the D11 import backfill loop (fetch details +
-  poster, fill empty fields, paced, per-film skip-on-error).
+  poster, fill empty fields, paced, per-film skip-on-error), and
+- :func:`search_local` — the no-key / degraded-mode local-library search over
+  the trigger-maintained tsvector (§3.2 weights).
 
-The Django-Q2 task wrapper for the backfill joins with the worker service
-(increment 3); these functions are plain and directly testable.
+The Django-Q2 task wrapper for the backfill lives in ``reeltalk.core.tasks``;
+these functions are plain and directly testable.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import logging
 import time
 
 from django.core.files.base import ContentFile
+from django.db.models.expressions import RawSQL
 
 from reeltalk.core.models import Film, derive_sort_title
 from reeltalk.core.tmdb import (
@@ -151,3 +154,25 @@ def backfill_films(film_ids) -> dict:
             summary["failed"] += 1
         time.sleep(BACKFILL_REQUEST_INTERVAL)
     return summary
+
+
+def search_local(query: str, limit: int = 20) -> list[Film]:
+    """Local-library search (D6 fallback): full-text over the tsvector.
+
+    Queries the trigger-maintained ``search_vector`` column (§3.2 weights:
+    title > subtitle > directors+cast > genres) via ``plainto_tsquery`` —
+    plain user text, parameterized, so no query injection. Best rank first;
+    empty/whitespace queries return nothing without hitting the database.
+    """
+    if not query.strip():
+        return []
+    ranked = (
+        Film.objects.annotate(
+            rank=RawSQL(
+                "ts_rank(search_vector, plainto_tsquery('simple', %s))", [query]
+            )
+        )
+        .filter(rank__gt=0)
+        .order_by("-rank", "sort_title")[:limit]
+    )
+    return list(ranked)

@@ -480,3 +480,79 @@ ul.errorlist {
 .site-footer a:hover {
   color: var(--accent);
 }
+
+/* --- Global search + suggest dropdown (M2 increment 4) ---------------------- */
+
+.site-header .container.nav {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.global-search {
+  position: relative;
+  margin-left: 1rem;
+}
+
+.global-search input[type="search"] {
+  width: 13rem;
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.suggest-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(20, 24, 30, 0.12);
+}
+
+.suggest-list a {
+  display: block;
+  padding: 0.35rem 0.75rem;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.suggest-list a:hover {
+  background: #eef3f8;
+}
+
+.search-row-main {
+  flex: 1;
+}
+
+.search-row .watchlist-btn {
+  margin-top: 0;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.9rem;
+  background: none;
+  color: var(--accent);
+  border: 1px solid var(--border);
+}
+
+.search-row .watchlist-btn:hover {
+  border-color: var(--accent);
+  filter: none;
+}
+
+.search-row .watchlist-btn:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.search-pager {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+}
