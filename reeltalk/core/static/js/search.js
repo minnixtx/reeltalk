@@ -20,10 +20,26 @@
     var input = form.querySelector("input[type=search]");
     var list = document.getElementById("search-suggest");
     var timer = null;
+    // R32: the rendered row links and the keyboard-active one (-1 = none).
+    var items = [];
+    var active = -1;
 
     function hide() {
       list.hidden = true;
       list.innerHTML = "";
+      items = [];
+      active = -1;
+    }
+
+    function setActive(index) {
+      if (!items.length) {
+        return;
+      }
+      items.forEach(function (a, i) {
+        a.classList.toggle("active", i === index);
+      });
+      active = index;
+      items[index].scrollIntoView({ block: "nearest" });
     }
 
     function render(results) {
@@ -32,10 +48,16 @@
         return;
       }
       list.innerHTML = "";
+      items = [];
+      active = -1;
       results.forEach(function (row) {
         var li = document.createElement("li");
         var a = document.createElement("a");
         a.href = row.url;
+        // R32: hovering moves the keyboard highlight to the same row.
+        a.addEventListener("mouseenter", function () {
+          setActive(items.indexOf(a));
+        });
         // R31: a small poster beside the title so a film can be recognized by
         // its artwork; a placeholder keeps the row shape when there is none.
         if (row.poster_url) {
@@ -54,6 +76,7 @@
         a.appendChild(label);
         li.appendChild(a);
         list.appendChild(li);
+        items.push(a);
       });
       list.hidden = false;
     }
@@ -80,9 +103,27 @@
       }, 200);
     });
 
+    // R32: standard combobox keys. With no row active, Enter keeps its
+    // default — submitting the search form for the typed query.
     input.addEventListener("keydown", function (e) {
       if (e.key === "Escape") {
         hide();
+        return;
+      }
+      if (!items.length) {
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActive((active + 1) % items.length);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActive(
+          active < 0 ? items.length - 1 : (active - 1 + items.length) % items.length
+        );
+      } else if (e.key === "Enter" && active >= 0) {
+        e.preventDefault();
+        window.location.href = items[active].href;
       }
     });
 

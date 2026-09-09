@@ -526,7 +526,9 @@ ul.errorlist {
   text-decoration: none;
 }
 
-.suggest-list a:hover {
+.suggest-list a:hover,
+.suggest-list a.active {
+  /* R32: keyboard highlight matches the mouse hover. */
   background: #eef3f8;
 }
 
