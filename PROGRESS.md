@@ -12,7 +12,7 @@
 | M0 — functional spec, license audit, dev environment | ✅ Done 2026-09-05, verified (stack healthy, site on :3030, pytest green, ruff green) |
 | Stack audit (pre-M1) | ✅ Done 2026-09-05 — stack restructured to web+db; findings in PLAN.md §3.9, decisions R1–R8 below |
 | M1 — core film domain (first working version, part 1) | ✅ Done 2026-09-08, verified — all 7 increments committed; exit bar run live end-to-end over HTTP (signup → manual film → watchlist → watched + review → feed), see §2 increment 7. |
-| M2 — TMDB integration | ✅ Done 2026-09-09, verified — all 4 increments committed (client `1914534`; create-or-match + backfill `26756be`; worker service `effd01e`; search surface `02f2ff5`); exit bar run live end-to-end over HTTP against the **real TMDB API** (search Blade Runner → add to watchlist → mark watched with a rating), see §2 increment 4. Stack is now web + db + worker. **Next session starts at M3 — file import/export** (PLAN.md §5). Milestone-boundary push to origin awaits the owner's go-ahead (standing rule: no push unless told). |
+| M2 — TMDB integration | ✅ Done 2026-09-09, verified — all 4 increments committed (client `1914534`; create-or-match + backfill `26756be`; worker service `effd01e`; search surface `02f2ff5`); exit bar run live end-to-end over HTTP against the **real TMDB API** (search Blade Runner → add to watchlist → mark watched with a rating), see §2 increment 4, and confirmed by the owner in a browser the same day. Stack is now web + db + worker. **Next session: the owner backlog R31–R34 first (owner decision 2026-09-09 — dropdown posters + keyboard nav, feed shelf events + posters), then M3 — file import/export** (PLAN.md §5). Milestone-boundary push to origin awaits the owner's go-ahead (standing rule: no push unless told). |
 | M3 — file import/export | ⬜ Not started |
 | M4 — federation (ActivityPub from spec) | ⬜ Not started |
 | M5 — social surface | ⬜ Not started |
@@ -293,6 +293,10 @@ Fourth and final increment of M2. The D6 search surface: global search as the pr
 **Test baseline:** before = 274 passed + 5 skipped. After = **303 passed, 5 skipped** (26 new: local search 4, results page 6 incl. anonymous/blocked/degradation/no-key, click-through 4, one-click watchlist 6, suggest 6 — plus 3 clean-room guard cases for the three new files). ruff check + format green; `makemigrations --check` no drift (no model changes).
 
 **Decisions:** R29–R30 in §4 below (engineering calls, recorded so the owner can veto).
+
+### Owner verification + post-M2 backlog (2026-09-09)
+
+The owner exercised the exit bar in a browser the same day and confirmed it works. They then requested four improvements, recorded as **R31–R34** in §4: suggest-dropdown posters (R31), dropdown keyboard navigation (R32), feed entries for watchlist additions + watched-with-review (R33 — supersedes D3's "no automatic feed notes" for these events), and posters on feed rows (R34). **Owner decision: this backlog is done next, before M3.** The owner's test films from the browser run were disposable and have been deleted — the instance holds only the `minnix` account with zero films/shelf rows/statuses.
 
 ### Push to origin + contributor attribution fix (2026-09-09)
 
