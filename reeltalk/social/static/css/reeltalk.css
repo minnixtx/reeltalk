@@ -418,6 +418,7 @@ ul.errorlist {
 }
 
 .film-row .thumb,
+.feed-item .thumb,
 .thumb-placeholder {
   width: 2.5rem;
   height: 3.75rem;
@@ -445,9 +446,21 @@ ul.errorlist {
   margin-top: 1.5rem;
 }
 
+/* R34: poster thumb beside the event text on film-anchored rows. */
+.feed-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.25rem 0;
+}
+
 .feed-film {
   margin: 0.25rem 0;
   font-weight: 600;
+}
+
+.feed-item .feed-film {
+  margin: 0;
 }
 
 /* --- Landing/about + footer (M1 increment 7) --------------------------------- */

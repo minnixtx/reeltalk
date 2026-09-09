@@ -12,11 +12,14 @@ entry (R35).
 
 from datetime import timedelta
 from decimal import Decimal
+from io import BytesIO
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
 from django.test import Client
 from django.utils import timezone
+from PIL import Image
 
 from reeltalk.core.models import (
     Film,
@@ -30,6 +33,12 @@ from reeltalk.core.models import (
 )
 
 User = get_user_model()
+
+
+def _tiny_jpeg() -> bytes:
+    buf = BytesIO()
+    Image.new("RGB", (10, 10), (90, 60, 120)).save(buf, format="JPEG")
+    return buf.getvalue()
 
 
 @pytest.fixture
@@ -457,3 +466,21 @@ def test_home_feed_watched_review_is_a_single_row(login, user, film, admin):
     mark_watched(user, film, rating="4", content="<p>Once.</p>", raw_content="Once.")
     body = login.get("/").content.decode()
     assert body.count("<p>Once.</p>") == 1
+
+
+# --- Posters on feed rows (R34) -----------------------------------------------
+
+
+@pytest.mark.django_db
+def test_home_feed_row_shows_the_film_poster(login, user, film, admin):
+    film.poster.save("dune.jpg", ContentFile(_tiny_jpeg()), save=True)
+    shelve_to_watchlist(user, film)
+    body = login.get("/").content.decode()
+    assert f'src="{film.poster.url}"' in body
+
+
+@pytest.mark.django_db
+def test_home_feed_row_placeholder_without_poster(login, user, film, admin):
+    mark_watched(user, film, rating="4")
+    body = login.get("/").content.decode()
+    assert "thumb-placeholder" in body
