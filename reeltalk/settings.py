@@ -146,6 +146,11 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = (
     env.int("DATA_UPLOAD_MAX_MEMORY_MiB", default=100) * 1024 * 1024
 )
 
+# TMDB (M2, decision D8): the operator's API key, shared by all users and read
+# from .env. Unset means "not configured" — search degrades to local-library
+# search instead of erroring (D6). Never written to any tracked file.
+TMDB_API_KEY = env.str("REELTALK_TMDB_API_KEY", default="")
+
 # Content Security Policy. img-src allows the TMDB poster CDN from day one —
 # the legacy project learned the hard way that adding it later breaks every
 # page that shows search results (PLAN.md §3.4).
