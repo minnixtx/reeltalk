@@ -12,7 +12,7 @@
 | M0 — functional spec, license audit, dev environment | ✅ Done 2026-09-05, verified (stack healthy, site on :3030, pytest green, ruff green) |
 | Stack audit (pre-M1) | ✅ Done 2026-09-05 — stack restructured to web+db; findings in PLAN.md §3.9, decisions R1–R8 below |
 | M1 — core film domain (first working version, part 1) | ✅ Done 2026-09-08, verified — all 7 increments committed; exit bar run live end-to-end over HTTP (signup → manual film → watchlist → watched + review → feed), see §2 increment 7. **Next session starts at M2 — TMDB integration** (PLAN.md §5: search as the primary add-film surface per D6; the `worker` service + Django-Q2 join here). |
-| M2 — TMDB integration | ⬜ Not started |
+| M2 — TMDB integration | 🟨 In progress — increment 1 (TMDB client) done 2026-09-08 (`a4a6833`); next: create-or-match (D7), worker service, search views. **Live search verification needs a TMDB API key in `.env`** (see §2 M2 note). |
 | M3 — file import/export | ⬜ Not started |
 | M4 — federation (ActivityPub from spec) | ⬜ Not started |
 | M5 — social surface | ⬜ Not started |
@@ -212,6 +212,32 @@ Seventh and final increment of M1. The §3.2 site-settings domain object (admin-
 
 **Decisions:** R24–R26 in §4 below (engineering calls, recorded so the owner can veto).
 
+### M2 — increment plan (forward-looking; ~4 increments across sessions)
+
+M2 = "TMDB integration (first working version, part 2)" (PLAN.md §5): the TMDB client, global search as the primary add-film surface with click-through + one-click Watchlist (D6/D7), the suggest endpoint + dropdown, and the async backfill task (D11) — with the `worker` service (Django-Q2 on Postgres) joining the stack. Built as small verified increments; **each ends in a committed green checkpoint** with this file updated, then the session stops. Scope per increment:
+
+1. ✅ **TMDB client** — `reeltalk.core.tmdb`: v3 `search_films` (paginated) / `get_film_details` (credits+images) / `download_poster` / `film_fields_from_tmdb`; `TmdbError` subtypes (auth 401 / rate-limit 429 / network); settings read `REELTALK_TMDB_API_KEY` (D8). *(done 2026-09-08, `a4a6833`.)*
+2. ⬜ **Create-or-match (D7) + backfill function** — find-or-create the local Film for a TMDB hit (tmdb_id → title+year fallback that backfills a manual film), plus the D11 backfill loop (fetch details + poster, fill empty fields, 0.25 s pacing, per-film skip-on-error).
+3. ⬜ **Worker service** — `django-q2` dep, `Q_CLUSTER` (Postgres backend, no Redis), a `worker` compose service (same image, `qcluster`) that starts after web; the backfill task wrapper. Live check the worker comes up.
+4. ⬜ **Search views + suggest + dropdown** — global search page (TMDB-backed with local fallback, D6), click-through create-or-match route, one-click Watchlist POST per row, `/search/suggest/` JSON endpoint + header dropdown JS. **Exit bar: live-verify "search Blade Runner → add to watchlist → mark watched with a rating" — needs a TMDB API key in `.env`.**
+
+### M2 increment 1 — TMDB client (executed 2026-09-08, commit `a4a6833`)
+
+First increment of M2. The server-side TMDB v3 client in `reeltalk.core.tmdb` (R27) and the settings hook for the operator's key (D8). No model changes, no new runtime deps (`requests` was already in the audited set).
+
+**What landed:**
+- **Client** (`reeltalk/core/tmdb.py`): `search_films(query, page)` → one page of results with total counts; `get_film_details(tmdb_id)` (credits + images appended); `download_poster(path)` from the image CDN; `film_fields_from_tmdb(details)` mapping a detail payload onto Film field values. A `_get` helper centralizes HTTP + error mapping.
+- **Error types (R27):** `TmdbError` base with `TmdbAuthError` (401 bad key), `TmdbRateLimitError` (429), `TmdbNetworkError` (network failure / unexpected status) — so a view can show a user-facing message per §3.4 instead of a stack trace.
+- **Field mapping:** the TMDB overview is plain text — kept verbatim in `raw_description` and rendered to sanitized HTML for `description` via the existing `render_markdown`, so every description passes through one code path; cast capped at ten names (§3.4).
+- **Settings:** `TMDB_API_KEY = env.str("REELTALK_TMDB_API_KEY", default="")` (D8); `is_configured()` helper. Unset key means search degrades to local-library search (D6) rather than erroring — that degradation logic lands with the search views (increment 4).
+
+**Gotchas hit & fixed:**
+- **Patching settings in tests.** `monkeypatch.setattr("reeltalk.settings.TMDB_API_KEY", …)` was a silent no-op: under the test harness the settings module resolves to two distinct objects, so Django's `LazySettings` (`settings._wrapped`) is not the `reeltalk.settings` module. Use `override_settings(…)` — it patches the wrapped module Django actually reads. (Production is unaffected: uvicorn loads settings once.)
+
+**Test baseline:** before = 241 passed + 5 skipped. After = **258 passed, 5 skipped** (15 new client tests — config, search success/empty/401/429/network/500, details, poster download, field mapping incl. cast cap — plus 2 clean-room guard cases for the two new files). ruff check + format green; `makemigrations --check` no drift (no model changes).
+
+**Decisions:** R27 in §4 below (engineering call, recorded so the owner can veto).
+
 ### Clean-room guard (added 2026-09-07)
 
 Owner asked for assurance that no BookWyrm code is in the repo. Verified clean: git provenance (16 commits since the AGPLv3 seed `0f3c520`, no BookWyrm/legacy ancestry, single remote `minnixtx/reeltalk`), zero BookWyrm markers in any `.py`/template/static file or dependency — the only mentions are the attribution prose REWRITE.md rule 5 requires. To keep that guarantee self-enforcing, `reeltalk/tests/test_clean_room.py` scans every project file for telltale strings (`bookwyrm`, `mouse reeve`, `anti-capitalist`, word-boundary `acrl`, case-insensitive). Discovery is a filesystem walk — the suite also runs inside the built image where there is no `.git`; top-level `static/`+`images/` (build artifacts/volumes), caches, `.venv`, and gitignored local files are skipped. Only the four attribution docs and the guard itself are whitelisted, deliberately by hand. Suite baseline: **145 passed + 5 skipped** (the whitelist).
@@ -254,3 +280,4 @@ New owner decisions for the rewrite are recorded here, numbered R1, R2, … The 
 - **R24 — Site settings singleton + v0.1 signup policy semantics.** `SiteSettings` is a single row (pk=1, created on first use) in `reeltalk.social`, admin-managed: instance name/description (plain text, auto-escaped at render) and the §3.7 signup policy (`open`/`invite`). In v0.1 `invite` means **closed** — accounts are created by an admin; the invite mechanism itself is a later deliberate step (§3 does not specify one, so none was invented unilaterally). The first-run wizard (R12) is unaffected: it precedes settings and always creates the admin. Owner may veto.
 - **R25 — Link-domain allowlist semantics + write-time enforcement.** `LinkDomain` rows gate outbound hrefs in user-authored markdown: a host matches when equal to an allowed domain or a subdomain of it (case-insensitive; port/userinfo stripped before matching; deny-by-default, so an empty list strips every external link from reviews/descriptions — anchor text stays). Enforced at write time inside `render_markdown` via bleach's per-tag attribute filter, so stored HTML never carries a disallowed href and no read-time filtering is needed. Owner may veto.
 - **R26 — Film merge/absorb tool shape.** The §3.7 v0.1 admin "film merge/absorb tool" is a staff-only custom view at `/admin/films/merge/` (the ModelAdmin framework has no multi-object action) rendered in the admin chrome: pick one canonical film + N absorbed rows; the batch runs `Film.merge_into` inside one outer transaction so a mid-batch failure rolls back every merge in it. The form rejects selecting the canonical as its own absorb; all merge semantics stay on the model (R16). Owner may veto.
+- **R27 — TMDB client shape (M2).** The v3 client lives in `reeltalk.core.tmdb` (film domain, per R9) and is server-side only (D8 key shared by all users; no browser calls). Failures map to a `TmdbError` base with three subtypes the spec calls out — `TmdbAuthError` (401), `TmdbRateLimitError` (429), `TmdbNetworkError` (network / unexpected status) — so views show a user-facing message rather than a stack trace. The TMDB overview is plain text: it is stored verbatim in `raw_description` and rendered to sanitized HTML for `description` via the existing `render_markdown` (one description code path; cast capped at ten). The client makes no DB calls itself — create-or-match and backfill act on films and import from here. Owner may veto.
