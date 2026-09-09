@@ -6,13 +6,19 @@ binary watch state (D1) lives on the Shelf/ShelfFilm side, not here.
 """
 
 import re
+from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
+
+if TYPE_CHECKING:
+    from reeltalk.social.models import User
 
 # Leading article stripped for sort_title and the title/year dedup fallback
 # (D7). One leading article only; "The The X" keeps its second "the".
@@ -439,13 +445,92 @@ class Status(models.Model):
 
         The user's own non-deleted statuses plus those of the users they
         follow, newest first (Meta ordering). Groups join the union when they
-        land (M5); blocks and feed filters are M4/M5 (R13). D3 stands: no
-        automatic notes exist — only reviews/ratings/comments are shareable.
+        land (M5); blocks and feed filters are M4/M5 (R13). The home feed is
+        built on this by ``feed_entries``: shelf events are derived from the
+        members' ShelfFilm rows, and a user's review of a watched film rides
+        on its "watched" entry instead of appearing twice (R35).
         """
         followed = list(user.follows.values_list("id", flat=True))
         return cls.objects.filter(
             Q(user=user) | Q(user_id__in=followed), deleted=False
         ).select_related("user", "film")
+
+
+@dataclass
+class FeedEntry:
+    """One home-feed row (R35).
+
+    ``kind`` is ``"watchlist"`` or ``"watched"`` for a shelf event — the two
+    events D3 used to suppress, shown per R33 — or ``"status"`` for a status
+    row of its own. A watched entry carries the user's D5 review rating and
+    text when they have one; the review is not a separate row.
+    """
+
+    kind: str
+    # social.User — string reference only; core must not import social at
+    # module level (social imports this module for the default shelves).
+    user: "User"
+    film: Film | None
+    date: datetime
+    rating: Decimal | None = None
+    content: str = ""
+
+
+def feed_entries(user) -> list[FeedEntry]:
+    """The user's home-feed entries, newest first (R33; shape per R35).
+
+    Membership is the existing feed rule — own + followed users. The two
+    shelf events D3 used to suppress are derived from the members' to-read /
+    read ``ShelfFilm`` rows: "added Y to their Watchlist" and "watched Y".
+    A watched entry carries that user's D5 review rating + text, so the
+    review is not a second row; everything else ``Status.feed_for`` returns
+    (comments, reviews without a Watched row) appears as its own entry.
+    """
+    member_ids = [user.id] + list(user.follows.values_list("id", flat=True))
+
+    entries: list[FeedEntry] = []
+    for row in (
+        ShelfFilm.objects.filter(
+            user_id__in=member_ids,
+            shelf__identifier__in=[Shelf.TO_READ, Shelf.READ],
+        )
+        .select_related("user", "film")
+        .order_by("-shelved_date", "id")
+    ):
+        kind = "watchlist" if row.shelf.identifier == Shelf.TO_READ else "watched"
+        entries.append(
+            FeedEntry(kind=kind, user=row.user, film=row.film, date=row.shelved_date)
+        )
+
+    watched = {
+        (entry.user.id, entry.film.id): entry
+        for entry in entries
+        if entry.kind == "watched" and entry.film is not None
+    }
+    for status in Status.feed_for(user):
+        # Only the user's D5 review folds into its watched entry — a comment
+        # on a watched film is still its own row.
+        target = (
+            watched.get((status.user_id, status.film_id)) if status.is_review else None
+        )
+        if target is not None:
+            target.rating = status.rating
+            target.content = status.content
+            continue
+        entries.append(
+            FeedEntry(
+                kind="status",
+                user=status.user,
+                film=status.film,
+                date=status.published_date,
+                rating=status.rating,
+                content=status.content,
+            )
+        )
+
+    # Stable sort: shelf events keep their ordering among equal timestamps.
+    entries.sort(key=lambda entry: entry.date, reverse=True)
+    return entries
 
 
 def validate_star_rating(rating) -> Decimal:

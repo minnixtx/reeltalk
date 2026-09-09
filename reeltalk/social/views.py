@@ -12,7 +12,7 @@ from django.contrib.auth import login
 from django.shortcuts import get_object_or_404, redirect, render
 
 import reeltalk
-from reeltalk.core.models import Shelf, Status
+from reeltalk.core.models import Shelf, feed_entries
 
 from .forms import SignupForm
 from .models import SiteSettings, User
@@ -27,9 +27,9 @@ def index(request):
         return redirect("setup")
     data = {"site": SiteSettings.get_instance()}
     if request.user.is_authenticated:
-        # The minimal v0.1 timeline (§3.6/§3.7); anonymous visitors get the
-        # landing page only.
-        data["feed"] = Status.feed_for(request.user)
+        # The v0.1 timeline (§3.6/§3.7): shelf events + statuses (R33/R35);
+        # anonymous visitors get the landing page only.
+        data["feed"] = feed_entries(request.user)
     return render(request, "home.html", data)
 
 

@@ -13,22 +13,22 @@
     <h2>Feed</h2>
     {% if feed %}
       <ul class="review-list">
-        {% for status in feed %}
+        {% for entry in feed %}
           <li class="review">
             <div class="review-head">
-              <span class="review-author">{{ status.user.localname }}</span>
-              {% if status.rating %}<span title="{{ status.rating|floatformat:'-1' }} / 5">{{ status.rating|stars }}</span>{% endif %}
-              <span class="muted">{{ status.published_date|date:"Y-m-d" }}</span>
+              <span class="review-author">{{ entry.user.localname }}</span>
+              {% if entry.rating %}<span title="{{ entry.rating|floatformat:'-1' }} / 5">{{ entry.rating|stars }}</span>{% endif %}
+              <span class="muted">{{ entry.date|date:"Y-m-d" }}</span>
             </div>
-            {% if status.film %}
-              <p class="feed-film"><a href="{% url 'film' status.film.id %}">{{ status.film.title }}{% if status.film.year %} ({{ status.film.year }}){% endif %}</a></p>
+            {% if entry.film %}
+              <p class="feed-film">{% if entry.kind == "watchlist" %}added {% elif entry.kind == "watched" %}watched {% endif %}<a href="{% url 'film' entry.film.id %}">{{ entry.film.title }}{% if entry.film.year %} ({{ entry.film.year }}){% endif %}</a>{% if entry.kind == "watchlist" %} to their Watchlist{% endif %}</p>
             {% endif %}
-            {% if status.content %}<div class="review-body">{{ status.content|safe }}</div>{% endif %}
+            {% if entry.content %}<div class="review-body">{{ entry.content|safe }}</div>{% endif %}
           </li>
         {% endfor %}
       </ul>
     {% else %}
-      <p class="muted">No posts yet — mark a film watched to share your first review.</p>
+      <p class="muted">Nothing here yet — add a film to your watchlist or mark one watched.</p>
     {% endif %}
   </section>
 {% else %}

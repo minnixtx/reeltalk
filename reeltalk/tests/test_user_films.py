@@ -1,10 +1,13 @@
-"""User films page + minimal feed tests (M1 increment 6).
+"""User films page + home feed tests (M1 increment 6, R33).
 
 The films page (PLAN.md §3.3 rule 1, D1): the User query API
 (films_on_shelf / all_films with the rating annotation) and the view —
 exactly three tabs, All films / Watchlist / Watched, tab filtering, public
-readability. The minimal home feed (§3.6/§3.7 v0.1): Status.feed_for (own +
-followed users' statuses, newest first, no deleted) and the home page.
+readability. The home feed (§3.6/§3.7 v0.1): Status.feed_for (own + followed
+users' statuses, newest first, no deleted), and the shelf events of R33 —
+feed_entries derives "added to Watchlist" / "watched" entries from the
+members' ShelfFilm rows, folding a watched film's D5 review into its watched
+entry (R35).
 """
 
 from datetime import timedelta
@@ -15,7 +18,16 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from django.utils import timezone
 
-from reeltalk.core.models import Film, Shelf, ShelfFilm, Status, mark_watched
+from reeltalk.core.models import (
+    Film,
+    Shelf,
+    ShelfFilm,
+    Status,
+    feed_entries,
+    mark_watched,
+    shelve_to_watchlist,
+    unshelve_from_watchlist,
+)
 
 User = get_user_model()
 
@@ -273,3 +285,175 @@ def test_home_anonymous_has_no_feed(client, admin):
     body = resp.content.decode()
     assert 'class="feed"' not in body
     assert "Sign up" in body
+
+
+# --- Home feed with shelf events (R33; shape per R35) -------------------------
+
+
+@pytest.mark.django_db
+def test_feed_entries_shows_watchlist_addition(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    dune = Film.objects.create(title="Dune", year=2021)
+    assert shelve_to_watchlist(alice, dune) == "added"
+    entries = feed_entries(alice)
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.kind == "watchlist"
+    assert entry.user == alice
+    assert entry.film == dune
+    assert entry.rating is None
+    assert entry.content == ""
+
+
+@pytest.mark.django_db
+def test_feed_entries_watched_carries_the_review(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    dune = Film.objects.create(title="Dune", year=2021)
+    mark_watched(
+        alice,
+        dune,
+        rating="4.5",
+        content="<p>Desert planet.</p>",
+        raw_content="Desert planet.",
+    )
+    # The D5 review rides on the watched entry — one row, not two.
+    entries = feed_entries(alice)
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.kind == "watched"
+    assert entry.rating == Decimal("4.5")
+    assert entry.content == "<p>Desert planet.</p>"
+
+
+@pytest.mark.django_db
+def test_feed_entries_watched_without_review_is_bare(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    dune = Film.objects.create(title="Dune", year=2021)
+    mark_watched(alice, dune, rating="3")
+    Status.objects.get(user=alice, film=dune).delete()  # soft delete
+    entries = feed_entries(alice)
+    assert len(entries) == 1
+    assert entries[0].kind == "watched"
+    assert entries[0].rating is None
+    assert entries[0].content == ""
+
+
+@pytest.mark.django_db
+def test_feed_entries_membership_own_plus_followed(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    alice.follows.add(bob)
+    dune = Film.objects.create(title="Dune", year=2021)
+    blade = Film.objects.create(title="Blade Runner", year=1982)
+    arrival = Film.objects.create(title="Arrival", year=2016)
+    shelve_to_watchlist(alice, dune)
+    mark_watched(bob, blade, rating="4")
+    shelve_to_watchlist(carol, arrival)  # a stranger's event — excluded
+    got = {(e.user.localname, e.kind) for e in feed_entries(alice)}
+    assert got == {("alice", "watchlist"), ("bob", "watched")}
+
+
+@pytest.mark.django_db
+def test_feed_entries_orders_newest_first_across_kinds(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    dune = Film.objects.create(title="Dune", year=2021)
+    blade = Film.objects.create(title="Blade Runner", year=1982)
+    to_read = Shelf.objects.get(user=alice, identifier=Shelf.TO_READ)
+    ShelfFilm.objects.create(
+        shelf=to_read,
+        film=dune,
+        user=alice,
+        shelved_date=timezone.now() - timedelta(days=1),
+    )
+    mark_watched(alice, blade, rating="4")  # now — newer than the watchlist row
+    entries = feed_entries(alice)
+    assert [(e.kind, e.film.title) for e in entries] == [
+        ("watched", "Blade Runner"),
+        ("watchlist", "Dune"),
+    ]
+
+
+@pytest.mark.django_db
+def test_feed_entries_watchlist_to_watched_transition(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    dune = Film.objects.create(title="Dune", year=2021)
+    shelve_to_watchlist(alice, dune)
+    assert {e.kind for e in feed_entries(alice)} == {"watchlist"}
+    mark_watched(alice, dune, rating="4")  # D1: off Watchlist, onto Watched
+    entries = feed_entries(alice)
+    assert len(entries) == 1
+    assert entries[0].kind == "watched"
+
+
+@pytest.mark.django_db
+def test_feed_entries_unshelve_removes_the_event(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    dune = Film.objects.create(title="Dune", year=2021)
+    shelve_to_watchlist(alice, dune)
+    assert unshelve_from_watchlist(alice, dune) is True
+    assert feed_entries(alice) == []
+
+
+@pytest.mark.django_db
+def test_feed_entries_review_without_shelf_row_stands_alone(db):
+    # Not reachable locally in v0.1 (mark_watched always shelves); remote
+    # mirrors may bring it — the review still shows as its own entry.
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    dune = Film.objects.create(title="Dune", year=2021)
+    Status.objects.create(
+        user=alice,
+        film=dune,
+        status_type=Status.Type.REVIEW,
+        rating="4",
+        content="<p>Heard about it.</p>",
+    )
+    entries = feed_entries(alice)
+    assert len(entries) == 1
+    assert entries[0].kind == "status"
+    assert entries[0].content == "<p>Heard about it.</p>"
+
+
+@pytest.mark.django_db
+def test_feed_entries_comment_on_watched_film_stays_separate(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    dune = Film.objects.create(title="Dune", year=2021)
+    mark_watched(alice, dune, rating="4")
+    Status.objects.create(
+        user=alice, film=dune, status_type=Status.Type.COMMENT, content="<p>Update.</p>"
+    )
+    kinds = sorted(e.kind for e in feed_entries(alice))
+    assert kinds == ["status", "watched"]
+
+
+# --- Home page with shelf events ----------------------------------------------
+
+
+@pytest.mark.django_db
+def test_home_feed_renders_watchlist_event(login, user, film, admin):
+    shelve_to_watchlist(user, film)
+    body = login.get("/").content.decode()
+    assert "added" in body
+    assert "to their Watchlist" in body
+
+
+@pytest.mark.django_db
+def test_home_feed_renders_watched_event_with_review(login, user, film, admin):
+    mark_watched(
+        user,
+        film,
+        rating="4.5",
+        content="<p>Desert planet.</p>",
+        raw_content="Desert planet.",
+    )
+    body = login.get("/").content.decode()
+    assert "watched" in body
+    assert "width:90%" in body  # the 4.5/5 star fill
+    assert "Desert planet." in body
+
+
+@pytest.mark.django_db
+def test_home_feed_watched_review_is_a_single_row(login, user, film, admin):
+    mark_watched(user, film, rating="4", content="<p>Once.</p>", raw_content="Once.")
+    body = login.get("/").content.decode()
+    assert body.count("<p>Once.</p>") == 1
