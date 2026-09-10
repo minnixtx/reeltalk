@@ -19,6 +19,8 @@
     <nav>
       {% if user.is_authenticated %}
         <a href="{% url 'user-films' user.localname %}">My films</a>
+        <a href="{% url 'import-films' %}">Import</a>
+        <a href="{% url 'export-films' %}">Export</a>
         <span class="who">{{ user.localname }}</span>
         <form method="post" action="{% url 'logout' %}" class="inline">
           {% csrf_token %}

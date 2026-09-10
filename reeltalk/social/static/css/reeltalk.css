@@ -587,3 +587,24 @@ ul.errorlist {
   gap: 1rem;
   margin-top: 1rem;
 }
+
+/* --- File import/export (M3) ----------------------------------------------- */
+
+table.results {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin: 1rem 0;
+}
+
+table.results th,
+table.results td {
+  text-align: left;
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+table.results th {
+  color: var(--muted);
+  font-weight: 600;
+}

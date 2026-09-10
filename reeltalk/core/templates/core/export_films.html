@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Export films — ReelTalk{% endblock %}
+
+{% block content %}
+<h1>Export films</h1>
+<p class="muted">
+  Download your film list as a TMDB-format CSV — one row per film on your
+  shelves or with a review or comment. It is the same format the import
+  accepts, so an export re-imports without changes.
+</p>
+<form method="post">
+  {% csrf_token %}
+  <button type="submit">Download my film list</button>
+</form>
+{% endblock %}

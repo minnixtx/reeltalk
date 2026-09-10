@@ -9,13 +9,19 @@ from urllib.parse import quote
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from .catalog import create_or_match_film, search_local
 from .forms import FilmForm
+from .import_export import (
+    TmdbCsvError,
+    export_film_csv,
+    import_film_csv,
+    parse_tmdb_csv,
+)
 from .models import (
     Film,
     Shelf,
@@ -347,3 +353,55 @@ def search_suggest(request):
                 }
             )
     return JsonResponse({"results": rows[:SUGGEST_LIMIT]})
+
+
+# --- File import/export (M3, D9/D10) -----------------------------------------
+
+
+@login_required
+def import_films(request):
+    """TMDB-CSV import (D9): upload page, then per-row results + summary.
+
+    The view only handles the upload — utf-8-sig decode (TMDB exports carry a
+    BOM), header validation, and the row cap; matching/shelving/rating all
+    live in ``import_export``. The D11 backfill for the imported ID stubs is
+    queued on commit inside ``import_film_csv``.
+    """
+    if not request.user.local:
+        # Import is a local-user feature (§3.5); remote mirrors are M4.
+        messages.error(request, "Film import is only available on your home instance.")
+        return redirect("user-films", localname=request.user.localname)
+
+    data = {}
+    if request.method == "POST":
+        upload = request.FILES.get("csv_file")
+        if not upload:
+            messages.error(request, "Choose a CSV file to import.")
+        else:
+            try:
+                text = upload.read().decode("utf-8-sig")
+            except UnicodeDecodeError:
+                messages.error(
+                    request, "That file isn't readable UTF-8; expected a CSV export."
+                )
+            else:
+                try:
+                    rows = parse_tmdb_csv(text)
+                except TmdbCsvError as exc:
+                    messages.error(request, str(exc))
+                else:
+                    data = import_film_csv(request.user, rows)
+    return render(request, "core/import_films.html", data)
+
+
+@login_required
+def export_films(request):
+    """TMDB-CSV export (D10): a page with a download button; POST streams CSV."""
+    if request.method == "POST":
+        disposition = 'attachment; filename="reeltalk-export.csv"'
+        return HttpResponse(
+            export_film_csv(request.user),
+            content_type="text/csv",
+            headers={"Content-Disposition": disposition},
+        )
+    return render(request, "core/export_films.html")

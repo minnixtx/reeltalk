@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Import films — ReelTalk{% endblock %}
+
+{% block content %}
+<h1>Import films</h1>
+<p class="muted">
+  Upload a TMDB film-list export (the ten-column CSV format). Unrated rows go
+  to your Watchlist; rated rows are marked watched with the rating converted
+  to stars. Films are matched by TMDB ID, then IMDb ID, then title + year —
+  metadata is filled in from TMDB in the background after the import.
+</p>
+
+{% if results %}
+<h2>Results</h2>
+<p>{{ summary.total }} rows: {{ summary.created }} created, {{ summary.matched }} matched, {{ summary.skipped }} skipped{% if backfill_queued %} — metadata backfill queued in the background{% endif %}.</p>
+<table class="results">
+  <thead>
+    <tr><th>Line</th><th>Name</th><th>Status</th><th>Note</th></tr>
+  </thead>
+  <tbody>
+    {% for row in results %}
+    <tr>
+      <td>{{ row.line }}</td>
+      <td>{{ row.name }}</td>
+      <td>{{ row.status }}</td>
+      <td>{{ row.note }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>{% if results %}Import another file{% else %}Choose a file{% endif %}</h2>
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  <input type="file" name="csv_file" accept=".csv,text/csv" required>
+  <button type="submit">Import</button>
+</form>
+{% endblock %}

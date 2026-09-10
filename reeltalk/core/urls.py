@@ -29,4 +29,7 @@ urlpatterns = [
         views.mark_watched_view,
         name="film-mark-watched",
     ),
+    # File import/export (M3, D9/D10) — the §3.5 preferences routes.
+    path("preferences/import/", views.import_films, name="import-films"),
+    path("preferences/export/", views.export_films, name="export-films"),
 ]

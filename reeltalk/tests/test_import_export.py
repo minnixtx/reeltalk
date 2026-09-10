@@ -13,7 +13,9 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import Client, TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 from django_q.models import OrmQ, SignedPackage
 
@@ -512,3 +514,123 @@ def test_export_reimport_is_a_noop(user):
     review.refresh_from_db()
     assert review.rating == Decimal("4.5")
     assert review.content == "<p>tears</p>"
+
+
+# --- views (§3.5 surface) ----------------------------------------------------
+
+
+@pytest.fixture
+def client():
+    return Client()
+
+
+@pytest.fixture
+def login(client, user):
+    assert client.login(username="alice", password="s3cretpass")
+    return client
+
+
+def _upload(client, text: str):
+    file = SimpleUploadedFile(
+        "export.csv", text.encode("utf-8"), content_type="text/csv"
+    )
+    return client.post(reverse("import-films"), {"csv_file": file})
+
+
+@pytest.mark.django_db
+def test_import_page_requires_login(client):
+    resp = client.get(reverse("import-films"))
+    assert resp.status_code == 302
+    assert "/login/" in resp["Location"]
+
+
+@pytest.mark.django_db
+def test_import_get_shows_upload_form(login):
+    resp = login.get(reverse("import-films"))
+    assert resp.status_code == 200
+    assert 'name="csv_file"' in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_import_post_without_file_shows_error(login):
+    resp = login.post(reverse("import-films"), {})
+    assert b"Choose a CSV file to import." in resp.content
+
+
+@pytest.mark.django_db
+def test_import_rejects_unrecognized_header(login):
+    header = [c for c in TMDB_CSV_HEADER if c != "TMDb ID"]
+    resp = _upload(login, _csv_text(_row(), header=header))
+    assert b"missing column(s)" in resp.content
+    assert b"TMDb ID" in resp.content
+    assert Film.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_import_rejects_non_utf8(login):
+    file = SimpleUploadedFile("bad.csv", b"\xff\xfeTMDb ID", content_type="text/csv")
+    resp = login.post(reverse("import-films"), {"csv_file": file})
+    # (the apostrophe in the message is HTML-escaped on render)
+    assert b"readable UTF-8" in resp.content
+
+
+@pytest.mark.django_db
+def test_import_rejects_over_row_cap(login, monkeypatch):
+    monkeypatch.setattr(import_export, "MAX_IMPORT_ROWS", 2)
+    text = _csv_text(_row(name="A"), _row(name="B"), _row(name="C"))
+    resp = _upload(login, text)
+    assert b"limited to 2" in resp.content
+
+
+@pytest.mark.django_db
+def test_import_bom_prefix_is_stripped(login):
+    # TMDB exports carry a UTF-8 BOM; the utf-8-sig decode must swallow it.
+    text = "\ufeff" + _csv_text(_row(name="Bom Film"))
+    resp = _upload(login, text)
+    assert b"Bom Film" in resp.content
+    assert Film.objects.filter(title="Bom Film").exists()
+
+
+@pytest.mark.django_db
+@override_settings(TMDB_API_KEY="k")
+def test_import_post_renders_results_and_queues_backfill(login):
+    text = _csv_text(
+        _row(name="Alpha", tmdb_id="1"),
+        _row(type="tv", name="A Series"),
+        _row(name="Beta", your_rating="9"),
+    )
+    with TestCase.captureOnCommitCallbacks(execute=True):
+        resp = _upload(login, text)
+    body = resp.content.decode()
+    assert "3 rows: 2 created, 0 matched, 1 skipped" in body
+    assert "not a movie (tv)" in body
+    assert "Watched — 4.5 stars" in body
+    assert "metadata backfill queued in the background" in body
+    # The D11 backfill carries both imported films (the skipped row none).
+    package = SignedPackage.loads(OrmQ.objects.get().payload)
+    expected_ids = sorted(Film.objects.values_list("id", flat=True))
+    assert tuple(package["args"]) == (expected_ids,)
+
+
+@pytest.mark.django_db
+def test_export_page_and_download(login, user):
+    film = Film.objects.create(title="Test Film", year=1976, tmdb_id=42)
+    watchlist = shelf_of(user, Shelf.TO_READ)
+    ShelfFilm.objects.create(shelf=watchlist, film=film, user=user)
+    page = login.get(reverse("export-films"))
+    assert page.status_code == 200
+    resp = login.post(reverse("export-films"))
+    assert resp["Content-Type"] == "text/csv"
+    assert 'attachment; filename="reeltalk-export.csv"' in resp["Content-Disposition"]
+    lines = resp.content.decode().split("\r\n")
+    assert lines[0] == ",".join(TMDB_CSV_HEADER)
+    assert "Test Film,1976-01-01T00:00:00Z" in lines[1]
+
+
+@pytest.mark.django_db
+def test_import_non_local_user_is_redirected(db, client):
+    User.objects.create_user(localname="remote", password="s3cretpass", local=False)
+    assert client.login(username="remote", password="s3cretpass")
+    resp = client.get(reverse("import-films"))
+    assert resp.status_code == 302
+    assert "/user/remote/films/" in resp["Location"]
