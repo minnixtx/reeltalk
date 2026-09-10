@@ -582,7 +582,7 @@ ul.errorlist {
   cursor: default;
 }
 
-.search-pager {
+.pager {
   display: flex;
   gap: 1rem;
   margin-top: 1rem;

@@ -9,6 +9,8 @@ policy (§3.7): open, or closed until an admin creates the account.
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
+from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 
 import reeltalk
@@ -89,11 +91,17 @@ def setup(request):
     return render(request, "social/setup.html", {"form": form})
 
 
+# The owner's 1,378-film watchlist crashed the browser rendered in one page
+# (2026-09-10); ~50 rows keeps every tab light.
+USER_FILMS_PAGE_SIZE = 50
+
+
 def user_films(request, localname):
     """A user's films page: All / Watchlist / Watched (§3.3 rule 1, D1).
 
     Exactly three tabs — D1's binary model leaves no room for more. The view
-    only picks the tab's queryset; query/shelf logic lives on the User model.
+    picks the tab's queryset and paginates it (~50/page); query/shelf logic
+    lives on the User model.
     """
     profile = get_object_or_404(User, localname=localname)
     tab = request.GET.get("tab", "all")
@@ -105,8 +113,24 @@ def user_films(request, localname):
         films = profile.films_on_shelf(Shelf.READ)
     else:
         films = profile.all_films()
+    paginator = Paginator(films, USER_FILMS_PAGE_SIZE)
+    try:
+        page_obj = paginator.page(request.GET.get("page"))
+    except PageNotAnInteger:
+        page_obj = paginator.page(1)
+    except EmptyPage:
+        raise Http404("Page not found.") from None
+    # Pagination links keep the active tab in the URL (the "all" tab has no
+    # query param, matching the tab nav).
+    page_query = "?" if tab == "all" else f"?tab={tab}&"
     return render(
         request,
         "social/user_films.html",
-        {"profile_user": profile, "tab": tab, "films": films},
+        {
+            "profile_user": profile,
+            "tab": tab,
+            "films": page_obj.object_list,
+            "page_obj": page_obj,
+            "page_query": page_query,
+        },
     )

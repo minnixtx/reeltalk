@@ -139,6 +139,9 @@ class User(AbstractBaseUser, PermissionsMixin):
 
         D5 allows at most one live review per user per film, so the subquery
         is unambiguous; ``user_rating`` is None when the user hasn't reviewed.
+        The deterministic order (sort title, year, id) keeps the films page's
+        pagination stable — id breaks sort-title ties and orders year-less
+        stubs.
         """
         rating = (
             Status.objects.filter(
@@ -150,7 +153,9 @@ class User(AbstractBaseUser, PermissionsMixin):
             .order_by("-id")
             .values("rating")[:1]
         )
-        return films.annotate(user_rating=Subquery(rating))
+        return films.order_by("sort_title", "year", "id").annotate(
+            user_rating=Subquery(rating)
+        )
 
 
 class SiteSettings(models.Model):

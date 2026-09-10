@@ -194,6 +194,62 @@ def test_user_films_links_to_film_pages(login, user, film):
     assert f'href="/film/{film.id}/"' in body
 
 
+# --- Pagination (2026-09-10 owner bug: a 1,378-film watchlist crashed the
+# browser when the whole tab rendered at once) ---------------------------------
+
+
+def _shelve_n(user, n, prefix="Pag Film"):
+    """Shelve ``n`` alphabetically-ordered films onto the user's Watchlist."""
+    to_read = Shelf.objects.get(user=user, identifier=Shelf.TO_READ)
+    for i in range(1, n + 1):
+        film = Film.objects.create(title=f"{prefix} {i:02d}", year=2000 + i)
+        ShelfFilm.objects.create(shelf=to_read, film=film, user=user)
+
+
+@pytest.mark.django_db
+def test_user_films_paginates_50_per_page(login, user):
+    _shelve_n(user, 52)
+    body = login.get("/user/alice/films/?tab=watchlist").content.decode()
+    assert "Pag Film 01" in body
+    assert "Pag Film 50" in body
+    assert "Pag Film 51" not in body  # lands on page 2
+    assert "Page 1 of 2" in body
+
+
+@pytest.mark.django_db
+def test_user_films_pagination_links_preserve_tab(login, user):
+    _shelve_n(user, 52)
+    body = login.get("/user/alice/films/?tab=watchlist").content.decode()
+    # & renders as &amp; in the attribute (the browser decodes it on click).
+    assert 'href="?tab=watchlist&amp;page=2"' in body  # next keeps the tab
+    page2 = login.get("/user/alice/films/?tab=watchlist&page=2")
+    body2 = page2.content.decode()
+    assert "Pag Film 51" in body2 and "Pag Film 01" not in body2
+    assert 'href="?tab=watchlist&amp;page=1"' in body2  # prev keeps the tab too
+    assert "page=3" not in body2  # no next on the last page
+
+
+@pytest.mark.django_db
+def test_user_films_all_tab_pagination_has_no_tab_param(login, user):
+    _shelve_n(user, 52)
+    body = login.get("/user/alice/films/").content.decode()
+    assert 'href="?page=2"' in body  # the "all" tab has no ?tab=
+
+
+@pytest.mark.django_db
+def test_user_films_out_of_range_page_404s(login, user):
+    _shelve_n(user, 1)
+    assert login.get("/user/alice/films/?tab=watchlist&page=99").status_code == 404
+
+
+@pytest.mark.django_db
+def test_user_films_non_integer_page_falls_back_to_first(login, user):
+    _shelve_n(user, 1)
+    resp = login.get("/user/alice/films/?tab=watchlist&page=bogus")
+    assert resp.status_code == 200
+    assert "Pag Film 01" in resp.content.decode()
+
+
 # --- minimal home feed (§3.6/§3.7 v0.1) ---------------------------------------
 
 

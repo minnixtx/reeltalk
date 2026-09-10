@@ -37,7 +37,7 @@
     {% endfor %}
   </ul>
   {% if source == "tmdb" and total_pages > 1 %}
-    <nav class="search-pager">
+    <nav class="pager">
       {% if page > 1 %}<a href="?q={{ query|urlencode }}&amp;page={{ page|add:"-1" }}">← Previous</a>{% endif %}
       {% if page < total_pages %}<a href="?q={{ query|urlencode }}&amp;page={{ page|add:"1" }}">Next →</a>{% endif %}
     </nav>
