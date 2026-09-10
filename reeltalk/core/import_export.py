@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import io
+from datetime import UTC
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django.db import transaction
@@ -236,3 +237,55 @@ def import_film_csv(user, rows: list[dict]) -> dict:
     if backfill_queued:
         transaction.on_commit(lambda: enqueue_backfill(film_ids))
     return {"results": results, "summary": summary, "backfill_queued": backfill_queued}
+
+
+def export_film_csv(user) -> str:
+    """D10: the user's film list as a canonical TMDB-format CSV.
+
+    One row per film with any relationship — shelved / reviewed / commented,
+    i.e. ``User.all_films`` — in deterministic order (sort title, year, id),
+    so repeated exports are byte-identical. Your Rating is the user's most
+    recent rated review ×2 (TMDB's 1–10 scale); Date Rated is that review's
+    published date in UTC. Review text drops out by design — the format
+    carries ratings, not reviews — which is what lets an export re-import as
+    a no-op: unrated rows re-shelve onto an already-filled Watchlist, rated
+    rows meet the existing-review guard.
+    """
+    films = user.all_films()
+
+    # D5 allows at most one live review per user per film; keep the first (most
+    # recent) rated one per film from a single query — no N+1.
+    latest_rated: dict[int, Status] = {}
+    for status in Status.objects.filter(
+        user=user,
+        deleted=False,
+        film__isnull=False,
+        status_type__in=list(Status.REVIEW_TYPES),
+        rating__isnull=False,
+    ).order_by("film_id", "-published_date"):
+        latest_rated.setdefault(status.film_id, status)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(TMDB_CSV_HEADER)
+    for film in sorted(films, key=lambda f: (f.sort_title, f.year or 0, f.id)):
+        review = latest_rated.get(film.id)
+        writer.writerow(
+            [
+                film.tmdb_id or "",
+                film.imdb_id or "",
+                "movie",
+                film.title,
+                # Only the year is stored: emit it as a Jan 1 date so a
+                # round-trip import can read it back.
+                f"{film.year}-01-01T00:00:00Z" if film.year else "",
+                "",  # Season Number
+                "",  # Episode Number
+                "",  # Rating (TMDB community score — not stored)
+                int(review.rating * 2) if review else "",
+                review.published_date.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+                if review
+                else "",
+            ]
+        )
+    return buf.getvalue()

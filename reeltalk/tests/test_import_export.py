@@ -8,17 +8,20 @@ shape test_tasks.py checks).
 
 import csv
 import io
+from datetime import datetime
 from decimal import Decimal
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from django_q.models import OrmQ, SignedPackage
 
 from reeltalk.core import import_export
 from reeltalk.core.import_export import (
     TMDB_CSV_HEADER,
     TmdbCsvError,
+    export_film_csv,
     find_or_create_film_stub,
     import_film_csv,
     import_row,
@@ -366,3 +369,146 @@ def test_import_does_not_queue_backfill_without_a_key(user):
         result = import_film_csv(user, [_row(name="Alpha")])
     assert result["backfill_queued"] is False
     assert OrmQ.objects.count() == 0
+
+
+# --- export_film_csv (D10) ---------------------------------------------------
+
+
+def _export_rows(user):
+    """The exported CSV as (header, row dicts)."""
+    reader = csv.DictReader(io.StringIO(export_film_csv(user)))
+    return reader.fieldnames, list(reader)
+
+
+@pytest.mark.django_db
+def test_export_unrated_film_row_is_byte_exact(user):
+    film = Film.objects.create(
+        title="Test Film", year=1976, tmdb_id=42, imdb_id="tt0075344"
+    )
+    watchlist = shelf_of(user, Shelf.TO_READ)
+    ShelfFilm.objects.create(shelf=watchlist, film=film, user=user)
+    text = export_film_csv(user)
+    lines = text.split("\r\n")
+    assert lines[0] == ",".join(TMDB_CSV_HEADER)
+    # Five empty trailing columns: season, episode, rating, your rating, date.
+    assert lines[1] == "42,tt0075344,movie,Test Film,1976-01-01T00:00:00Z,,,,,"
+
+
+@pytest.mark.django_db
+def test_export_only_films_with_a_relationship(user):
+    related = Film.objects.create(title="Related", year=2000, tmdb_id=1)
+    Film.objects.create(title="Unrelated", year=2001, tmdb_id=2)
+    watchlist = shelf_of(user, Shelf.TO_READ)
+    ShelfFilm.objects.create(shelf=watchlist, film=related, user=user)
+    _, rows = _export_rows(user)
+    assert [r["Name"] for r in rows] == ["Related"]
+
+
+@pytest.mark.django_db
+def test_export_rated_review_row(user):
+    film = Film.objects.create(title="Test Film", year=1976, tmdb_id=42)
+    Status.objects.create(
+        user=user,
+        film=film,
+        status_type=Status.Type.REVIEW,
+        rating=Decimal("4.5"),
+        content="<p>good</p>",
+        published_date=timezone.make_aware(datetime(2026, 9, 1, 12, 30, 15)),
+    )
+    _, rows = _export_rows(user)
+    assert rows[0]["Your Rating"] == "9"
+    assert rows[0]["Date Rated"] == "2026-09-01T12:30:15Z"
+
+
+@pytest.mark.django_db
+def test_export_review_without_rating_exports_unrated(user):
+    film = Film.objects.create(title="Test Film", year=1976, tmdb_id=42)
+    watchlist = shelf_of(user, Shelf.TO_READ)
+    ShelfFilm.objects.create(shelf=watchlist, film=film, user=user)
+    Status.objects.create(
+        user=user, film=film, status_type=Status.Type.REVIEW, content="<p>no stars</p>"
+    )
+    _, rows = _export_rows(user)
+    assert rows[0]["Your Rating"] == ""
+    assert rows[0]["Date Rated"] == ""
+
+
+@pytest.mark.django_db
+def test_export_soft_deleted_review_is_excluded(user):
+    film = Film.objects.create(title="Test Film", year=1976, tmdb_id=42)
+    watchlist = shelf_of(user, Shelf.TO_READ)
+    ShelfFilm.objects.create(shelf=watchlist, film=film, user=user)
+    dead = Status.objects.create(
+        user=user,
+        film=film,
+        status_type=Status.Type.REVIEW_RATING,
+        rating=Decimal("3.5"),
+    )
+    dead.delete()  # soft delete — a tombstone, not gone
+    _, rows = _export_rows(user)
+    assert rows[0]["Your Rating"] == ""
+
+
+@pytest.mark.django_db
+def test_export_relationship_set_and_deterministic_order(user):
+    watchlist = shelf_of(user, Shelf.TO_READ)
+    watched = shelf_of(user, Shelf.READ)
+    zeta = Film.objects.create(title="Zeta", year=2020, tmdb_id=3)
+    alpha = Film.objects.create(title="Alpha", year=1999, tmdb_id=1)
+    comment_only = Film.objects.create(title="Gamma", year=2010, tmdb_id=2)
+    ShelfFilm.objects.create(shelf=watchlist, film=zeta, user=user)
+    ShelfFilm.objects.create(shelf=watched, film=alpha, user=user)
+    Status.objects.create(
+        user=user,
+        film=alpha,
+        status_type=Status.Type.REVIEW_RATING,
+        rating=Decimal("4"),
+    )
+    # A comment-only film is in the relationship set too (reachable via M4).
+    Status.objects.create(
+        user=user,
+        film=comment_only,
+        status_type=Status.Type.COMMENT,
+        content="<p>hi</p>",
+    )
+    _, rows = _export_rows(user)
+    assert [r["Name"] for r in rows] == ["Alpha", "Gamma", "Zeta"]
+
+
+@pytest.mark.django_db
+def test_export_reimport_is_a_noop(user):
+    # A mixed state of everything reachable in v0.1: a watchlist stub, a
+    # watched film with a written review, and a manual (no TMDB id) film on
+    # the watchlist. Exporting and re-importing changes nothing (D10).
+    watchlist = shelf_of(user, Shelf.TO_READ)
+    watched = shelf_of(user, Shelf.READ)
+    stub = Film.objects.create(
+        title="Trackdown", year=1976, tmdb_id=102938, imdb_id="tt0075344"
+    )
+    review_film = Film.objects.create(title="Blade Runner", year=1982, tmdb_id=78)
+    manual = Film.objects.create(title="A Manual Film", year=1969)
+    ShelfFilm.objects.create(shelf=watchlist, film=stub, user=user)
+    ShelfFilm.objects.create(shelf=watched, film=review_film, user=user)
+    ShelfFilm.objects.create(shelf=watchlist, film=manual, user=user)
+    review = Status.objects.create(
+        user=user,
+        film=review_film,
+        status_type=Status.Type.REVIEW,
+        rating=Decimal("4.5"),
+        content="<p>tears</p>",
+        raw_content="tears",
+    )
+
+    rows = parse_tmdb_csv(export_film_csv(user))
+    result = import_film_csv(user, rows)
+
+    # Nothing created — every row matched its existing film.
+    assert result["summary"]["created"] == 0
+    assert result["summary"]["matched"] == 3
+    assert Film.objects.count() == 3
+    assert ShelfFilm.objects.count() == 3
+    assert Status.objects.count() == 1
+    # The review is untouched (the existing-review guard).
+    review.refresh_from_db()
+    assert review.rating == Decimal("4.5")
+    assert review.content == "<p>tears</p>"
