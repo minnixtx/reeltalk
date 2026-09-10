@@ -105,8 +105,13 @@ CACHES = {
 # exist by then (the entrypoint migrates only when it starts uvicorn).
 Q_CLUSTER = {
     "name": "reeltalk",
-    # One long backfill at a time plus headroom for periodic jobs (M3+).
-    "workers": 2,
+    # One worker (R38): a re-import enqueues a second full backfill list by
+    # design (it heals stale stubs, D11). With two workers the batches ran in
+    # lockstep — every poster double-downloaded and TMDB traffic doubled
+    # (2026-09-10 poster incident). Serialized, the second batch runs after
+    # the first and is nearly free: backfill_films skips already-complete
+    # films without an API call.
+    "workers": 1,
     # A full import backfill runs ~15 minutes under D11 pacing; keep the
     # default 1-hour timeout explicit so a long job is never killed mid-run.
     "timeout": 3600,

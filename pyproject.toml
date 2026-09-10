@@ -55,6 +55,10 @@ env = [
     "DEBUG = true",
     "DOMAIN = localhost",
     "ALLOWED_HOSTS = localhost",
+    # Private, throwaway MEDIA_ROOT: the suite saves tiny fake posters and
+    # would otherwise litter the shared media volume (2026-09-10 poster
+    # incident cleanup). /tmp is fresh per `docker compose run`.
+    "MEDIA_ROOT = /tmp/reeltalk-test-media",
 ]
 
 [tool.ruff]
