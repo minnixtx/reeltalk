@@ -7,7 +7,7 @@ binary watch state (D1) lives on the Shelf/ShelfFilm side, not here.
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -456,14 +456,27 @@ class Status(models.Model):
         ).select_related("user", "film")
 
 
+# R37: consecutive shelf events by the same user on the same shelf closer
+# together than this gap are one bulk operation and render as a single feed
+# entry. A file import lands in one transaction — the owner's 1,378-row
+# import spanned 6.5 s (p99 row gap ~6 ms) — so any window far above that
+# absorbs it; five minutes keeps deliberate manual adds (minutes to hours
+# apart) separate, and two quick manual adds merging is the accepted cosmetic
+# trade. Chained: each row only needs to be within the window of the previous
+# one, so a slow import still aggregates as a whole.
+FEED_BULK_WINDOW = timedelta(minutes=5)
+
+
 @dataclass
 class FeedEntry:
-    """One home-feed row (R35).
+    """One home-feed row (R35; bulk aggregation per R37).
 
     ``kind`` is ``"watchlist"`` or ``"watched"`` for a shelf event — the two
     events D3 used to suppress, shown per R33 — or ``"status"`` for a status
     row of its own. A watched entry carries the user's D5 review rating and
-    text when they have one; the review is not a separate row.
+    text when they have one; the review is not a separate row. Aggregated
+    bulk entries (R37) show the newest film plus ``other_count`` — "added Y
+    and N other films" — and carry no rating or content.
     """
 
     kind: str
@@ -474,32 +487,92 @@ class FeedEntry:
     date: datetime
     rating: Decimal | None = None
     content: str = ""
+    other_count: int = 0
+
+
+def _group_has_written_review(user_id: int, film_ids: list[int]) -> bool:
+    """R37: True if the user has a live D5 review with text on any film."""
+    return Status.objects.filter(
+        user_id=user_id,
+        film_id__in=film_ids,
+        deleted=False,
+        status_type__in=list(Status.REVIEW_TYPES),
+        content__gt="",
+    ).exists()
 
 
 def feed_entries(user) -> list[FeedEntry]:
-    """The user's home-feed entries, newest first (R33; shape per R35).
+    """The user's home-feed entries, newest first (R33; shape per R35/R37).
 
     Membership is the existing feed rule — own + followed users. The two
     shelf events D3 used to suppress are derived from the members' to-read /
     read ``ShelfFilm`` rows: "added Y to their Watchlist" and "watched Y".
-    A watched entry carries that user's D5 review rating + text, so the
-    review is not a second row; everything else ``Status.feed_for`` returns
-    (comments, reviews without a Watched row) appears as its own entry.
+    Bulk shelves aggregate (R37): consecutive same-user/same-shelf events
+    within ``FEED_BULK_WINDOW`` of each other collapse into one entry —
+    "added Y and N other films" — so a file import shows once, not 1,378
+    times. A group whose films carry the user's live written review stays
+    individual so the review text is not lost; rating-only statuses of
+    aggregated films are absorbed into the entry (ratings stay visible on
+    the film and user-films pages). A watched entry carries that user's D5
+    review rating + text, so the review is not a second row; everything else
+    ``Status.feed_for`` returns (comments, reviews without a Watched row)
+    appears as its own entry.
     """
     member_ids = [user.id] + list(user.follows.values_list("id", flat=True))
 
-    entries: list[FeedEntry] = []
-    for row in (
+    shelf_rows = list(
         ShelfFilm.objects.filter(
             user_id__in=member_ids,
             shelf__identifier__in=[Shelf.TO_READ, Shelf.READ],
         )
         .select_related("user", "film")
-        .order_by("-shelved_date", "id")
-    ):
-        kind = "watchlist" if row.shelf.identifier == Shelf.TO_READ else "watched"
+        .order_by("shelved_date", "id")
+    )
+
+    # Group consecutive same-(user, shelf) rows within FEED_BULK_WINDOW (R37).
+    groups: list[list[ShelfFilm]] = []
+    group_index: dict[tuple[int, str], int] = {}
+    for row in shelf_rows:
+        key = (row.user_id, row.shelf.identifier)
+        idx = group_index.get(key)
+        if (
+            idx is not None
+            and row.shelved_date - groups[idx][-1].shelved_date <= FEED_BULK_WINDOW
+        ):
+            groups[idx].append(row)
+        else:
+            group_index[key] = len(groups)
+            groups.append([row])
+
+    entries: list[FeedEntry] = []
+    # (user_id, film_id) pairs folded into an aggregated entry — their
+    # rating-only statuses must not surface as separate feed rows (R37).
+    absorbed: set[tuple[int, int]] = set()
+    for group in groups:
+        kind = "watchlist" if group[0].shelf.identifier == Shelf.TO_READ else "watched"
+        if len(group) > 1 and _group_has_written_review(
+            group[0].user_id, [row.film_id for row in group]
+        ):
+            # A written review must stay visible — keep the films separate so
+            # R35's fold can ride it onto its own entry (R37).
+            for row in group:
+                entries.append(
+                    FeedEntry(
+                        kind=kind, user=row.user, film=row.film, date=row.shelved_date
+                    )
+                )
+            continue
+        newest = group[-1]  # rows are ordered by (shelved_date, id)
+        if len(group) > 1:
+            absorbed.update((row.user_id, row.film_id) for row in group)
         entries.append(
-            FeedEntry(kind=kind, user=row.user, film=row.film, date=row.shelved_date)
+            FeedEntry(
+                kind=kind,
+                user=newest.user,
+                film=newest.film,
+                date=newest.shelved_date,
+                other_count=len(group) - 1,
+            )
         )
 
     watched = {
@@ -508,6 +581,10 @@ def feed_entries(user) -> list[FeedEntry]:
         if entry.kind == "watched" and entry.film is not None
     }
     for status in Status.feed_for(user):
+        # Reviews of aggregated films ride on the bulk entry — no second row.
+        # Written reviews never aggregate (above), so none are lost.
+        if status.is_review and (status.user_id, status.film_id) in absorbed:
+            continue
         # Only the user's D5 review folds into its watched entry — a comment
         # on a watched film is still its own row.
         target = (

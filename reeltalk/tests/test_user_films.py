@@ -540,3 +540,115 @@ def test_home_feed_row_placeholder_without_poster(login, user, film, admin):
     mark_watched(user, film, rating="4")
     body = login.get("/").content.decode()
     assert "thumb-placeholder" in body
+
+
+# --- Bulk-shelf aggregation (R37; 2026-09-10 owner bug: a file import flooded
+# the feed with one "added to Watchlist" entry per film) -----------------------
+
+
+def _bulk_shelve(user, n, at, identifier=Shelf.TO_READ, step_seconds=1):
+    """Create ``n`` ShelfFilm rows on one shelf starting at ``at``, one row
+    every ``step_seconds`` — the shape a file import produces (one
+    transaction, timestamps clustered seconds apart)."""
+    shelf = Shelf.objects.get(user=user, identifier=identifier)
+    for i in range(1, n + 1):
+        film = Film.objects.create(title=f"Bulk Film {i:02d}", year=2000 + i)
+        ShelfFilm.objects.create(
+            shelf=shelf,
+            film=film,
+            user=user,
+            shelved_date=at + timedelta(seconds=i * step_seconds),
+        )
+
+
+@pytest.mark.django_db
+def test_feed_entries_bulk_watchlist_is_one_entry(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    at = timezone.now() - timedelta(hours=1)
+    _bulk_shelve(alice, 5, at)
+    entries = feed_entries(alice)
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.kind == "watchlist"
+    assert entry.other_count == 4
+    assert entry.film.title == "Bulk Film 05"  # the newest film stands in
+    assert entry.date == at + timedelta(seconds=5)
+    assert entry.rating is None and entry.content == ""
+
+
+@pytest.mark.django_db
+def test_feed_entries_bulk_gap_beyond_window_stays_separate(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    at = timezone.now() - timedelta(hours=1)
+    _bulk_shelve(alice, 1, at)
+    # A deliberate add six minutes later is a separate event.
+    _bulk_shelve(alice, 1, at + timedelta(minutes=6), step_seconds=0)
+    entries = feed_entries(alice)
+    assert len(entries) == 2
+    assert all(e.other_count == 0 for e in entries)
+
+
+@pytest.mark.django_db
+def test_feed_entries_bulk_chain_within_window_aggregates(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    at = timezone.now() - timedelta(hours=1)
+    # Each gap is 4 minutes (< the 5-minute window) but the total span is
+    # 8 — chaining still makes it one bulk operation.
+    for i, offset in enumerate((0, 4, 8), start=1):
+        _bulk_shelve(alice, 1, at + timedelta(minutes=offset), step_seconds=0)
+    entries = feed_entries(alice)
+    assert len(entries) == 1
+    assert entries[0].other_count == 2
+
+
+@pytest.mark.django_db
+def test_feed_entries_bulk_watched_absorbs_rating_statuses(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    at = timezone.now() - timedelta(hours=1)
+    _bulk_shelve(alice, 3, at, identifier=Shelf.READ)
+    # A rated import also creates one rating-only status per film — those must
+    # not surface as separate feed rows.
+    for i in range(1, 4):
+        film = Film.objects.get(title=f"Bulk Film {i:02d}")
+        Status.objects.create(
+            user=alice,
+            film=film,
+            status_type=Status.Type.REVIEW_RATING,
+            rating="4",
+            published_date=at + timedelta(seconds=i),
+        )
+    entries = feed_entries(alice)
+    assert len(entries) == 1
+    assert entries[0].kind == "watched"
+    assert entries[0].other_count == 2
+
+
+@pytest.mark.django_db
+def test_feed_entries_bulk_with_written_review_stays_separate(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    at = timezone.now() - timedelta(hours=1)
+    _bulk_shelve(alice, 2, at, identifier=Shelf.READ)
+    reviewed = Film.objects.get(title="Bulk Film 01")
+    Status.objects.create(
+        user=alice,
+        film=reviewed,
+        status_type=Status.Type.REVIEW,
+        rating="4",
+        content="<p>Great.</p>",
+        published_date=at + timedelta(seconds=1),
+    )
+    # The written review must stay visible — no aggregation for this group.
+    entries = feed_entries(alice)
+    assert len(entries) == 2
+    by_film = {e.film.title: e for e in entries}
+    assert by_film["Bulk Film 01"].content == "<p>Great.</p>"
+    assert by_film["Bulk Film 01"].rating == Decimal("4")
+    assert by_film["Bulk Film 02"].other_count == 0
+
+
+@pytest.mark.django_db
+def test_home_feed_renders_bulk_entry(login, user, admin):
+    at = timezone.now() - timedelta(hours=1)
+    _bulk_shelve(user, 3, at)
+    body = login.get("/").content.decode()
+    assert "and 2 other films to their Watchlist" in body

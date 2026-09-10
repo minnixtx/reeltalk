@@ -28,7 +28,7 @@
                 {% else %}
                   <span class="thumb thumb-placeholder"></span>
                 {% endif %}
-                <p class="feed-film">{% if entry.kind == "watchlist" %}added {% elif entry.kind == "watched" %}watched {% endif %}<a href="{% url 'film' entry.film.id %}">{{ entry.film.title }}{% if entry.film.year %} ({{ entry.film.year }}){% endif %}</a>{% if entry.kind == "watchlist" %} to their Watchlist{% endif %}</p>
+                <p class="feed-film">{% if entry.kind == "watchlist" %}added {% elif entry.kind == "watched" %}watched {% endif %}<a href="{% url 'film' entry.film.id %}">{{ entry.film.title }}{% if entry.film.year %} ({{ entry.film.year }}){% endif %}</a>{% if entry.other_count %} and {{ entry.other_count }} other film{{ entry.other_count|pluralize }}{% endif %}{% if entry.kind == "watchlist" %} to their Watchlist{% endif %}</p>
               </div>
             {% endif %}
             {% if entry.content %}<div class="review-body">{{ entry.content|safe }}</div>{% endif %}
