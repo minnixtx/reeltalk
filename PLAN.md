@@ -258,6 +258,12 @@ New and changed dependencies from the stack audit (§3.9), same method as §4.1 
 |---|---|---|
 | **django-picklefield** (3.4.0) — new, transitive via django-q2 | MIT (PyPI `license_expression`) | ✅ Small field helper django-q2 uses to serialize task arguments; AGPLv3-compatible. |
 
+### 4.6 M4 additions (2026-09-10)
+
+| Package | License (verified) | Verdict |
+|---|---|---|
+| **cryptography** (50.0.1) — new, ActivityPub keys + HTTP signatures | Apache-2.0 OR BSD-3-Clause (PyPI `license_expression`, verified 2026-09-10) | ✅ Dual-licensed; either clause is AGPLv3-compatible. Needed because the stdlib has no Ed25519 and no maintained Python ActivityPub library exists to borrow key handling from (R7: federation built from spec). Transitive deps cffi (MIT) + pycparser (MIT) are permissive. |
+
 ## 5. Build plan (milestones for this repo)
 
 Sizing note: federation-from-spec (M4) is the largest single chunk of new code; it was inherited for free in the legacy fork and must be written here against the W3C specs.

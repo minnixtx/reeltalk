@@ -14,6 +14,7 @@ from django.db import models
 from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
+from reeltalk.activitypub.crypto import generate_keypair
 from reeltalk.core.models import Film, Shelf, ShelfFilm, Status
 
 
@@ -61,6 +62,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     # Local users are full accounts; remote users (M4) are lightweight mirrors
     # populated from federation.
     local = models.BooleanField(default=True)
+    # ActivityPub key pair (M4, R7): Ed25519 keys in PEM form. Local users get
+    # a pair generated at creation (save below); remote mirrors carry only the
+    # public key, fetched from their Person document — private_key stays empty.
+    private_key = models.TextField(blank=True, default="")
+    public_key = models.TextField(blank=True, default="")
     # PermissionsMixin provides is_superuser/groups/user_permissions but not
     # is_staff — custom users define it themselves.
     is_staff = models.BooleanField(
@@ -92,6 +98,10 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def save(self, *args, **kwargs):
         creating = self.pk is None
+        if creating and self.local and not self.private_key:
+            # Every local user signs federation requests with its own key
+            # (M4, R7); remote mirrors are signed by their home instance.
+            self.private_key, self.public_key = generate_keypair()
         super().save(*args, **kwargs)
         if creating and self.local:
             # Every local user starts with the two binary shelves (D1). Remote

@@ -70,3 +70,38 @@ def test_localname_is_unique():
     with pytest.raises(IntegrityError):
         with transaction.atomic():
             User.objects.create_user(localname="alice")
+
+
+# --- ActivityPub key pair (M4, R7) -------------------------------------------
+
+
+@pytest.mark.django_db
+def test_local_user_gets_keypair_on_creation():
+    from reeltalk.activitypub import crypto
+
+    user = User.objects.create_user(localname="alice", password="p")
+    assert user.private_key and user.public_key
+    # Both parse, and the public half matches the private key's.
+    private = crypto.load_private_key(user.private_key)
+    assert crypto.load_public_key(user.public_key) == private.public_key()
+
+
+@pytest.mark.django_db
+def test_resave_does_not_regenerate_keys():
+    user = User.objects.create_user(localname="alice", password="p")
+    original = (user.private_key, user.public_key)
+    user.display_name = "Alice A."
+    user.save()
+    assert (user.private_key, user.public_key) == original
+
+
+@pytest.mark.django_db
+def test_remote_mirror_carries_no_private_key():
+    # Remote users (M4) are mirrors signed by their home instance — they get
+    # only a public key, fetched from their Person document.
+    user = User(localname="remote-alice", local=False)
+    user.set_unusable_password()
+    user.public_key = "fetched-pem"
+    user.save()
+    assert user.private_key == ""
+    assert user.public_key == "fetched-pem"

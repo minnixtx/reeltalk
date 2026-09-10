@@ -29,6 +29,10 @@ dependencies = [
     "environs==15.2.0",
     "python-dateutil==2.9.0.post0",
     "django-pgtrigger==4.17.0",
+    # ActivityPub Ed25519 keys + HTTP signatures (M4, R7): the stdlib has no
+    # Ed25519, and no maintained Python AP library exists to borrow one from.
+    # License-audited in PLAN.md §4.6 (Apache-2.0 OR BSD-3-Clause).
+    "cryptography==50.0.1",
 ]
 
 [dependency-groups]

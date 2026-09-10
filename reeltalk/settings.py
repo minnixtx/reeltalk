@@ -39,6 +39,10 @@ INSTALLED_APPS = [
     # statuses); more apps join as their milestones land (PLAN.md §5, R9).
     "reeltalk.core",
     "reeltalk.social",
+    # Federation (M4, R7/R9): ActivityPub from spec — wire types, discovery,
+    # inbox/outbox, delivery. No models of its own yet; crypto + signatures
+    # land first (increment 1).
+    "reeltalk.activitypub",
     # Task queue (M2, R4): Django-Q2's ORM cluster tables. The worker service
     # runs `qcluster` from the same image; its cluster lives in Postgres.
     "django_q",
