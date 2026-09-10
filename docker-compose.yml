@@ -64,6 +64,10 @@ services:
     restart: unless-stopped
     env_file: .env
     command: python manage.py qcluster
+    volumes:
+      # The backfill downloads posters into MEDIA_ROOT — must be the shared
+      # volume or web can never serve them (2026-09-10 poster incident).
+      - media_volume:/app/images
     depends_on:
       web:
         condition: service_healthy
