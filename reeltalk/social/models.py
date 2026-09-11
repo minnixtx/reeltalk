@@ -108,6 +108,21 @@ class User(AbstractBaseUser, PermissionsMixin):
             # mirrors (M4) receive their shelves from federation instead.
             Shelf.create_default_shelves(self)
 
+    def ensure_keypair(self) -> bool:
+        """Generate this user's federation key pair if it has none yet.
+
+        Local users created before the key fields landed (M4 increment 1)
+        have no keys — a data migration runs this over the table, and it is
+        the fallback for any other pre-existing account. Idempotent: only
+        the empty case fills in, and remote mirrors are never touched (their
+        home instance signs for them). Returns True when a pair was made.
+        """
+        if self.pk is None or not self.local or self.private_key:
+            return False
+        self.private_key, self.public_key = generate_keypair()
+        self.save(update_fields=["private_key", "public_key"])
+        return True
+
     @property
     def username(self) -> str:
         """Full identity, localname@domain (§3.2). M4 will refine this for

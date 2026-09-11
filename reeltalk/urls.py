@@ -6,6 +6,7 @@ from django.contrib.auth import views as auth_views
 from django.urls import include, path, re_path
 from django.views.static import serve
 
+from reeltalk.activitypub.identity import LOCALNAME_RE
 from reeltalk.core import admin_views as core_admin_views
 from reeltalk.social import views as social_views
 
@@ -34,13 +35,17 @@ urlpatterns = [
     path("signup/", social_views.signup, name="signup"),
     path("setup/", social_views.setup, name="setup"),
     path("about/", social_views.about, name="about"),
-    path(
-        "user/<str:localname>/films/",
+    # Shares the actor route's localname pattern (R40) — the old ``<str>``
+    # converter rejected dots, which are legal localnames (R12).
+    re_path(
+        rf"^user/(?P<localname>{LOCALNAME_RE})/films/",
         social_views.user_films,
         name="user-films",
     ),
     # Film domain (detail now; create/edit/shelve/finish join in later pieces).
     path("", include("reeltalk.core.urls")),
+    # Federation (M4): the actor URL + webfinger/nodeinfo discovery.
+    path("", include("reeltalk.activitypub.urls")),
 ]
 
 # User-uploaded media (posters, avatars) is served by the web process itself —
