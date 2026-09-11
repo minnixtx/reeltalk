@@ -350,14 +350,21 @@ def test_followers_and_following_directions(client):
 # --- Inbox routes -----------------------------------------------------------
 
 
+# Signed-delivery coverage (first-contact mirrors, verification, dedup,
+# graceful ignore) lives in test_activitypub_inbox.py; these keep the route
+# contract: GET is not an inbox operation, and an unsigned POST is rejected.
+
+
 @pytest.mark.django_db
-def test_per_user_inbox_get_405_post_202(client):
+def test_per_user_inbox_get_405_unsigned_post_401(client):
     User.objects.create_user(localname="alice", password="p")
-    assert client.get("/user/alice/inbox/").status_code == 405
+    response = client.get("/user/alice/inbox/")
+    assert response.status_code == 405
+    assert response["Allow"] == "POST"
     response = client.post(
         "/user/alice/inbox/", data="{}", content_type="application/json"
     )
-    assert response.status_code == 202
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db
@@ -372,10 +379,12 @@ def test_per_user_inbox_unknown_user_404(client):
 
 
 @pytest.mark.django_db
-def test_shared_inbox_get_405_post_202(client):
-    assert client.get("/inbox/").status_code == 405
+def test_shared_inbox_get_405_unsigned_post_401(client):
+    response = client.get("/inbox/")
+    assert response.status_code == 405
+    assert response["Allow"] == "POST"
     response = client.post("/inbox/", data="{}", content_type="application/json")
-    assert response.status_code == 202
+    assert response.status_code == 401
 
 
 # --- Content-negotiated Film serving ----------------------------------------

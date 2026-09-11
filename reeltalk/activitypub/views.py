@@ -1,11 +1,17 @@
-"""ActivityPub views (M4 increments 2-3, R40/R41).
+"""ActivityPub views (M4 increments 2-4, R40/R41 + increment 4).
 
 Thin handlers over ``identity`` / ``collections`` / ``objects``: the actor
 endpoint (Person document with content negotiation), webfinger, nodeinfo, and
 the collections — outbox (paginated Create activities), followers/following
 (Person collections), and the per-user + shared inboxes. All unauthenticated:
 these are the endpoints other instances fetch from (and post to) to federate.
+
+Inbox POSTs (increment 4) run the delivery pipeline: resolve the sender from
+the signature's keyid (mirroring first-contact remote users from their Person
+document), verify the signature, then dedup + dispatch in ``inbox``.
 """
+
+import json
 
 from django.conf import settings
 from django.http import HttpResponse, JsonResponse
@@ -27,7 +33,10 @@ from .identity import (
     outbox_path,
     person_document,
 )
+from .inbox import process_inbound_activity
+from .mirrors import resolve_sender
 from .objects import create_activity
+from .signatures import extract_key_id, verify_request
 
 
 def _local_user(localname: str) -> "User | None":
@@ -205,16 +214,44 @@ def following(request, localname):
     return _person_collection(request, user, url, user.follows.all())
 
 
-def _inbox_response(request):
-    """Inbox route (R40/R41): exists now, processes activities in increment 4.
+def _handle_inbox_post(request):
+    """Verify + process one inbound activity delivery (M4 increment 4).
 
-    GET is not a valid inbox operation (405); POST is accepted (202) so a
-    remote's delivery never hits a 404 while the handler is still a stub. The
-    real work — verifying the sender's signature, deduping by origin id, and
-    creating/updating remote mirrors — lands in increment 4.
+    Order matters: the sender is resolved from the signature's keyid — a
+    first-contact remote user is mirrored from their Person document as part
+    of this — and the signature is verified against the resolved user's
+    public key before the body is parsed or anything is recorded. Status
+    codes: 401 for a missing, unresolvable, or invalid signature; 400 for a
+    signed but unparseable JSON body; 202 Accepted for everything else
+    (handled, gracefully ignored, or duplicate — the outcome is not exposed
+    to the sender).
+    """
+    key_id = extract_key_id(request)
+    if not key_id:
+        return HttpResponse(status=401)
+    sender = resolve_sender(key_id, request)
+    if sender is None or not sender.public_key:
+        return HttpResponse(status=401)
+    if not verify_request(request, sender.public_key):
+        return HttpResponse(status=401)
+    try:
+        activity = json.loads(request.body)
+    except ValueError:
+        return HttpResponse(status=400)
+    process_inbound_activity(activity)
+    return HttpResponse(status=202)
+
+
+def _inbox_response(request):
+    """Inbox route (R40/R41, real handling in increment 4).
+
+    GET is not a valid inbox operation (405); POST runs the delivery
+    pipeline above. Both the per-user and shared inboxes process deliveries
+    identically — dedup by activity id makes it harmless when a remote posts
+    to both.
     """
     if request.method == "POST":
-        return HttpResponse(status=202)
+        return _handle_inbox_post(request)
     response = HttpResponse(status=405)
     response["Allow"] = "POST"
     return response

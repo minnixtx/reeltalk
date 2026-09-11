@@ -50,8 +50,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     # the login name (USERNAME_FIELD). Uniqueness is case-sensitive at the
     # database level; signup additionally rejects case-insensitive duplicates
     # (social.forms), since "Alice" and "alice" are one identity to other
-    # instances.
-    localname = models.CharField(max_length=30, unique=True)
+    # instances. Local accounts keep R12's 1-30 char rule (enforced in
+    # social.forms); the field itself is wider because remote mirrors (M4)
+    # are stored as <preferredUsername>@<netloc>, which can exceed 30 chars.
+    localname = models.CharField(max_length=255, unique=True)
     display_name = models.CharField(max_length=255, blank=True, default="")
     # Not unique yet: password reset (later in M1) will need it; two users
     # with no email must be possible until then.
@@ -62,6 +64,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     # Local users are full accounts; remote users (M4) are lightweight mirrors
     # populated from federation.
     local = models.BooleanField(default=True)
+    # The mirror's home-instance actor URL — the id of its Person document on
+    # its own instance (M4 increment 4). It is what deliveries' keyids point
+    # at and the wire id served back to other instances. Empty for local
+    # users, whose actor URL is derived from the localname (R40).
+    actor_url = models.TextField(blank=True, default="")
     # ActivityPub key pair (M4, R7): Ed25519 keys in PEM form. Local users get
     # a pair generated at creation (save below); remote mirrors carry only the
     # public key, fetched from their Person document — private_key stays empty.
@@ -95,6 +102,16 @@ class User(AbstractBaseUser, PermissionsMixin):
     class Meta:
         verbose_name = "user"
         verbose_name_plural = "users"
+        constraints = [
+            # One mirror per home actor URL (remote users only — local users
+            # leave actor_url empty, so the condition keeps their blanks out
+            # of the index).
+            models.UniqueConstraint(
+                fields=["actor_url"],
+                condition=models.Q(local=False),
+                name="unique_actor_url_for_remote_mirrors",
+            ),
+        ]
 
     def save(self, *args, **kwargs):
         creating = self.pk is None
@@ -125,9 +142,15 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     @property
     def username(self) -> str:
-        """Full identity, localname@domain (§3.2). M4 will refine this for
-        remote users, whose domain is not the local one."""
-        return f"{self.localname}@{settings.DOMAIN}"
+        """Full identity, localname@domain (§3.2).
+
+        Local users qualify against this instance's domain; remote mirrors
+        already carry their home domain in the localname
+        (<preferredUsername>@<netloc>, M4 increment 4).
+        """
+        if self.local:
+            return f"{self.localname}@{settings.DOMAIN}"
+        return self.localname
 
     def get_full_name(self) -> str:
         return self.display_name or self.localname

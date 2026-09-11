@@ -172,6 +172,34 @@ def parse_legacy_signature(value: str) -> dict[str, str]:
     return params
 
 
+def extract_key_id(request: Any) -> str | None:
+    """The signing key's URL from the request's signature headers.
+
+    Reads whichever live format is present (R39): an RFC 9421
+    ``Signature-Input`` carries ``keyid``, a bare old-draft ``Signature``
+    header carries ``keyId``. Returns None when no usable signature header
+    exists — the caller treats that as "reject this activity". The returned
+    keyid is the actor URL with a ``#main-key`` fragment (R39).
+    """
+    signature_input = request.headers.get("Signature-Input")
+    if signature_input:
+        try:
+            _label, _components, params, _serialization = parse_signature_input(
+                signature_input
+            )
+        except ValueError:
+            return None
+        return params.get("keyid") or None
+    signature = request.headers.get("Signature")
+    if signature:
+        try:
+            params = parse_legacy_signature(signature)
+        except ValueError:
+            return None
+        return params.get("keyId") or None
+    return None
+
+
 def digest_value(body: bytes) -> str:
     """RFC 9530 ``Content-Digest`` value (sha-256, base64, colon-wrapped)."""
     return "sha-256=:" + base64.b64encode(hashlib.sha256(body).digest()).decode() + ":"
