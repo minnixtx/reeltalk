@@ -14,6 +14,9 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
+from reeltalk.activitypub.identity import accepts_activitypub
+from reeltalk.activitypub.objects import film_document
+
 from .catalog import create_or_match_film, search_local
 from .forms import FilmForm
 from .import_export import (
@@ -37,9 +40,19 @@ from .utils import render_markdown
 
 
 def film_detail(request, film_id):
-    """A film: metadata, poster, reviews from all users (§3.7)."""
+    """A film: metadata, poster, reviews from all users (§3.7).
+
+    ActivityPub clients get the **Film** wire document (D15) by content
+    negotiation — the same split as the actor endpoint (R40) — so a remote
+    instance can fetch a referenced film object by its id URL.
+    """
     # Absorbed films' URLs keep resolving to the canonical row (§3.2).
     film = get_object_or_404(Film, id=resolve_film_id(film_id))
+    if accepts_activitypub(request):
+        return JsonResponse(
+            film_document(film, request),
+            content_type="application/activity+json",
+        )
     reviews = (
         Status.objects.filter(
             film=film, status_type__in=list(Status.REVIEW_TYPES), deleted=False

@@ -71,8 +71,15 @@ class Film(models.Model):
         return self.title
 
     def save(self, *args, **kwargs):
+        creating = self.pk is None
         self.sort_title = derive_sort_title(self.title)
         super().save(*args, **kwargs)
+        if creating and not self.origin_id:
+            # Day-one origin identity (R41): a locally created film's
+            # origin_id is its pk. A queryset update (not save) so the
+            # auto_now updated_date is untouched by the backfill.
+            Film.objects.filter(pk=self.pk).update(origin_id=self.pk)
+            self.origin_id = self.pk
 
     @classmethod
     def find_match(
@@ -416,12 +423,18 @@ class Status(models.Model):
         return f"{self.user.localname}: status"
 
     def save(self, *args, **kwargs):
+        creating = self.pk is None
         if self.status_type == Status.Type.REVIEW_RATING and not self.rating:
             raise ValueError("A rating-only entry must carry a star rating")
         if self.status_type and not self.film_id:
             kind = self.get_status_type_display().lower()
             raise ValueError(f"A {kind} status must be anchored to a film")
         super().save(*args, **kwargs)
+        if creating and self.local and not self.origin_id:
+            # Day-one origin identity (R41): a local status's origin_id is its
+            # pk. Remote mirrors (increment 4) carry remote_id instead.
+            Status.objects.filter(pk=self.pk).update(origin_id=self.pk)
+            self.origin_id = self.pk
 
     @property
     def is_review(self) -> bool:
