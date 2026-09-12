@@ -2,15 +2,16 @@
 
 Sends a signed activity to a remote inbox. Increment 5 uses it for the
 Follow / Undo(Follow) a local user initiates toward a remote user; increment
-6 reuses it for status broadcasts to followers' inboxes. Built fresh against
-the spec (R7): the request is signed per RFC 9421 with Ed25519 (R39) via
-``signatures.sign_request``, covering ``@method`` + ``@target-uri`` and the
-body's content-digest — the format current Mastodon verifies.
+6 reuses it for status broadcasts and shelf events to followers' inboxes.
+Built fresh against the spec (R7): the request is signed per RFC 9421 with
+Ed25519 (R39) via ``signatures.sign_request``, covering ``@method`` +
+``@target-uri`` and the body's content-digest — the format current Mastodon
+verifies.
 
 Delivery in v0.1 is a single synchronous POST with no retry queue: a network
 failure surfaces as a ``requests.RequestException`` for the caller to handle
-(the local follow state has already been recorded, so the relationship is not
-lost — only the remote's copy of it lags).
+(the local state has already been recorded, so nothing is lost — only the
+remote's copy of it lags until the next delivery or an outbox backfill).
 """
 
 import json
@@ -21,6 +22,19 @@ from .signatures import sign_request
 
 # Same reachability budget as the inbound Person-document fetch (mirrors).
 REQUEST_TIMEOUT = 10
+
+
+def inbox_for(follower) -> str:
+    """A remote follower's home inbox — the advertised URL, else the convention.
+
+    The mirror's ``inbox_url`` is populated from its Person document at mirror
+    creation (R42 create-only). ReelTalk and current Mastodon (R39's targets)
+    both place the inbox under the actor path, so a mirror whose document
+    advertised no inbox falls back to ``<actor_url>/inbox``.
+    """
+    if follower.inbox_url:
+        return follower.inbox_url
+    return follower.actor_url.rstrip("/") + "/inbox"
 
 
 def deliver_activity(inbox_url: str, activity: dict, private_pem: str, key_id: str):

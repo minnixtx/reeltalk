@@ -14,8 +14,13 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
+from reeltalk.activitypub.broadcast import (
+    broadcast_shelf_event,
+    broadcast_status_create,
+    broadcast_status_update,
+)
 from reeltalk.activitypub.identity import accepts_activitypub
-from reeltalk.activitypub.objects import film_document
+from reeltalk.activitypub.objects import film_document, note_document
 
 from .catalog import create_or_match_film, search_local
 from .forms import FilmForm
@@ -84,6 +89,23 @@ def film_detail(request, film_id):
     return render(request, "core/film/detail.html", data)
 
 
+def status_detail(request, status_id):
+    """A status's wire URL (R41, deferred to M4 increment 6).
+
+    ActivityPub clients get the **Note** document at its id — the fetch
+    endpoint for objects that ride inline elsewhere. Only local statuses are
+    served: a remote mirror's canonical id is its home instance's URL, not
+    this row's, and there is no human-facing status page in v0.1 (M5), so
+    other clients get 404. Deleted statuses are tombstones — not served.
+    """
+    status = get_object_or_404(Status, id=status_id, local=True, deleted=False)
+    if not accepts_activitypub(request):
+        return HttpResponse(status=404)
+    return JsonResponse(
+        note_document(status, request), content_type="application/activity+json"
+    )
+
+
 @login_required
 @require_POST
 def mark_watched_view(request, film_id):
@@ -94,11 +116,24 @@ def mark_watched_view(request, film_id):
     ``mark_watched``. A missing/invalid rating raises before any write; we
     surface it as a message and send the user back to the film page.
     """
+    user = request.user
     film = get_object_or_404(Film, id=resolve_film_id(film_id))
     raw_content = request.POST.get("content", "")
     try:
-        mark_watched(
-            request.user,
+        # Both checked before the write: which broadcast the success takes
+        # (create vs update) and whether mark_watched takes the film off the
+        # Watchlist (D1) — so that removal is broadcast too.
+        existing_review = Status.objects.filter(
+            user=user,
+            film=film,
+            status_type__in=list(Status.REVIEW_TYPES),
+            deleted=False,
+        ).exists()
+        was_on_watchlist = ShelfFilm.objects.filter(
+            user=user, shelf__identifier=Shelf.TO_READ, film=film
+        ).exists()
+        status = mark_watched(
+            user,
             film,
             rating=request.POST.get("rating"),
             content=render_markdown(raw_content),
@@ -107,6 +142,16 @@ def mark_watched_view(request, film_id):
     except ValueError as exc:
         messages.error(request, str(exc))
         return redirect("film", film_id=film.id)
+    # Federation broadcast (M4 increment 6): the review to remote followers,
+    # plus the watchlist removal when mark_watched took the film off it. A
+    # dead follower drops its send — this request must not fail because of
+    # one unreachable instance.
+    if existing_review:
+        broadcast_status_update(request, status)
+    else:
+        broadcast_status_create(request, status)
+    if was_on_watchlist:
+        broadcast_shelf_event(request, user, film, Shelf.TO_READ, added=False)
     messages.success(request, "Marked as watched.")
     return redirect("film", film_id=film.id)
 
@@ -116,12 +161,17 @@ def mark_watched_view(request, film_id):
 def shelve(request, film_id):
     """Add a film to the user's Watchlist (D1 mutual exclusion enforced)."""
     film = get_object_or_404(Film, id=resolve_film_id(film_id))
+    outcome = shelve_to_watchlist(request.user, film)
+    if outcome == "added":
+        # Federation broadcast (M4 increment 6): the shelf event to remote
+        # followers ("already" and "watched" change nothing on the wire).
+        broadcast_shelf_event(request, request.user, film, Shelf.TO_READ, added=True)
     notices = {
         "added": ("success", "Added to your watchlist."),
         "already": ("info", "Already on your watchlist."),
         "watched": ("warning", "This film is in your Watched list."),
     }
-    level, text = notices[shelve_to_watchlist(request.user, film)]
+    level, text = notices[outcome]
     getattr(messages, level)(request, text)
     return redirect("film", film_id=film.id)
 
@@ -132,6 +182,9 @@ def unshelve(request, film_id):
     """Remove a film from the user's Watchlist."""
     film = get_object_or_404(Film, id=resolve_film_id(film_id))
     if unshelve_from_watchlist(request.user, film):
+        # Federation broadcast (M4 increment 6): the removal to remote
+        # followers.
+        broadcast_shelf_event(request, request.user, film, Shelf.TO_READ, added=False)
         messages.success(request, "Removed from your watchlist.")
     else:
         messages.info(request, "Not on your watchlist.")
@@ -310,6 +363,10 @@ def search_watchlist(request, tmdb_id):
     if outcome == "watched":
         # D1: a watched film can't also be wanted — refuse with 409.
         return JsonResponse({"status": outcome}, status=409)
+    if outcome == "added":
+        # Federation broadcast (M4 increment 6): same shelf event as the
+        # film-page control — this is a second entry point onto the Watchlist.
+        broadcast_shelf_event(request, request.user, film, Shelf.TO_READ, added=True)
     return JsonResponse({"status": outcome})
 
 

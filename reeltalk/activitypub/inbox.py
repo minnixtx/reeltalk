@@ -1,14 +1,15 @@
-"""Inbound activity processing (M4 increments 4-5).
+"""Inbound activity processing (M4 increments 4-6).
 
 The decision layer of the inbox pipeline, kept separate from the views so
 it is directly testable: dedup by the activity's wire id (R41), then
 dispatch on the activity type. Increment 5 registers the Follow and Undo
-handlers (``follow``); Create/Update/Delete land in increment 6. Activity
-types with no registered handler — including types we will never support —
-are ignored gracefully: that is the spec-correct behavior for shapes an
-instance does not handle (§3.6: a remote sending quotations or book objects
-must not crash or create content here): acknowledge with 202, create
-nothing, never raise on an unfamiliar shape.
+handlers (``follow``); increment 6 registers Create/Update/Delete
+(``statuses``) for reviews, film objects, and shelf events. Activity types
+with no registered handler — including types we will never support — are
+ignored gracefully: that is the spec-correct behavior for shapes an instance
+does not handle (§3.6: a remote sending quotations or book objects must not
+crash or create content here): acknowledge with 202, create nothing, never
+raise on an unfamiliar shape.
 """
 
 from collections.abc import Callable
@@ -18,6 +19,7 @@ from django.db import transaction
 
 from .follow import handle_follow, handle_undo
 from .models import DeliveredActivity
+from .statuses import handle_create, handle_delete, handle_update
 
 # Activity types this instance acts on, mapped to their handlers (each takes
 # the parsed activity dict, the verified sender, and the request, and applies
@@ -27,6 +29,9 @@ from .models import DeliveredActivity
 HANDLERS: dict[str, Callable[[dict, Any, Any], None]] = {
     "Follow": handle_follow,
     "Undo": handle_undo,
+    "Create": handle_create,
+    "Update": handle_update,
+    "Delete": handle_delete,
 }
 
 

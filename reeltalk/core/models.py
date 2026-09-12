@@ -58,12 +58,27 @@ class Film(models.Model):
     # can carry provenance; federation populates them when it lands.
     origin_id = models.PositiveBigIntegerField(null=True, blank=True)
     remote_id = models.PositiveBigIntegerField(null=True, blank=True)
+    # The home-instance wire URL of a mirrored (remote) film — the object's id
+    # as received (M4 increment 6; R42: the integer remote_id alone cannot
+    # reconstruct a host). Blank for local films, whose wire id is their
+    # origin_id on this instance.
+    remote_url = models.TextField(blank=True, default="")
 
     created_date = models.DateTimeField(default=timezone.now, db_index=True)
     updated_date = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["sort_title", "year"]
+        constraints = [
+            # One mirror row per home-instance object URL (mirrors only —
+            # local films leave remote_url blank). Enforces the idempotent,
+            # origin-id-keyed inbound processing (M4 increment 6) at the DB.
+            models.UniqueConstraint(
+                fields=["remote_url"],
+                condition=Q(remote_url__gt=""),
+                name="unique_remote_url_for_film_mirrors",
+            )
+        ]
 
     def __str__(self) -> str:
         if self.year is not None:
@@ -74,10 +89,11 @@ class Film(models.Model):
         creating = self.pk is None
         self.sort_title = derive_sort_title(self.title)
         super().save(*args, **kwargs)
-        if creating and not self.origin_id:
+        if creating and not self.origin_id and not self.remote_url:
             # Day-one origin identity (R41): a locally created film's
             # origin_id is its pk. A queryset update (not save) so the
-            # auto_now updated_date is untouched by the backfill.
+            # auto_now updated_date is untouched by the backfill. Remote
+            # mirrors (remote_url set, M4 increment 6) claim no local origin.
             Film.objects.filter(pk=self.pk).update(origin_id=self.pk)
             self.origin_id = self.pk
 
@@ -398,6 +414,10 @@ class Status(models.Model):
     # ActivityPub origin identity (M4) — same day-one pattern as Film/Shelf.
     origin_id = models.PositiveBigIntegerField(null=True, blank=True)
     remote_id = models.PositiveBigIntegerField(null=True, blank=True)
+    # The home-instance wire URL of a mirrored (remote) status — the Note's id
+    # as received (M4 increment 6; R42: the integer remote_id alone cannot
+    # reconstruct a host). Blank for local statuses.
+    remote_url = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["-published_date"]
@@ -413,7 +433,15 @@ class Status(models.Model):
                     deleted=False,
                 ),
                 name="unique_review_per_user_per_film",
-            )
+            ),
+            # One mirror row per home-instance object URL (mirrors only —
+            # local statuses leave remote_url blank). Enforces the idempotent,
+            # origin-id-keyed inbound processing (M4 increment 6) at the DB.
+            models.UniqueConstraint(
+                fields=["remote_url"],
+                condition=Q(remote_url__gt=""),
+                name="unique_remote_url_for_status_mirrors",
+            ),
         ]
 
     def __str__(self) -> str:

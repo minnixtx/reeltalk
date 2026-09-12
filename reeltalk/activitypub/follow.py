@@ -29,7 +29,7 @@ import uuid
 
 from reeltalk.social.models import User
 
-from .delivery import deliver_activity
+from .delivery import deliver_activity, inbox_for
 from .identity import absolute_uri, actor_path
 from .mirrors import (
     fetch_person_document,
@@ -60,18 +60,6 @@ def _ensure_mirror(actor_url: str) -> User:
         return mirror
     doc = fetch_person_document(actor_url)
     return mirror_user_from_person(doc)
-
-
-def _inbox_for(mirror: User) -> str:
-    """The mirror's home inbox — the advertised URL, else the path convention.
-
-    ReelTalk and current Mastodon (R39's targets) both place the inbox under
-    the actor path, so a mirror whose document advertised no inbox falls back
-    to ``<actor_url>/inbox``.
-    """
-    if mirror.inbox_url:
-        return mirror.inbox_url
-    return mirror.actor_url.rstrip("/") + "/inbox"
 
 
 # --- Inbound handlers (registered in inbox.HANDLERS) ------------------------
@@ -155,7 +143,7 @@ def _deliver_follow(request, follower: User, mirror: User, *, undo: bool):
     actor = absolute_uri(request, actor_path(follower.localname))
     activity = _follow_activity(actor, mirror, undo=undo)
     deliver_activity(
-        _inbox_for(mirror), activity, follower.private_key, f"{actor}#main-key"
+        inbox_for(mirror), activity, follower.private_key, f"{actor}#main-key"
     )
 
 

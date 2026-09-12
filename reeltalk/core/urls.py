@@ -21,6 +21,8 @@ urlpatterns = [
     path("search/suggest/", views.search_suggest, name="search-suggest"),
     path("film/create/", views.film_create, name="film-create"),
     path("film/<int:film_id>/", views.film_detail, name="film"),
+    # A status's wire URL (M4 increment 6): the Note document for AP clients.
+    path("status/<int:status_id>/", views.status_detail, name="status"),
     path("film/<int:film_id>/edit/", views.film_edit, name="film-edit"),
     path("film/<int:film_id>/shelve/", views.shelve, name="film-shelve"),
     path("film/<int:film_id>/unshelve/", views.unshelve, name="film-unshelve"),
