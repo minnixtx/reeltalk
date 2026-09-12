@@ -178,18 +178,39 @@ def outbox(request, localname):
     return _collection_response(request, user, collection_url, items_by_offset)
 
 
+def _person_item(person, request):
+    """The Person entry for one followers/following collection item.
+
+    A local user gets the full Person document (R40). A remote mirror emits a
+    minimal Person document whose id is the mirror's home-instance actor URL
+    (R42) — the wire id other instances use to identify that user; we do not
+    re-serialize a mirror's summary/image, which it does not carry.
+    """
+    if person.local:
+        return person_document(person, request)
+    return {
+        "@context": [
+            "https://www.w3.org/ns/activitystreams",
+            "https://w3id.org/security/v1",
+        ],
+        "id": person.actor_url,
+        "type": "Person",
+        "name": person.display_name or person.localname,
+    }
+
+
 def _person_collection(request, user, collection_url, related):
     """Serve a followers/following relation as an OrderedCollection of Persons.
 
-    Local users only: a remote entry needs the followed actor's home URL, which
-    the mirror does not store yet — those land with remote mirrors (increment
-    4/5). Ordered by id so pages are stable.
+    Includes both local users (full Person documents) and remote mirrors (a
+    minimal Person document keyed on the mirror's home actor URL — increment
+    5). Ordered by id so pages are stable.
     """
-    persons = list(related.filter(local=True).order_by("id"))
+    persons = list(related.all().order_by("id"))
 
     def items_by_offset(start, count):
         page = persons[start : start + count]
-        return [person_document(person, request) for person in page], len(persons)
+        return [_person_item(person, request) for person in page], len(persons)
 
     return _collection_response(request, user, collection_url, items_by_offset)
 
@@ -238,7 +259,7 @@ def _handle_inbox_post(request):
         activity = json.loads(request.body)
     except ValueError:
         return HttpResponse(status=400)
-    process_inbound_activity(activity)
+    process_inbound_activity(activity, sender, request)
     return HttpResponse(status=202)
 
 

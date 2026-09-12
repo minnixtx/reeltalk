@@ -305,37 +305,61 @@ def test_resolve_sender_unreachable_remote_returns_none():
 
 @pytest.mark.django_db
 def test_process_records_delivered_activity():
-    result = process_inbound_activity(
-        {"id": "https://remote.example/activity/1", "type": "Follow"}
-    )
-    # No handlers are registered in increment 4 — accepted, recorded, ignored.
-    assert result == "ignored"
+    # A handled activity (Follow) is recorded for dedup. The follow semantics
+    # themselves are covered in test_activitypub_follow.py; here the point is
+    # that dispatch runs a registered handler and leaves a dedup row.
+    User.objects.create_user(localname="alice", password="p")
+    sender = User(localname="carol@remote.example", local=False, actor_url=REMOTE_ACTOR)
+    sender.save()
+    request = _request_with_host()
+    activity = {
+        "id": "https://remote.example/activity/1",
+        "type": "Follow",
+        "actor": REMOTE_ACTOR,
+        "object": "http://testserver/user/alice/",
+    }
+    result = process_inbound_activity(activity, sender, request)
+    assert result == "handled"
     assert DeliveredActivity.objects.count() == 1
 
 
 @pytest.mark.django_db
 def test_process_duplicate_is_not_reprocessed():
-    activity = {"id": "https://remote.example/activity/1", "type": "Follow"}
-    assert process_inbound_activity(activity) == "ignored"
-    assert process_inbound_activity(activity) == "duplicate"
+    User.objects.create_user(localname="alice", password="p")
+    sender = User(localname="carol@remote.example", local=False, actor_url=REMOTE_ACTOR)
+    sender.save()
+    request = _request_with_host()
+    activity = {
+        "id": "https://remote.example/activity/1",
+        "type": "Follow",
+        "object": "http://testserver/user/alice/",
+    }
+    assert process_inbound_activity(activity, sender, request) == "handled"
+    assert process_inbound_activity(activity, sender, request) == "duplicate"
     assert DeliveredActivity.objects.count() == 1
 
 
 @pytest.mark.django_db
 def test_process_unknown_types_ignored_gracefully():
-    # Types we will never support (and non-string shapes) are ignored without
-    # raising and without creating content.
+    # Types with no registered handler (and non-string shapes) are ignored
+    # without raising and without creating content.
+    sender = User.objects.create_user(localname="alice", password="p")
+    request = _request_with_host()
     for type_name in ("Announce", "Add", "Book", 42, ["Follow"], None):
         result = process_inbound_activity(
-            {"id": f"https://remote.example/activity/{type_name!s}", "type": type_name}
+            {"id": f"https://remote.example/activity/{type_name!s}", "type": type_name},
+            sender,
+            request,
         )
         assert result == "ignored"
 
 
 @pytest.mark.django_db
 def test_process_non_dict_ignored_without_record():
-    assert process_inbound_activity("not an object") == "ignored"
-    assert process_inbound_activity(None) == "ignored"
+    sender = User.objects.create_user(localname="alice", password="p")
+    request = _request_with_host()
+    assert process_inbound_activity("not an object", sender, request) == "ignored"
+    assert process_inbound_activity(None, sender, request) == "ignored"
     assert DeliveredActivity.objects.count() == 0
 
 

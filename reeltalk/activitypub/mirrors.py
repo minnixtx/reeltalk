@@ -118,6 +118,9 @@ def mirror_user_from_person(doc: dict) -> User:
         display_name=doc.get("name") or "",
         local=False,
         actor_url=actor_url,
+        # The home inbox advertised by the document — where outbound
+        # activities (a follow we initiate) are delivered (increment 5).
+        inbox_url=doc.get("inbox") or "",
         public_key=public_key,
     )
     try:
@@ -134,33 +137,58 @@ def mirror_user_from_person(doc: dict) -> User:
 _ACTOR_PATH_RE = re.compile(rf"^/user/({LOCALNAME_RE})/$")
 
 
-def resolve_sender(key_id: str, request) -> "User | None":
-    """Resolve a signature's keyid to the user who signed the request.
+def _resolve_actor(actor_url: str, request, *, fetch: bool) -> "User | None":
+    """Resolve an actor URL to a user this instance can represent.
 
-    The keyid is the actor URL with a ``#main-key`` fragment (R39). A URL on
-    this instance — netloc compared against the request's Host header, so it
-    works behind the operator proxy (D14) and in same-host multi-instance
-    setups where only the port differs — resolves to the local user at its
-    R40 path; there is no remote mirror of ourselves to fetch. Otherwise the
-    remote mirror is looked up by its ``actor_url``, and on first contact the
-    Person document is fetched from that URL and the mirror created. Returns
-    None when the sender cannot be resolved (unknown local user, unreachable
-    or unusable remote document) — the caller rejects the delivery.
+    A URL on this instance — netloc compared against the request's Host
+    header, so it works behind the operator proxy (D14) and in same-host
+    multi-instance setups where only the port differs — resolves to the local
+    user at its R40 path; there is no remote mirror of ourselves to fetch.
+    Otherwise the remote mirror is looked up by its ``actor_url``; when
+    ``fetch`` is set, a first contact fetches the Person document and creates
+    the mirror (R42). Returns None when the URL cannot be resolved (unknown
+    local user, no mirror and fetch disabled, or an unreachable/unusable
+    remote document).
     """
-    actor_url = key_id.split("#", 1)[0]
-    if not actor_url:
+    base = actor_url.split("#", 1)[0]
+    if not base:
         return None
-    parsed = urlparse(actor_url)
+    parsed = urlparse(base)
     if parsed.netloc.lower() == request.get_host().lower():
         match = _ACTOR_PATH_RE.match(parsed.path)
         if not match:
             return None
         return User.objects.filter(local=True, localname__iexact=match.group(1)).first()
-    mirror = User.objects.filter(local=False, actor_url=actor_url).first()
+    mirror = User.objects.filter(local=False, actor_url=base).first()
     if mirror is not None:
         return mirror
+    if not fetch:
+        return None
     try:
-        doc = fetch_person_document(actor_url)
+        doc = fetch_person_document(base)
         return mirror_user_from_person(doc)
     except RemoteFetchError:
         return None
+
+
+def resolve_sender(key_id: str, request) -> "User | None":
+    """Resolve a signature's keyid to the user who signed the request.
+
+    The keyid is the actor URL with a ``#main-key`` fragment (R39). A first
+    contact with a remote sender fetches its Person document and creates the
+    mirror, so later deliveries verify against the stored key without
+    re-fetching. Returns None when the sender cannot be resolved — the caller
+    rejects the delivery.
+    """
+    return _resolve_actor(key_id, request, fetch=True)
+
+
+def resolve_known_actor(actor_url: str, request) -> "User | None":
+    """Resolve an actor URL to a user this instance already knows.
+
+    Local users by their R40 path on this host, remote users by an existing
+    mirror — no first-contact fetch. Used to resolve the object of an inbound
+    Follow/Undo(Follow) (increment 5): an unknown actor is ignored gracefully
+    rather than fetched as a side effect of processing the activity.
+    """
+    return _resolve_actor(actor_url, request, fetch=False)

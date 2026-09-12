@@ -69,6 +69,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     # at and the wire id served back to other instances. Empty for local
     # users, whose actor URL is derived from the localname (R40).
     actor_url = models.TextField(blank=True, default="")
+    # The mirror's home-instance inbox — where outbound activities (a follow
+    # we initiate, M4 increment 5) are delivered. Populated from the Person
+    # document at mirror creation (R42: create-only, no refresh). Empty for
+    # local users and for mirrors whose document advertised no inbox.
+    inbox_url = models.TextField(blank=True, default="")
     # ActivityPub key pair (M4, R7): Ed25519 keys in PEM form. Local users get
     # a pair generated at creation (save below); remote mirrors carry only the
     # public key, fetched from their Person document — private_key stays empty.

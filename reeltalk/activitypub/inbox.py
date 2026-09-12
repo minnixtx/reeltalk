@@ -1,15 +1,14 @@
-"""Inbound activity processing (M4 increment 4).
+"""Inbound activity processing (M4 increments 4-5).
 
 The decision layer of the inbox pipeline, kept separate from the views so
 it is directly testable: dedup by the activity's wire id (R41), then
-dispatch on the activity type. Increment 4 registers no handlers —
-Follow/Undo(Follow) land in increment 5 and Create/Update/Delete in
-increment 6 — so every well-formed activity is accepted, recorded, and
-otherwise ignored. That is the spec-correct behavior for activity types an
-instance does not support (§3.6: unknown activity/object types are ignored
-gracefully — a remote sending quotations or book objects must not crash or
-create content here): acknowledge with 202, create nothing, never raise on
-an unfamiliar shape.
+dispatch on the activity type. Increment 5 registers the Follow and Undo
+handlers (``follow``); Create/Update/Delete land in increment 6. Activity
+types with no registered handler — including types we will never support —
+are ignored gracefully: that is the spec-correct behavior for shapes an
+instance does not handle (§3.6: a remote sending quotations or book objects
+must not crash or create content here): acknowledge with 202, create
+nothing, never raise on an unfamiliar shape.
 """
 
 from collections.abc import Callable
@@ -17,26 +16,34 @@ from typing import Any
 
 from django.db import transaction
 
+from .follow import handle_follow, handle_undo
 from .models import DeliveredActivity
 
 # Activity types this instance acts on, mapped to their handlers (each takes
-# the parsed activity dict and applies its effects). Increment 4 handles none
-# yet; this is where increments 5/6 register theirs. Everything not in the
-# registry — including types we will never support — is ignored gracefully.
-HANDLERS: dict[str, Callable[[dict], None]] = {}
+# the parsed activity dict, the verified sender, and the request, and applies
+# its effects). Increment 5 registers Follow + Undo; increment 6 adds
+# Create/Update/Delete. Everything not in the registry — including types we
+# will never support — is ignored gracefully.
+HANDLERS: dict[str, Callable[[dict, Any, Any], None]] = {
+    "Follow": handle_follow,
+    "Undo": handle_undo,
+}
 
 
-def process_inbound_activity(activity: Any) -> str:
+def process_inbound_activity(activity: Any, sender, request) -> str:
     """Process one verified inbound activity. Returns the outcome.
 
-    ``"duplicate"`` — the activity's wire id was already delivered, so
-    nothing is re-processed; ``"ignored"`` — a well-formed activity of an
-    unknown or not-yet-handled type (recorded for dedup, no content
-    created); ``"handled"`` — a registered handler acted on it. Activities
-    without a string ``id`` cannot be deduped and are processed (or ignored)
-    without a record. The dedup row and the handler run in one transaction:
-    a handler failure rolls the record back too, so the sender's retry is
-    not blocked by its own failed delivery.
+    ``sender`` is the user resolved and signature-verified by the view (the
+    authoritative actor of record — handlers never trust the activity's
+    self-declared ``actor``); ``request`` lets a handler resolve actor URLs
+    against this instance's host. Outcomes: ``"duplicate"`` — the activity's
+    wire id was already delivered, so nothing is re-processed; ``"ignored"`` —
+    a well-formed activity of an unknown or not-yet-handled type (recorded for
+    dedup, no content created); ``"handled"`` — a registered handler acted on
+    it. Activities without a string ``id`` cannot be deduped and are processed
+    (or ignored) without a record. The dedup row and the handler run in one
+    transaction: a handler failure rolls the record back too, so the sender's
+    retry is not blocked by its own failed delivery.
     """
     if not isinstance(activity, dict):
         return "ignored"
@@ -54,5 +61,5 @@ def process_inbound_activity(activity: Any) -> str:
         )
         if handler is None:
             return "ignored"
-        handler(activity)
+        handler(activity, sender, request)
     return "handled"
