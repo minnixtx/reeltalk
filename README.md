@@ -4,9 +4,11 @@ A federated social network for tracking, reviewing, and discovering films. B-mov
 
 ## Status
 
-🚧 **Ground-up rewrite in progress.** ReelTalk was originally built as a fork of [BookWyrm](https://github.com/bookwyrm-social/bookwyrm) under the Anti-Capitalist Software License v1.4. Because ACRL is not an OSI-approved free/open-source license, the project is being rewritten from scratch under the **AGPLv3**, using the original codebase purely as a functional reference. See [REWRITE.md](REWRITE.md) for the rationale and the rules that govern the rewrite.
+🚧 **Ground-up rewrite in progress — core + federation done, social surface next.** ReelTalk was originally built as a fork of [BookWyrm](https://github.com/bookwyrm-social/bookwyrm) under the Anti-Capitalist Software License v1.4. Because ACRL is not an OSI-approved free/open-source license, the project is being rewritten from scratch under the **AGPLv3**, using the original codebase purely as a functional reference. See [REWRITE.md](REWRITE.md) for the rationale and the rules that govern the rewrite.
 
 The frozen original lives at **[minnixtx/reeltalk-legacy](https://github.com/minnixtx/reeltalk-legacy)** (archived, reference-only — feature inventory, behavior, design decisions; no code is carried over).
+
+Milestone-by-milestone state, with verification records and the decision log: [PROGRESS.md](PROGRESS.md).
 
 ## What ReelTalk will be
 
@@ -19,9 +21,12 @@ The frozen original lives at **[minnixtx/reeltalk-legacy](https://github.com/min
 
 - [x] Project seed (AGPLv3)
 - [x] Functional spec from the frozen original ([PLAN.md](PLAN.md), incl. dependency + asset license audit)
-- [ ] Core rewrite: film domain model + metadata (TMDB)
-- [ ] Federation (ActivityPub)
-- [ ] First public instance
+- [x] Core film domain — shelves, reviews/ratings, feeds, film pages (M1)
+- [x] TMDB integration — search, metadata, posters, import backfill (M2)
+- [x] File import/export in the canonical TMDB format (M3)
+- [x] Federation (ActivityPub) — follows, reviews + films exchanged between instances, Mastodon-compatible signatures (M4; verified live between two instances)
+- [ ] Social surface — follow UI, profile pages, blocking, feed filters (M5)
+- [ ] Polish & first public instance (M6)
 
 Discuss the project on Matrix: `#reeltalk:minnix.dev`
 
