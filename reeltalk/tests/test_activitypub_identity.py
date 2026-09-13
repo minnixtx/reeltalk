@@ -116,19 +116,22 @@ def test_actor_endpoint_mastodon_style_accept(client):
 
 
 @pytest.mark.django_db
-def test_actor_endpoint_redirects_browsers(client):
+def test_actor_endpoint_serves_profile_to_browsers(client):
+    # M5: browsers get the human profile page (R40's redirect is superseded).
     User.objects.create_user(localname="alice", password="p")
     response = client.get("/user/alice/", HTTP_ACCEPT="text/html,*/*;q=0.8")
-    assert response.status_code == 302
-    assert response["Location"] == "/user/alice/films/"
+    assert response.status_code == 200
+    assert b"alice" in response.content
 
 
 @pytest.mark.django_db
 def test_actor_endpoint_wildcard_accept_is_not_json(client):
-    # A bare */* (browser default) must not receive the JSON document.
+    # A bare */* (browser default) must not receive the JSON document —
+    # it gets the HTML profile page instead (M5).
     User.objects.create_user(localname="alice", password="p")
     response = client.get("/user/alice/", HTTP_ACCEPT="*/*")
-    assert response.status_code == 302
+    assert response.status_code == 200
+    assert response["Content-Type"].startswith("text/html")
 
 
 @pytest.mark.django_db

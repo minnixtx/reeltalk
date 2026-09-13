@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}{{ profile_user.get_full_name }} — ReelTalk{% endblock %}
+
+{% block content %}
+<header class="profile-head">
+  {% if profile_user.avatar %}
+    <img class="avatar" src="{{ profile_user.avatar.url }}" alt="">
+  {% else %}
+    <span class="avatar avatar-placeholder"></span>
+  {% endif %}
+  <div class="profile-id">
+    <h1>{{ profile_user.get_full_name }}</h1>
+    <p class="handle">@{{ profile_user.username }}{% if not profile_user.local %} · on {{ home_instance }}{% endif %}</p>
+  </div>
+</header>
+
+{% if is_self %}
+<p><a class="btn" href="{% url 'profile-edit' %}">Edit profile</a></p>
+{% endif %}
+
+{% if profile_user.summary %}
+<div class="profile-summary">{{ profile_user.summary|safe }}</div>
+{% endif %}
+
+<nav class="tabs">
+  <a href="{% url 'user-films' profile_user.localname %}">Films</a>
+</nav>
+{% endblock %}

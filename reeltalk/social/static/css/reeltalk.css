@@ -52,8 +52,7 @@ a {
   text-decoration: none;
 }
 
-.site-header nav a,
-.site-header nav .who {
+.site-header nav a {
   margin-left: 1rem;
   color: var(--muted);
   text-decoration: none;
@@ -376,6 +375,28 @@ ul.errorlist {
 
 .profile-head h1 {
   margin: 0.5rem 0 0;
+}
+
+/* --- Profile page (M5) ---------------------------------------------------- */
+
+.avatar-placeholder {
+  display: inline-block;
+  background: var(--border);
+}
+
+.profile-id {
+  display: flex;
+  flex-direction: column;
+}
+
+.handle {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.profile-summary {
+  margin: 1rem 0;
 }
 
 .tabs {

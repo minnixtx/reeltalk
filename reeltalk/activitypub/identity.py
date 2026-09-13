@@ -23,6 +23,13 @@ AP_MEDIA_TYPES = ("application/activity+json", "application/ld+json")
 # localname looks like (the older ``<str>`` converter rejected dots).
 LOCALNAME_RE = r"[a-zA-Z0-9._-]+"
 
+# The human profile/films routes also match remote-mirror localnames, which
+# are <preferredUsername>@<netloc> (M4 increment 4) — so the pattern adds '@'
+# and ':' (the netloc carries the port when it is non-default). Federation
+# routes stay on LOCALNAME_RE: a mirror's canonical wire document lives on
+# its home instance, not here.
+PROFILE_LOCALNAME_RE = r"[a-zA-Z0-9._@:-]+"
+
 
 def actor_path(localname: str) -> str:
     return f"/user/{localname}/"

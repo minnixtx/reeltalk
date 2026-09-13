@@ -2,7 +2,10 @@
 
 The collection URLs (inbox/outbox/followers/following, shared inbox) follow
 the actor-URL convention fixed in increment 2 (R40) so the Person document's
-shape never changes; their handlers land here in increment 3 (R41).
+shape never changes; their handlers land here in increment 3 (R41). The bare
+actor URL /user/<localname>/ itself is served by the social app's profile
+route (M5) — Person JSON-LD for AP clients, the human profile page for
+browsers.
 """
 
 from django.urls import path, re_path
@@ -14,13 +17,6 @@ urlpatterns = [
     path(".well-known/webfinger", views.webfinger, name="webfinger"),
     path(".well-known/nodeinfo", views.nodeinfo_index, name="nodeinfo-index"),
     path("nodeinfo/2.0", views.nodeinfo_2_0, name="nodeinfo-2.0"),
-    # The actor URL (R40). The films page keeps its own more specific route
-    # in reeltalk/urls.py; this matches only the bare /user/<localname>/.
-    re_path(
-        rf"^user/(?P<localname>{LOCALNAME_RE})/$",
-        views.actor,
-        name="actor",
-    ),
     # Collections (R41): outbox/followers/following are read-side
     # OrderedCollections; the per-user inbox accepts delivery POSTs.
     re_path(

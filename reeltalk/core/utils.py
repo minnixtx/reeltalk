@@ -49,6 +49,26 @@ def _allowed_href(tag: str, attr: str, value: str):
     return value
 
 
+def sanitize_html(html: str) -> str:
+    """Sanitize already-rendered HTML with the user-content allowlist.
+
+    For content that arrives as HTML rather than markdown — a remote Person
+    document's ``summary`` (M5 profile refresh). Same tags/attributes/
+    protocols as ``render_markdown``, so stored user content always passes
+    through one safety gate.
+    """
+    if not html:
+        return ""
+    return bleach.clean(
+        html,
+        tags=_ALLOWED_TAGS,
+        # Per-tag callable: bleach's dict form supports a filter per tag, not
+        # per attribute — this one gates the only attribute <a> carries.
+        attributes={"a": _allowed_href},
+        protocols=_ALLOWED_PROTOCOLS,
+    )
+
+
 def render_markdown(text: str) -> str:
     """Render markdown to sanitized HTML, stored at write time (§3.2).
 
@@ -59,12 +79,4 @@ def render_markdown(text: str) -> str:
     if not text:
         return ""
     # mistune appends a trailing newline; strip so stored HTML stays tidy.
-    html = mistune.html(text).strip()
-    return bleach.clean(
-        html,
-        tags=_ALLOWED_TAGS,
-        # Per-tag callable: bleach's dict form supports a filter per tag, not
-        # per attribute — this one gates the only attribute <a> carries.
-        attributes={"a": _allowed_href},
-        protocols=_ALLOWED_PROTOCOLS,
-    )
+    return sanitize_html(mistune.html(text).strip())

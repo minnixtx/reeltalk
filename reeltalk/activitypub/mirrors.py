@@ -13,18 +13,36 @@ ReelTalk instances and current Mastodon (R39), whose Person documents both
 carry ``publicKeyPem``.
 """
 
+import logging
 import re
-from urllib.parse import urlparse
+from io import BytesIO
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import requests
+from django.core.cache import cache
+from django.core.files.base import ContentFile
 from django.db import IntegrityError
+from PIL import Image
 
 from reeltalk import __version__
+from reeltalk.core.utils import sanitize_html
 from reeltalk.social.models import User
 
 from .identity import LOCALNAME_RE
 
+logger = logging.getLogger(__name__)
+
 REQUEST_TIMEOUT = 10
+
+# A federated avatar is a small image; anything bigger is treated as hostile
+# or broken and skipped (the poster keeps its own larger cap, R46).
+AVATAR_MAX_BYTES = 2 * 1024 * 1024
+
+# How long a mirror may not be re-fetched while its avatar/summary are still
+# missing — a profile view must not become an unthrottled outbound-fetch loop
+# against a home instance that never fills those fields.
+PROFILE_REFRESH_THROTTLE = 3600
 
 
 class RemoteFetchError(Exception):
@@ -131,6 +149,109 @@ def mirror_user_from_person(doc: dict) -> User:
         # rather than merge two identities.
         raise RemoteFetchError("Mirror localname collision") from err
     return user
+
+
+def refresh_mirror_profile(user) -> None:
+    """Best-effort fill of a mirror's display name, summary, and avatar (M5).
+
+    R42's mirrors carry the display name + public key only; the profile page
+    wants an avatar and bio too. When either is missing, the home Person
+    document is fetched once per throttle window and whatever it carries is
+    filled in — fill-missing only, never a refresh of values we already have.
+    Identity fields (actor_url, public_key, inbox_url) are never touched: no
+    key rotation, no identity re-derivation (R42). Any failure is silent —
+    the page renders with what we already have.
+    """
+    if user.local or not user.actor_url:
+        return
+    if user.avatar and user.summary:
+        return  # nothing to fill — no fetch
+    cache_key = f"mirror-profile-refresh:{user.actor_url}"
+    if cache.get(cache_key) is not None:
+        return
+    cache.set(cache_key, True, PROFILE_REFRESH_THROTTLE)
+    try:
+        doc = fetch_person_document(user.actor_url)
+    except RemoteFetchError:
+        return
+    update_fields = []
+    name = doc.get("name") or ""
+    if name and not user.display_name:
+        user.display_name = name[: User._meta.get_field("display_name").max_length]
+        update_fields.append("display_name")
+    summary = doc.get("summary") or ""
+    if isinstance(summary, str) and summary and not user.summary:
+        # Remote summaries arrive as HTML (Mastodon) — through the same
+        # user-content allowlist as locally rendered markdown.
+        user.summary = sanitize_html(summary)
+        update_fields.append("summary")
+    image = doc.get("image")
+    if not user.avatar and isinstance(image, str) and image:
+        data = fetch_image_bytes(image, AVATAR_MAX_BYTES)
+        if data is not None:
+            user.avatar.save(
+                image_storage_name(image, f"avatar-{user.pk}.jpg"),
+                ContentFile(data),
+                save=False,
+            )
+            update_fields.append("avatar")
+    if update_fields:
+        user.save(update_fields=update_fields)
+
+
+def fetch_image_bytes(url: str, max_bytes: int) -> "bytes | None":
+    """Defensively download a remote image (R46's poster pattern, shared).
+
+    http/https only; Content-Length pre-check plus a capped streamed read so
+    a hostile body cannot exhaust memory; Pillow ``verify()`` before the bytes
+    are returned so a forged "image" payload is never stored. Any failure —
+    scheme, network, non-2xx, oversized, non-image — logs a warning and
+    returns None: the caller skips the image rather than failing its work.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        logger.warning(
+            "Skipping remote image %s: unsupported scheme %r", url, parsed.scheme
+        )
+        return None
+    try:
+        resp = requests.get(
+            url,
+            headers={"User-Agent": f"reeltalk/{__version__}"},
+            timeout=REQUEST_TIMEOUT,
+            stream=True,
+        )
+        if not resp.ok:
+            raise ValueError(f"HTTP {resp.status_code}")
+        content_length = resp.headers.get("Content-Length")
+        if content_length and int(content_length) > max_bytes:
+            raise ValueError("image exceeds the size cap")
+        data = resp.raw.read(max_bytes + 1, decode_content=True)
+        if len(data) > max_bytes:
+            raise ValueError("image exceeds the size cap")
+        Image.open(BytesIO(data)).verify()
+    except Exception as err:
+        logger.warning("Skipping remote image %s: %s", url, err)
+        return None
+    return data
+
+
+def image_storage_name(url: str, fallback: str) -> str:
+    """A storage name for a federated image.
+
+    The URL's basename keeps provenance (and usually the right extension);
+    it is sanitized to filename-safe characters, with ``fallback`` when
+    nothing usable remains.
+    """
+    base = Path(unquote(urlparse(url).path)).name
+    cleaned = "".join(
+        ch for ch in base if ch.isascii() and (ch.isalnum() or ch in "._-")
+    )
+    if not cleaned:
+        return fallback
+    if "." not in cleaned:
+        cleaned += ".jpg"
+    return cleaned
 
 
 # The R40 actor-path convention, matched against an absolute URL's path.

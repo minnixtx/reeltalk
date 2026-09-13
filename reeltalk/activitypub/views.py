@@ -1,10 +1,12 @@
 """ActivityPub views (M4 increments 2-4, R40/R41 + increment 4).
 
-Thin handlers over ``identity`` / ``collections`` / ``objects``: the actor
-endpoint (Person document with content negotiation), webfinger, nodeinfo, and
-the collections — outbox (paginated Create activities), followers/following
-(Person collections), and the per-user + shared inboxes. All unauthenticated:
-these are the endpoints other instances fetch from (and post to) to federate.
+Thin handlers over ``identity`` / ``collections`` / ``objects``: webfinger,
+nodeinfo, and the collections — outbox (paginated Create activities),
+followers/following (Person collections), and the per-user + shared inboxes.
+All unauthenticated: these are the endpoints other instances fetch from (and
+post to) to federate. The bare actor URL /user/<localname>/ is served by the
+social app's profile route (M5): Person document for AP clients, the human
+profile page for browsers.
 
 Inbox POSTs (increment 4) run the delivery pipeline: resolve the sender from
 the signature's keyid (mirroring first-contact remote users from their Person
@@ -15,7 +17,6 @@ import json
 
 from django.conf import settings
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import redirect
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 
@@ -26,7 +27,6 @@ from reeltalk.social.models import SiteSettings, User
 from .collections import PAGE_SIZE, collection_document, page_document, parse_page
 from .identity import (
     absolute_uri,
-    accepts_activitypub,
     actor_path,
     followers_path,
     following_path,
@@ -45,21 +45,6 @@ def _local_user(localname: str) -> "User | None":
     # usernames. The stored spelling wins — responses carry it back so
     # remotes learn the canonical case.
     return User.objects.filter(local=True, localname__iexact=localname).first()
-
-
-@require_GET
-def actor(request, localname):
-    """The user's actor URL (R40): Person JSON-LD for ActivityPub clients,
-    a redirect to the films page for everyone else."""
-    user = _local_user(localname)
-    if user is None:
-        return HttpResponse(status=404)
-    if accepts_activitypub(request):
-        return JsonResponse(
-            person_document(user, request),
-            content_type="application/activity+json",
-        )
-    return redirect(f"/user/{user.localname}/films/")
 
 
 @require_GET

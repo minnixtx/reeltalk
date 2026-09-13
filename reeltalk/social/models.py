@@ -60,6 +60,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(blank=True)
     # HTML rendered from markdown at write time (§3.2), like Film.description.
     summary = models.TextField(blank=True, default="")
+    # The markdown source of the summary (R18's raw-source pattern): the edit
+    # form pre-fills this, not the stored HTML markup. Remote mirrors leave it
+    # empty — their summary is sanitized HTML fetched from the home document.
+    raw_summary = models.TextField(blank=True, default="")
     avatar = models.ImageField(upload_to="avatars/", null=True, blank=True)
     # Local users are full accounts; remote users (M4) are lightweight mirrors
     # populated from federation.

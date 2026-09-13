@@ -46,14 +46,11 @@ import logging
 import re
 from datetime import datetime
 from decimal import Decimal
-from io import BytesIO
-from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 import requests
 from django.core.files.base import ContentFile
 from django.utils import timezone
-from PIL import Image
 
 from reeltalk import __version__
 from reeltalk.core.models import (
@@ -63,6 +60,8 @@ from reeltalk.core.models import (
     Status,
     resolve_film_id,
 )
+
+from .mirrors import fetch_image_bytes, image_storage_name
 
 logger = logging.getLogger(__name__)
 
@@ -207,24 +206,6 @@ def _mirror_film(doc: dict) -> Film:
     return film
 
 
-def _poster_name_from_url(url: str, film_pk: int) -> str:
-    """A storage name for a federated poster.
-
-    The URL's basename keeps provenance (and usually the right extension);
-    it is sanitized to filename-safe characters, with a generated fallback
-    when nothing usable remains.
-    """
-    base = Path(unquote(urlparse(url).path)).name
-    cleaned = "".join(
-        ch for ch in base if ch.isascii() and (ch.isalnum() or ch in "._-")
-    )
-    if not cleaned:
-        return f"mirror-{film_pk}.jpg"
-    if "." not in cleaned:
-        cleaned += ".jpg"
-    return cleaned
-
-
 def _attach_remote_poster(film: Film, image_url) -> None:
     """Download and store the poster carried by a remote Film document (R46).
 
@@ -232,39 +213,19 @@ def _attach_remote_poster(film: Film, image_url) -> None:
     status, oversized body, or non-image payload is logged and skipped: the
     mirror row exists without a poster instead of failing the whole delivery.
     Called only for a freshly created mirror; existing mirrors and D7-matched
-    local rows are never touched (mirrors stay create-only, R42).
+    local rows are never touched (mirrors stay create-only, R42). The
+    defensive download itself is shared with the avatar refresh (M5) in
+    ``mirrors.fetch_image_bytes``.
     """
     if not isinstance(image_url, str) or not image_url:
         return
-    parsed = urlparse(image_url)
-    if parsed.scheme not in ("http", "https"):
-        logger.warning(
-            "Skipping remote poster for %s: unsupported scheme %r",
-            film.remote_url,
-            parsed.scheme,
-        )
-        return
-    try:
-        resp = requests.get(
-            image_url,
-            headers={"User-Agent": f"reeltalk/{__version__}"},
-            timeout=REQUEST_TIMEOUT,
-            stream=True,
-        )
-        if not resp.ok:
-            raise ValueError(f"HTTP {resp.status_code}")
-        content_length = resp.headers.get("Content-Length")
-        if content_length and int(content_length) > POSTER_MAX_BYTES:
-            raise ValueError("poster exceeds the size cap")
-        data = resp.raw.read(POSTER_MAX_BYTES + 1, decode_content=True)
-        if len(data) > POSTER_MAX_BYTES:
-            raise ValueError("poster exceeds the size cap")
-        Image.open(BytesIO(data)).verify()
-    except Exception as err:
-        logger.warning("Skipping remote poster for %s: %s", film.remote_url, err)
+    data = fetch_image_bytes(image_url, POSTER_MAX_BYTES)
+    if data is None:
         return
     film.poster.save(
-        _poster_name_from_url(image_url, film.pk), ContentFile(data), save=True
+        image_storage_name(image_url, f"mirror-{film.pk}.jpg"),
+        ContentFile(data),
+        save=True,
     )
 
 

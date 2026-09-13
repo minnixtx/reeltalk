@@ -1,4 +1,4 @@
-"""Account forms: signup and the first-run setup wizard share one form."""
+"""Account forms: signup, the first-run setup wizard, and profile editing."""
 
 import re
 
@@ -50,3 +50,21 @@ class SignupForm(forms.Form):
             except ValidationError as exc:
                 self.add_error("password1", exc)
         return cleaned_data
+
+
+class ProfileForm(forms.Form):
+    """Profile editing (M5): display name, markdown bio, avatar upload.
+
+    The bio is stored rendered (``summary``) with the markdown source kept in
+    ``raw_summary`` (R18's pattern) so a later edit pre-fills markdown, not
+    markup. Rendering + link-domain filtering happen in the view via
+    ``render_markdown`` — one write path for all user content.
+    """
+
+    display_name = forms.CharField(max_length=255, required=False)
+    summary = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 4}),
+        help_text="Markdown. Links are kept only for the instance's allowed domains.",
+    )
+    avatar = forms.ImageField(required=False)
