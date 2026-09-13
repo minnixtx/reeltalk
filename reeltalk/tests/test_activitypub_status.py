@@ -12,13 +12,15 @@ Also covers the /status/<id>/ Note fetch endpoint (R41's deferred route).
 
 import json
 from decimal import Decimal
+from io import BytesIO
 
 import pytest
 import requests
 import responses
 from django.test import RequestFactory
+from PIL import Image
 
-from reeltalk.activitypub import crypto, signatures
+from reeltalk.activitypub import crypto, signatures, statuses
 from reeltalk.activitypub.broadcast import (
     broadcast_shelf_event,
     broadcast_status_create,
@@ -60,6 +62,12 @@ def person_doc(remote_keypair):
             "publicKeyPem": public_pem,
         },
     }
+
+
+def _tiny_jpeg() -> bytes:
+    buf = BytesIO()
+    Image.new("RGB", (10, 10), (120, 80, 40)).save(buf, format="JPEG")
+    return buf.getvalue()
 
 
 def _request_with_host():
@@ -464,6 +472,170 @@ def test_inbound_delete_film_ignored_gracefully():
     )
     # v0.1: film rows are PROTECTed while referenced — deletion is ignored.
     assert Film.objects.filter(remote_url=REMOTE_FILM).count() == 1
+
+
+# --- Inbound film mirrors: poster federation (R46) ----------------------------
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_inbound_create_film_downloads_poster():
+    carol = _carol()
+    carol.save()
+    request = _request_with_host()
+    doc = _film_doc(REMOTE_FILM, name="Arrival", year=2016)
+    doc["image"] = "https://remote.example/images/posters/arrival.jpg"
+    responses.add(responses.GET, doc["image"], body=_tiny_jpeg())
+
+    process_inbound_activity(
+        _activity("https://remote.example/activity/s22a", "Create", doc),
+        carol,
+        request,
+    )
+    # A second activity for the same object: the existing mirror is returned
+    # untouched — no second poster fetch.
+    process_inbound_activity(
+        _activity("https://remote.example/activity/s22b", "Create", doc),
+        carol,
+        request,
+    )
+
+    film = Film.objects.get(remote_url=REMOTE_FILM)
+    assert film.poster  # the federated poster was stored
+    with film.poster.open("rb") as fh:
+        assert fh.read() == _tiny_jpeg()
+    assert len(responses.calls) == 1  # fetched once, not per redelivery
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_inbound_review_mirrors_film_with_poster():
+    # The owner-visible flow: a remote review references a film we don't know;
+    # fetching its document brings the poster along (R46).
+    carol = _carol()
+    carol.save()
+    doc = _film_doc(REMOTE_FILM, name="Arrival", year=2016)
+    doc["image"] = "https://remote.example/images/posters/arrival.jpg"
+    responses.add(responses.GET, REMOTE_FILM, json=doc)
+    responses.add(responses.GET, doc["image"], body=_tiny_jpeg())
+    request = _request_with_host()
+    activity = _activity(
+        "https://remote.example/activity/s23",
+        "Create",
+        _note("https://remote.example/status/55/", rating=4.0, film=REMOTE_FILM),
+    )
+    process_inbound_activity(activity, carol, request)
+
+    film = Film.objects.get(remote_url=REMOTE_FILM)
+    assert film.poster
+    status = Status.objects.get(local=False)
+    assert status.film_id == film.pk
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_inbound_create_film_poster_fetch_failure_keeps_mirror():
+    carol = _carol()
+    carol.save()
+    request = _request_with_host()
+    doc = _film_doc(REMOTE_FILM, name="Arrival", year=2016)
+    doc["image"] = "https://remote.example/images/posters/missing.jpg"
+    responses.add(responses.GET, doc["image"], status=404)
+
+    process_inbound_activity(
+        _activity("https://remote.example/activity/s24", "Create", doc),
+        carol,
+        request,
+    )
+
+    film = Film.objects.get(remote_url=REMOTE_FILM)  # the mirror still exists
+    assert not film.poster
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_inbound_create_film_non_image_poster_skipped():
+    carol = _carol()
+    carol.save()
+    request = _request_with_host()
+    doc = _film_doc(REMOTE_FILM, name="Arrival", year=2016)
+    doc["image"] = "https://remote.example/images/posters/fake.jpg"
+    responses.add(responses.GET, doc["image"], body=b"<html>not an image</html>")
+
+    process_inbound_activity(
+        _activity("https://remote.example/activity/s25", "Create", doc),
+        carol,
+        request,
+    )
+
+    film = Film.objects.get(remote_url=REMOTE_FILM)
+    assert not film.poster
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_inbound_create_film_d7_match_never_fetches_poster():
+    # A D7 match anchors the remote document onto our row — the local row is
+    # never backfilled with a federated poster (R46).
+    carol = _carol()
+    carol.save()
+    local_blade = Film.objects.create(title="Blade Runner", year=1982, tmdb_id=1316)
+    request = _request_with_host()
+    doc = _film_doc(
+        "https://remote.example/film/9/", name="Blade Runner", year=1982, tmdb_id=1316
+    )
+    doc["image"] = "https://remote.example/images/posters/br.jpg"
+
+    process_inbound_activity(
+        _activity("https://remote.example/activity/s26", "Create", doc),
+        carol,
+        request,
+    )
+
+    assert Film.objects.count() == 1
+    assert not local_blade.poster
+    assert len(responses.calls) == 0  # the poster URL was never requested
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_inbound_create_film_oversized_poster_skipped(monkeypatch):
+    carol = _carol()
+    carol.save()
+    monkeypatch.setattr(statuses, "POSTER_MAX_BYTES", 16)
+    request = _request_with_host()
+    doc = _film_doc(REMOTE_FILM, name="Arrival", year=2016)
+    doc["image"] = "https://remote.example/images/posters/huge.jpg"
+    responses.add(responses.GET, doc["image"], body=b"x" * 64)
+
+    process_inbound_activity(
+        _activity("https://remote.example/activity/s27", "Create", doc),
+        carol,
+        request,
+    )
+
+    film = Film.objects.get(remote_url=REMOTE_FILM)
+    assert not film.poster
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_inbound_create_film_unsupported_scheme_poster_skipped():
+    carol = _carol()
+    carol.save()
+    request = _request_with_host()
+    doc = _film_doc(REMOTE_FILM, name="Arrival", year=2016)
+    doc["image"] = "file:///etc/passwd"
+
+    process_inbound_activity(
+        _activity("https://remote.example/activity/s28", "Create", doc),
+        carol,
+        request,
+    )
+
+    film = Film.objects.get(remote_url=REMOTE_FILM)
+    assert not film.poster
+    assert len(responses.calls) == 0
 
 
 # --- Inbound ShelfEvent -------------------------------------------------------

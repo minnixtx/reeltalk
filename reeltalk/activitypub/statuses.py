@@ -28,7 +28,9 @@ to mark watched), so mirroring one also mirrors that shelf row — the feed
 then renders it as a "watched" entry with stars (R35) instead of a standalone
 note. A **Film** document runs D7's find-match first, so the same movie stays
 one row on this instance and a remote review anchors to our row rather than a
-duplicate. A **ShelfEvent** creates or removes the mirrored ``ShelfFilm`` row
+duplicate; a freshly created film mirror also downloads the document's poster
+when present (R46 — best-effort, never failing the delivery). A **ShelfEvent**
+creates or removes the mirrored ``ShelfFilm`` row
 on the sender's D1 shelf (mirrors receive their shelves from federation —
 R15 — so the first event creates the shelf it names).
 
@@ -40,13 +42,18 @@ the sender instead of silently dropping content. Malformed-but-harmless shapes
 ignored gracefully — §3.6: unsupported shapes create nothing and never raise.
 """
 
+import logging
 import re
 from datetime import datetime
 from decimal import Decimal
-from urllib.parse import urlparse
+from io import BytesIO
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import requests
+from django.core.files.base import ContentFile
 from django.utils import timezone
+from PIL import Image
 
 from reeltalk import __version__
 from reeltalk.core.models import (
@@ -57,8 +64,14 @@ from reeltalk.core.models import (
     resolve_film_id,
 )
 
+logger = logging.getLogger(__name__)
+
 # Same reachability budget as the inbound Person-document fetch (mirrors).
 REQUEST_TIMEOUT = 10
+
+# A federated poster is a w500-class image (~100–300 KB); anything bigger is
+# treated as hostile or broken and skipped rather than stored.
+POSTER_MAX_BYTES = 10 * 1024 * 1024
 
 # The D1 shelf identifiers a ShelfEvent may name (the only shelves v0.1 has).
 _DEFAULT_SHELF_NAMES = {identifier: name for identifier, name in Shelf.DEFAULT_SHELVES}
@@ -157,7 +170,9 @@ def _mirror_film(doc: dict) -> Film:
     wins over creating one — the same movie stays one row on this instance,
     so a remote review of it anchors to our row instead of a duplicate.
     Mirrors are create-only: metadata is not refreshed on later deliveries
-    (R42's posture for mirrors).
+    (R42's posture for mirrors). A freshly created mirror downloads the
+    document's ``image`` poster when present (R46) — best-effort, and D7-
+    matched rows are never backfilled with one.
     """
     home_url = doc["id"]
     existing = Film.objects.filter(remote_url=home_url).first()
@@ -188,7 +203,69 @@ def _mirror_film(doc: dict) -> Film:
         remote_id=_remote_id_from_url(home_url),
     )
     film.save()
+    _attach_remote_poster(film, doc.get("image"))
     return film
+
+
+def _poster_name_from_url(url: str, film_pk: int) -> str:
+    """A storage name for a federated poster.
+
+    The URL's basename keeps provenance (and usually the right extension);
+    it is sanitized to filename-safe characters, with a generated fallback
+    when nothing usable remains.
+    """
+    base = Path(unquote(urlparse(url).path)).name
+    cleaned = "".join(
+        ch for ch in base if ch.isascii() and (ch.isalnum() or ch in "._-")
+    )
+    if not cleaned:
+        return f"mirror-{film_pk}.jpg"
+    if "." not in cleaned:
+        cleaned += ".jpg"
+    return cleaned
+
+
+def _attach_remote_poster(film: Film, image_url) -> None:
+    """Download and store the poster carried by a remote Film document (R46).
+
+    Best-effort by design — an unsupported scheme, network failure, non-2xx
+    status, oversized body, or non-image payload is logged and skipped: the
+    mirror row exists without a poster instead of failing the whole delivery.
+    Called only for a freshly created mirror; existing mirrors and D7-matched
+    local rows are never touched (mirrors stay create-only, R42).
+    """
+    if not isinstance(image_url, str) or not image_url:
+        return
+    parsed = urlparse(image_url)
+    if parsed.scheme not in ("http", "https"):
+        logger.warning(
+            "Skipping remote poster for %s: unsupported scheme %r",
+            film.remote_url,
+            parsed.scheme,
+        )
+        return
+    try:
+        resp = requests.get(
+            image_url,
+            headers={"User-Agent": f"reeltalk/{__version__}"},
+            timeout=REQUEST_TIMEOUT,
+            stream=True,
+        )
+        if not resp.ok:
+            raise ValueError(f"HTTP {resp.status_code}")
+        content_length = resp.headers.get("Content-Length")
+        if content_length and int(content_length) > POSTER_MAX_BYTES:
+            raise ValueError("poster exceeds the size cap")
+        data = resp.raw.read(POSTER_MAX_BYTES + 1, decode_content=True)
+        if len(data) > POSTER_MAX_BYTES:
+            raise ValueError("poster exceeds the size cap")
+        Image.open(BytesIO(data)).verify()
+    except Exception as err:
+        logger.warning("Skipping remote poster for %s: %s", film.remote_url, err)
+        return
+    film.poster.save(
+        _poster_name_from_url(image_url, film.pk), ContentFile(data), save=True
+    )
 
 
 def _film_for_reference(ref, request) -> Film:
