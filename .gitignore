@@ -21,3 +21,6 @@ backups/
 !/images/.gitkeep
 
 .qwen/
+
+# Instance B env (federation peer; secrets) — M4 increment 7
+.env.b

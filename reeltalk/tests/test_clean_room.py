@@ -44,7 +44,7 @@ SKIP_DIRS = {
 }
 
 # Local-only files (gitignored operator config).
-SKIP_FILES = {".env", ".env.dev"}
+SKIP_FILES = {".env", ".env.dev", ".env.b"}
 
 TELLTALES = ("bookwyrm", "mouse reeve", "anti-capitalist")
 ACRL_RE = re.compile(r"\bacrl\b", re.IGNORECASE)

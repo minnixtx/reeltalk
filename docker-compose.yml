@@ -21,7 +21,9 @@ services:
     image: postgres:17
     restart: unless-stopped
     shm_size: ${POSTGRES_SHM_SIZE:-128mb}
-    env_file: .env
+    # ${ENV_FILE}: a second local instance (federation testing, R45) runs the
+    # same file as its own compose project with -e ENV_FILE=.env.b.
+    env_file: ${ENV_FILE:-.env}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -36,7 +38,7 @@ services:
   web:
     build: .
     restart: unless-stopped
-    env_file: .env
+    env_file: ${ENV_FILE:-.env}
     command: uvicorn reeltalk.asgi:application --host 0.0.0.0 --port 3030
     ports:
       - "${WEB_PORT:-3030}:3030"
@@ -62,7 +64,7 @@ services:
   worker:
     build: .
     restart: unless-stopped
-    env_file: .env
+    env_file: ${ENV_FILE:-.env}
     command: python manage.py qcluster
     volumes:
       # The backfill downloads posters into MEDIA_ROOT — must be the shared
