@@ -65,6 +65,12 @@ def film_detail(request, film_id):
         .select_related("user")
         .order_by("-published_date")
     )
+    if request.user.is_authenticated:
+        # R56: hide the reviews of users this viewer has blocked. Blocking is
+        # per-logged-in-user state, so anonymous visitors see every review.
+        blocked_ids = set(request.user.blocks.values_list("id", flat=True))
+        if blocked_ids:
+            reviews = reviews.exclude(user_id__in=blocked_ids)
     data = {"film": film, "reviews": reviews}
     if request.user.is_authenticated:
         # D1 binary state drives the shelve controls on the page.
@@ -86,6 +92,8 @@ def film_detail(request, film_id):
             .order_by("id")
             .first()
         )
+        # The block-film control's state (R55).
+        data["is_film_blocked"] = request.user.blocked_films.filter(pk=film.id).exists()
     return render(request, "core/film/detail.html", data)
 
 
@@ -188,6 +196,31 @@ def unshelve(request, film_id):
         messages.success(request, "Removed from your watchlist.")
     else:
         messages.info(request, "Not on your watchlist.")
+    return redirect("film", film_id=film.id)
+
+
+@login_required
+@require_POST
+def film_block(request, film_id):
+    """Block a film (M5 increment 3, R55): local-only ``User.blocked_films``.
+
+    Read-side state — in v0.1 the effect is exclusion from search (already
+    wired in M2); nothing is delivered over federation and the film page
+    itself stays reachable by direct URL.
+    """
+    film = get_object_or_404(Film, id=resolve_film_id(film_id))
+    request.user.blocked_films.add(film)
+    messages.success(request, f"You have blocked “{film.title}”.")
+    return redirect("film", film_id=film.id)
+
+
+@login_required
+@require_POST
+def film_unblock(request, film_id):
+    """Unblock a film (M5 increment 3, R55)."""
+    film = get_object_or_404(Film, id=resolve_film_id(film_id))
+    request.user.blocked_films.remove(film)
+    messages.success(request, f"You have unblocked “{film.title}”.")
     return redirect("film", film_id=film.id)
 
 

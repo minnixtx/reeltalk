@@ -286,6 +286,85 @@ def test_detail_shows_correct_shelve_button(login, film):
     assert "Add to Watchlist" not in body
 
 
+# --- block / unblock film (M5 increment 3, R55) ------------------------------
+
+
+@pytest.mark.django_db
+def test_film_block_requires_login(client, film):
+    resp = client.post(f"/film/{film.id}/block/")
+    assert resp.status_code == 302
+    assert "/login/" in resp["Location"]
+
+
+@pytest.mark.django_db
+def test_film_block_is_post_only(login, film):
+    assert login.get(f"/film/{film.id}/block/").status_code == 405
+
+
+@pytest.mark.django_db
+def test_film_block_adds_to_blocked_films(login, user, film):
+    resp = login.post(f"/film/{film.id}/block/")
+    assert resp.status_code == 302
+    assert resp["Location"] == f"/film/{film.id}/"
+    assert film in user.blocked_films.all()
+
+
+@pytest.mark.django_db
+def test_film_unblock_removes_from_blocked_films(login, user, film):
+    user.blocked_films.add(film)
+    resp = login.post(f"/film/{film.id}/unblock/")
+    assert resp.status_code == 302
+    assert film not in user.blocked_films.all()
+
+
+@pytest.mark.django_db
+def test_detail_shows_block_button_and_toggles(login, film):
+    body = login.get(f"/film/{film.id}/").content.decode()
+    assert "Block</button>" in body
+    assert "/unblock/" not in body
+    login.post(f"/film/{film.id}/block/")
+    body = login.get(f"/film/{film.id}/").content.decode()
+    assert "Blocked</button>" in body
+    assert f"/film/{film.id}/unblock/" in body
+
+
+# --- Film page hides blocked users' reviews (M5 increment 3, R56) ------------
+
+
+@pytest.mark.django_db
+def test_film_detail_hides_blocked_users_reviews(login, user, film):
+    other = User.objects.create_user(localname="bob", password="s3cretpass")
+    review(user, film, rating="4.5", content="<p>Great.</p>")
+    review(other, film, rating="2", content="<p>Meh.</p>")
+    user.blocks.add(other)
+    body = login.get(f"/film/{film.id}/").content.decode()
+    assert "Great." in body  # own review still shows
+    assert "Meh." not in body  # the blocked user's review is hidden
+    assert "Reviews (1)" in body
+
+
+@pytest.mark.django_db
+def test_film_detail_anonymous_sees_all_reviews(client, user, film):
+    other = User.objects.create_user(localname="bob", password="s3cretpass")
+    review(user, film, rating="4.5", content="<p>Great.</p>")
+    review(other, film, rating="2", content="<p>Meh.</p>")
+    user.blocks.add(other)  # blocking is per-logged-in-user; anonymous sees all
+    body = client.get(f"/film/{film.id}/").content.decode()
+    assert "Great." in body
+    assert "Meh." in body
+    assert "Reviews (2)" in body
+
+
+@pytest.mark.django_db
+def test_film_detail_unblocking_shows_reviews_again(login, user, film):
+    other = User.objects.create_user(localname="bob", password="s3cretpass")
+    review(other, film, rating="2", content="<p>Meh.</p>")
+    user.blocks.add(other)
+    assert "Meh." not in login.get(f"/film/{film.id}/").content.decode()
+    user.blocks.remove(other)
+    assert "Meh." in login.get(f"/film/{film.id}/").content.decode()
+
+
 # --- finish flow: mark watched (rating required) + edit review (D5) ---------
 
 

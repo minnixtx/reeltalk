@@ -26,6 +26,9 @@ urlpatterns = [
     path("film/<int:film_id>/edit/", views.film_edit, name="film-edit"),
     path("film/<int:film_id>/shelve/", views.shelve, name="film-shelve"),
     path("film/<int:film_id>/unshelve/", views.unshelve, name="film-unshelve"),
+    # Block / unblock a film (M5 increment 3, R55): local-only read-side state.
+    path("film/<int:film_id>/block/", views.film_block, name="film-block"),
+    path("film/<int:film_id>/unblock/", views.film_unblock, name="film-unblock"),
     path(
         "film/<int:film_id>/watched/",
         views.mark_watched_view,

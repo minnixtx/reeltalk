@@ -40,6 +40,11 @@
       <button type="button" data-open-modal="mark-watched-modal">Edit review</button>
     {% endif %}
     {% if not film.tmdb_id %}<a class="btn" href="{% url 'film-edit' film.id %}">Edit</a>{% endif %}
+    {% if is_film_blocked %}
+      <form method="post" action="{% url 'film-unblock' film.id %}" class="inline">{% csrf_token %}<button type="submit">Blocked</button></form>
+    {% else %}
+      <form method="post" action="{% url 'film-block' film.id %}" class="inline">{% csrf_token %}<button type="submit">Block</button></form>
+    {% endif %}
   </div>
 {% endif %}
 
