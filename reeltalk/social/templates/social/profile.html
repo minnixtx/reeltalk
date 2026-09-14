@@ -28,6 +28,17 @@
           <button type="submit" class="btn">Follow</button>
         </form>
       {% endif %}
+      {% if is_blocked %}
+        <form method="post" action="{% url 'user-unblock' profile_user.localname %}" class="inline">
+          {% csrf_token %}
+          <button type="submit" class="btn">Blocked</button>
+        </form>
+      {% else %}
+        <form method="post" action="{% url 'user-block' profile_user.localname %}" class="inline">
+          {% csrf_token %}
+          <button type="submit" class="btn">Block</button>
+        </form>
+      {% endif %}
     {% endif %}
   </div>
 </header>

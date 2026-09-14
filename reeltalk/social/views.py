@@ -160,9 +160,10 @@ def user_profile(request, localname):
     is_self = request.user.is_authenticated and request.user.pk == user.pk
     data = {"profile_user": user, "is_self": is_self}
     if request.user.is_authenticated and not is_self:
-        # The follow button's state (the template hides the control on one's
-        # own profile and for anonymous visitors).
+        # The follow + block buttons' state (the template hides the controls
+        # on one's own profile and for anonymous visitors).
         data["is_following"] = request.user.follows.filter(pk=user.pk).exists()
+        data["is_blocked"] = request.user.blocks.filter(pk=user.pk).exists()
     if not user.local:
         # The home instance the mirror came from (the actor URL's netloc).
         data["home_instance"] = urlparse(user.actor_url).netloc
@@ -246,6 +247,46 @@ def user_follow(request, localname):
 def user_unfollow(request, localname):
     """POST: unfollow the profile's user (M5 increment 2)."""
     return _change_follow(request, localname, undo=True)
+
+
+def _change_block(request, localname: str, *, block: bool):
+    """The block / unblock POST routes' shared body (M5 increment 3).
+
+    Blocking is read-side state (R53/R54): it only changes the local
+    ``User.blocks`` M2M — a blocked user's statuses and shelf events drop out
+    of the blocker's feed, and their reviews disappear from film pages. There
+    is no Block activity delivered over federation in v0.1 (accepted limit),
+    so a remote target is handled exactly like a local one: a plain M2M change
+    on this instance, nothing sent to the home instance. As with follow, only
+    resolvable profiles can be blocked — an unknown handle 404s.
+    """
+    target = _resolve_profile_user(localname)
+    if target is None:
+        raise Http404("No such user")
+    blocker = request.user
+    if blocker.pk == target.pk:
+        messages.error(request, "You can't block yourself.")
+    elif block:
+        blocker.blocks.add(target)
+        messages.success(request, f"You have blocked {target.get_full_name()}.")
+    else:
+        blocker.blocks.remove(target)
+        messages.success(request, f"You have unblocked {target.get_full_name()}.")
+    return redirect("user-profile", localname=target.localname)
+
+
+@require_POST
+@login_required
+def user_block(request, localname):
+    """POST: block the profile's user (M5 increment 3)."""
+    return _change_block(request, localname, block=True)
+
+
+@require_POST
+@login_required
+def user_unblock(request, localname):
+    """POST: unblock the profile's user (M5 increment 3)."""
+    return _change_block(request, localname, block=False)
 
 
 @login_required

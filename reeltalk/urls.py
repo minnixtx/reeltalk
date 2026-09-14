@@ -63,6 +63,19 @@ urlpatterns = [
         social_views.user_unfollow,
         name="user-unfollow",
     ),
+    # Block / unblock a profile (M5 increment 3): read-side state — a local
+    # M2M change only, no federation delivery (R53). Same extended pattern so
+    # mirror handles (<user>@<netloc>) match too.
+    re_path(
+        rf"^user/(?P<localname>{PROFILE_LOCALNAME_RE})/block/$",
+        social_views.user_block,
+        name="user-block",
+    ),
+    re_path(
+        rf"^user/(?P<localname>{PROFILE_LOCALNAME_RE})/unblock/$",
+        social_views.user_unblock,
+        name="user-unblock",
+    ),
     # Remote-user discovery (M5 increment 2): user@domain → their profile.
     path("find/", social_views.find_user, name="find-user"),
     path("preferences/profile/", social_views.profile_edit, name="profile-edit"),
