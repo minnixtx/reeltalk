@@ -491,6 +491,77 @@ def test_feed_entries_comment_on_watched_film_stays_separate(db):
     assert kinds == ["status", "watched"]
 
 
+# --- Feed membership honors blocks (M5 increment 3, R54) ----------------------
+
+
+@pytest.mark.django_db
+def test_feed_member_ids_self_plus_followed_minus_blocked(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    alice.follows.add(bob, carol)
+    assert set(alice.feed_member_ids()) == {alice.id, bob.id, carol.id}
+    alice.blocks.add(bob)
+    assert set(alice.feed_member_ids()) == {alice.id, carol.id}
+
+
+@pytest.mark.django_db
+def test_feed_for_excludes_blocked_users(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    alice.follows.add(bob, carol)
+    dune = Film.objects.create(title="Dune", year=2021)
+    blade = Film.objects.create(title="Blade Runner", year=1982)
+    arrival = Film.objects.create(title="Arrival", year=2016)
+    mark_watched(bob, dune, rating="4")
+    mark_watched(carol, blade, rating="3")
+    Status.objects.create(
+        user=alice, film=arrival, status_type=Status.Type.COMMENT, content="<p>Hi.</p>"
+    )
+    alice.blocks.add(bob)
+    got = {s.user_id for s in Status.feed_for(alice)}
+    assert got == {alice.id, carol.id}  # bob's review is gone
+
+
+@pytest.mark.django_db
+def test_feed_entries_excludes_blocked_users_shelf_events(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    alice.follows.add(bob)
+    dune = Film.objects.create(title="Dune", year=2021)
+    shelve_to_watchlist(bob, dune)
+    assert {e.user.localname for e in feed_entries(alice)} == {"bob"}
+    alice.blocks.add(bob)
+    assert feed_entries(alice) == []
+
+
+@pytest.mark.django_db
+def test_feed_entries_following_a_blocked_user_stays_hidden(db):
+    # R50: following a blocked user is allowed — but the block still hides
+    # their content (membership = followed − blocked).
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    alice.follows.add(bob)
+    alice.blocks.add(bob)
+    dune = Film.objects.create(title="Dune", year=2021)
+    mark_watched(bob, dune, rating="4")
+    assert feed_entries(alice) == []
+
+
+@pytest.mark.django_db
+def test_feed_entries_unblocking_restores_the_user(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    alice.follows.add(bob)
+    alice.blocks.add(bob)
+    dune = Film.objects.create(title="Dune", year=2021)
+    shelve_to_watchlist(bob, dune)
+    assert feed_entries(alice) == []
+    alice.blocks.remove(bob)
+    assert {e.user.localname for e in feed_entries(alice)} == {"bob"}
+
+
 # --- Home page with shelf events ----------------------------------------------
 
 

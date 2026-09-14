@@ -214,6 +214,25 @@ class User(AbstractBaseUser, PermissionsMixin):
             user_rating=Subquery(rating)
         )
 
+    # --- Feed membership (M5 increment 3, R54) --------------------------------
+
+    def feed_member_ids(self):
+        """The user ids whose content appears in this user's home feed.
+
+        Self plus the users they follow, minus the users they have blocked:
+        blocking a user removes them from the feed entirely — their statuses
+        and shelf events alike (R54). You cannot block yourself, so self is
+        always present. Following a blocked user stays allowed (R50) but their
+        content stays hidden while the block stands.
+        """
+        blocked = set(self.blocks.values_list("id", flat=True))
+        followed = [
+            uid
+            for uid in self.follows.values_list("id", flat=True)
+            if uid not in blocked
+        ]
+        return [self.id] + followed
+
 
 class SiteSettings(models.Model):
     """Instance-wide settings — a single row (pk=1), admin-managed (§3.2).

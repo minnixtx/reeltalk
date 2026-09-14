@@ -484,16 +484,16 @@ class Status(models.Model):
     def feed_for(cls, user):
         """The user's minimal timeline (§3.6/§3.7 v0.1).
 
-        The user's own non-deleted statuses plus those of the users they
-        follow, newest first (Meta ordering). Groups join the union when they
-        land (M5); blocks and feed filters are M4/M5 (R13). The home feed is
-        built on this by ``feed_entries``: shelf events are derived from the
-        members' ShelfFilm rows, and a user's review of a watched film rides
-        on its "watched" entry instead of appearing twice (R35).
+        The non-deleted statuses of the feed members — self plus followed
+        users, minus blocked users (``user.feed_member_ids``, R54) — newest
+        first (Meta ordering). Groups join the union when they land (M5);
+        feed filters (which status types to see) are later (R13). The home
+        feed is built on this by ``feed_entries``: shelf events are derived
+        from the members' ShelfFilm rows, and a user's review of a watched
+        film rides on its "watched" entry instead of appearing twice (R35).
         """
-        followed = list(user.follows.values_list("id", flat=True))
         return cls.objects.filter(
-            Q(user=user) | Q(user_id__in=followed), deleted=False
+            user_id__in=user.feed_member_ids(), deleted=False
         ).select_related("user", "film")
 
 
@@ -545,9 +545,11 @@ def _group_has_written_review(user_id: int, film_ids: list[int]) -> bool:
 def feed_entries(user) -> list[FeedEntry]:
     """The user's home-feed entries, newest first (R33; shape per R35/R37).
 
-    Membership is the existing feed rule — own + followed users. The two
-    shelf events D3 used to suppress are derived from the members' to-read /
-    read ``ShelfFilm`` rows: "added Y to their Watchlist" and "watched Y".
+    Membership is the feed rule — own + followed users, minus blocked users
+    (``user.feed_member_ids``, R54): a blocked user's shelf events and
+    statuses alike are absent from the feed. The two shelf events D3 used to
+    suppress are derived from the members' to-read / read ``ShelfFilm`` rows:
+    "added Y to their Watchlist" and "watched Y".
     Bulk shelves aggregate (R37): consecutive same-user/same-shelf events
     within ``FEED_BULK_WINDOW`` of each other collapse into one entry —
     "added Y and N other films" — so a file import shows once, not 1,378
@@ -559,7 +561,7 @@ def feed_entries(user) -> list[FeedEntry]:
     ``Status.feed_for`` returns (comments, reviews without a Watched row)
     appears as its own entry.
     """
-    member_ids = [user.id] + list(user.follows.values_list("id", flat=True))
+    member_ids = user.feed_member_ids()
 
     shelf_rows = list(
         ShelfFilm.objects.filter(
