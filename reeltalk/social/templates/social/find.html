@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Find people — ReelTalk{% endblock %}
+
+{% block content %}
+<h1>Find people</h1>
+<p>Enter a full handle — <code>user@domain</code> — to find someone on this instance or another.</p>
+{% if error %}
+<p class="error">{{ error }}</p>
+{% endif %}
+<form method="post">
+  {% csrf_token %}
+  <input type="text" name="q" value="{{ q }}" placeholder="user@domain" autofocus>
+  <button type="submit">Find</button>
+</form>
+{% endblock %}

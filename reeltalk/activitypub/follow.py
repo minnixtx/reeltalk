@@ -31,11 +31,7 @@ from reeltalk.social.models import User
 
 from .delivery import deliver_activity, inbox_for
 from .identity import absolute_uri, actor_path
-from .mirrors import (
-    fetch_person_document,
-    mirror_user_from_person,
-    resolve_known_actor,
-)
+from .mirrors import ensure_mirror, resolve_known_actor
 
 
 def _actor_url(value) -> str | None:
@@ -45,21 +41,6 @@ def _actor_url(value) -> str | None:
     if isinstance(value, dict):
         return value.get("id") or None
     return None
-
-
-def _ensure_mirror(actor_url: str) -> User:
-    """The existing mirror for ``actor_url``, fetched + created on first contact.
-
-    Creation (not a refresh of an existing mirror) is the only fetch, per R42.
-    Raises the mirrors module's ``RemoteFetchError`` when the remote cannot be
-    resolved — the caller surfaces it rather than recording a follow to an
-    unknown user.
-    """
-    mirror = User.objects.filter(local=False, actor_url=actor_url).first()
-    if mirror is not None:
-        return mirror
-    doc = fetch_person_document(actor_url)
-    return mirror_user_from_person(doc)
 
 
 # --- Inbound handlers (registered in inbox.HANDLERS) ------------------------
@@ -158,7 +139,7 @@ def follow_user(request, follower: User, followed_actor_url: str) -> User:
     """
     if not follower.local:
         raise ValueError("Only a local user can initiate a follow")
-    mirror = _ensure_mirror(followed_actor_url)
+    mirror = ensure_mirror(followed_actor_url)
     _deliver_follow(request, follower, mirror, undo=False)
     return mirror
 

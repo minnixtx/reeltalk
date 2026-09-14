@@ -51,6 +51,20 @@ urlpatterns = [
         social_views.user_films,
         name="user-films",
     ),
+    # Follow / unfollow a profile (M5 increment 2): POST-only routes sharing
+    # the extended pattern so mirror handles (<user>@<netloc>) match too.
+    re_path(
+        rf"^user/(?P<localname>{PROFILE_LOCALNAME_RE})/follow/$",
+        social_views.user_follow,
+        name="user-follow",
+    ),
+    re_path(
+        rf"^user/(?P<localname>{PROFILE_LOCALNAME_RE})/unfollow/$",
+        social_views.user_unfollow,
+        name="user-unfollow",
+    ),
+    # Remote-user discovery (M5 increment 2): user@domain → their profile.
+    path("find/", social_views.find_user, name="find-user"),
     path("preferences/profile/", social_views.profile_edit, name="profile-edit"),
     # Film domain (detail now; create/edit/shelve/finish join in later pieces).
     path("", include("reeltalk.core.urls")),

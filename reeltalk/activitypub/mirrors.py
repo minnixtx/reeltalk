@@ -92,6 +92,58 @@ def fetch_person_document(actor_url: str) -> dict:
     return doc
 
 
+def webfinger_actor_url(localname: str, domain: str) -> str:
+    """RFC 6454: resolve ``acct:<localname>@<domain>`` to the actor URL.
+
+    The scheme rule (R51): a domain carrying an explicit non-default port is
+    reached over plain http at that port (LAN instances are published on
+    arbitrary ports with no TLS); without one, https is tried first and http
+    is the fallback. A 404 from a reachable server is a definitive "no such
+    user" answer; only network failures fall through to the next scheme.
+    Raises :class:`RemoteFetchError` on any failure — the caller shows a
+    message rather than failing the request.
+    """
+    try:
+        port = urlparse(f"//{domain}").port
+    except ValueError as err:
+        raise RemoteFetchError(f"Invalid domain: {domain}") from err
+    if port is None or port in (80, 443):
+        schemes = ("https", "http")
+    else:
+        schemes = ("http",)
+    resource = f"acct:{localname}@{domain}"
+    last_error: RemoteFetchError | None = None
+    for scheme in schemes:
+        url = f"{scheme}://{domain}/.well-known/webfinger"
+        try:
+            resp = requests.get(
+                url, params={"resource": resource}, timeout=REQUEST_TIMEOUT
+            )
+        except requests.RequestException:
+            last_error = RemoteFetchError(f"Could not reach {domain}")
+            continue
+        if resp.status_code == 404:
+            raise RemoteFetchError(f"No such user on {domain}: {localname}")
+        if not resp.ok:
+            last_error = RemoteFetchError(
+                f"Webfinger lookup failed (HTTP {resp.status_code})"
+            )
+            continue
+        try:
+            doc = resp.json()
+        except ValueError as err:
+            raise RemoteFetchError("Webfinger response is not JSON") from err
+        for link in doc.get("links", []):
+            if (
+                link.get("rel") == "self"
+                and link.get("type") == "application/activity+json"
+            ):
+                return link["href"]
+        raise RemoteFetchError("Webfinger response has no self link")
+    assert last_error is not None  # every scheme raised before this point
+    raise last_error
+
+
 def _mirror_localname(doc: dict) -> str:
     """The local handle for a remote mirror: ``<preferredUsername>@<netloc>``.
 
@@ -149,6 +201,20 @@ def mirror_user_from_person(doc: dict) -> User:
         # rather than merge two identities.
         raise RemoteFetchError("Mirror localname collision") from err
     return user
+
+
+def ensure_mirror(actor_url: str) -> User:
+    """The existing mirror for ``actor_url``, fetched + created on first contact.
+
+    Creation (not a refresh of an existing mirror) is the only fetch, per R42.
+    Raises :class:`RemoteFetchError` when the remote cannot be resolved — the
+    caller surfaces it rather than acting on an unknown user.
+    """
+    mirror = User.objects.filter(local=False, actor_url=actor_url).first()
+    if mirror is not None:
+        return mirror
+    doc = fetch_person_document(actor_url)
+    return mirror_user_from_person(doc)
 
 
 def refresh_mirror_profile(user) -> None:

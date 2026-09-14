@@ -12,10 +12,19 @@ but browsers now get a real profile (avatar, bio, films link) instead of a
 redirect to the films page. Remote mirrors are profiled too — their route
 matches the <preferredUsername>@<netloc> localname, and a missing avatar or
 bio triggers one throttled best-effort fetch of the home Person document.
+
+The profile also carries the follow relationship (M5 increment 2): a local
+target is a plain M2M change (same instance — no delivery), a remote target
+goes through the signed Follow / Undo(Follow) delivery (M4). And ``/find/``
+resolves a ``user@domain`` handle to a profile — same-domain handles
+directly, other domains via webfinger (RFC 6454) — without auto-following:
+one POST changes at most one relationship, and the follow action itself
+lives on the profile page.
 """
 
 from urllib.parse import urlparse
 
+import requests
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
@@ -23,10 +32,17 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
+from django.views.decorators.http import require_POST
 
 import reeltalk
+from reeltalk.activitypub.follow import follow_user, unfollow_user
 from reeltalk.activitypub.identity import accepts_activitypub, person_document
-from reeltalk.activitypub.mirrors import refresh_mirror_profile
+from reeltalk.activitypub.mirrors import (
+    RemoteFetchError,
+    ensure_mirror,
+    refresh_mirror_profile,
+    webfinger_actor_url,
+)
 from reeltalk.core.models import Shelf, feed_entries
 from reeltalk.core.utils import render_markdown
 
@@ -141,14 +157,137 @@ def user_profile(request, localname):
     if not user.local:
         refresh_mirror_profile(user)
         user.refresh_from_db()
-    data = {
-        "profile_user": user,
-        "is_self": request.user.is_authenticated and request.user.pk == user.pk,
-    }
+    is_self = request.user.is_authenticated and request.user.pk == user.pk
+    data = {"profile_user": user, "is_self": is_self}
+    if request.user.is_authenticated and not is_self:
+        # The follow button's state (the template hides the control on one's
+        # own profile and for anonymous visitors).
+        data["is_following"] = request.user.follows.filter(pk=user.pk).exists()
     if not user.local:
         # The home instance the mirror came from (the actor URL's netloc).
         data["home_instance"] = urlparse(user.actor_url).netloc
     return render(request, "social/profile.html", data)
+
+
+def _change_follow(request, localname: str, *, undo: bool):
+    """The follow / unfollow POST routes' shared body (M5 increment 2).
+
+    Operates on a resolvable profile — the button only renders there, so an
+    unresolvable handle is a 404 (you can't follow someone we don't know;
+    discovery at /find/ is what creates an unknown remote's mirror first). A
+    local target is a plain M2M change — same instance, no delivery. A remote
+    target goes through the signed Follow / Undo(Follow) delivery (M4); the
+    library finds the already-resolved mirror by actor_url, so the only failure
+    mode is the delivery itself hitting a down home instance — a dead remote
+    must not 500 the user's request (the same posture as status broadcasts):
+    the local state stands and a warning says the remote's copy lags.
+    """
+    target = _resolve_profile_user(localname)
+    if target is None:
+        raise Http404("No such user")
+    follower = request.user
+    if follower.pk == target.pk:
+        messages.error(request, "You can't follow yourself.")
+    elif target.local:
+        if undo:
+            follower.follows.remove(target)
+            messages.success(request, f"You no longer follow {target.get_full_name()}.")
+        else:
+            follower.follows.add(target)
+            messages.success(request, f"You now follow {target.get_full_name()}.")
+    elif undo:
+        try:
+            undone = unfollow_user(request, follower, target.actor_url)
+        except requests.RequestException:
+            # The M2M row is already removed locally; the Undo just couldn't
+            # be delivered (v0.1 has no retry queue).
+            messages.warning(
+                request,
+                f"You no longer follow {target.get_full_name()}, but their "
+                "instance couldn't be reached — they may still see you as a "
+                "follower.",
+            )
+        else:
+            if undone is None:
+                # Not following (no M2M row): nothing to undo, and the
+                # library sends no spurious Undo.
+                messages.info(
+                    request, f"You were not following {target.get_full_name()}."
+                )
+            else:
+                messages.success(
+                    request, f"You no longer follow {target.get_full_name()}."
+                )
+    else:
+        try:
+            follow_user(request, follower, target.actor_url)
+        except requests.RequestException:
+            # The follow is recorded locally; the signed delivery to a down
+            # home instance failed (v0.1 has no retry queue).
+            messages.warning(
+                request,
+                f"You now follow {target.get_full_name()}, but their instance "
+                "couldn't be reached — they may not have received the follow yet.",
+            )
+        else:
+            messages.success(request, f"You now follow {target.get_full_name()}.")
+    return redirect("user-profile", localname=target.localname)
+
+
+@require_POST
+@login_required
+def user_follow(request, localname):
+    """POST: follow the profile's user (M5 increment 2)."""
+    return _change_follow(request, localname, undo=False)
+
+
+@require_POST
+@login_required
+def user_unfollow(request, localname):
+    """POST: unfollow the profile's user (M5 increment 2)."""
+    return _change_follow(request, localname, undo=True)
+
+
+@login_required
+def find_user(request):
+    """Remote-user discovery (M5 increment 2): ``user@domain`` → their profile.
+
+    A same-domain handle resolves the local account directly; any other
+    domain goes through webfinger (RFC 6454) over real HTTP — the self
+    link's actor URL becomes a mirror (created on first contact) and the
+    user is redirected to its profile. Resolve-and-redirect only: submitting
+    never follows anyone (the follow action lives on the profile page).
+    """
+    value = request.POST.get("q", "").strip() if request.method == "POST" else ""
+    error = None
+    if request.method == "POST":
+        if value.count("@") != 1:
+            error = "Enter a full handle: user@domain."
+        else:
+            localname, _, domain = value.partition("@")
+            localname, domain = localname.strip(), domain.strip()
+            if not localname or not domain:
+                error = "Enter a full handle: user@domain."
+            elif domain.lower() == settings.DOMAIN.lower():
+                user = User.objects.filter(
+                    local=True, localname__iexact=localname
+                ).first()
+                if user is None:
+                    error = f"No user named {localname!r} on this instance."
+                else:
+                    return redirect("user-profile", localname=user.localname)
+            else:
+                try:
+                    actor_url = webfinger_actor_url(localname, domain)
+                    mirror = ensure_mirror(actor_url)
+                except RemoteFetchError:
+                    error = (
+                        f"Could not find {value} — check the handle and that "
+                        "the instance is reachable."
+                    )
+                else:
+                    return redirect("user-profile", localname=mirror.localname)
+    return render(request, "social/find.html", {"q": value, "error": error})
 
 
 @login_required

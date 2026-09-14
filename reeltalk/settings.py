@@ -19,11 +19,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = env.str("SECRET_KEY", default="insecure-dev-only-key-change-me")
 DEBUG = env.bool("DEBUG", default=False)
 
+# DOMAIN may carry an explicit port (an IP:port operator instance, R52); the
+# bare host is what ALLOWED_HOSTS and From addresses need.
 DOMAIN = env.str("DOMAIN", default="localhost")
 WEB_PORT = env.int("WEB_PORT", default=3030)
-ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[DOMAIN, "localhost"])
+DOMAIN_HOST = DOMAIN.split(":", 1)[0]
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[DOMAIN_HOST, "localhost"])
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
-BASE_URL = f"http://{DOMAIN}:{WEB_PORT}"
+BASE_URL = f"http://{DOMAIN}" if ":" in DOMAIN else f"http://{DOMAIN}:{WEB_PORT}"
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -210,5 +213,6 @@ if smtp_host:
 else:
     MAILERS = {"default": {"BACKEND": "django.core.mail.backends.console.EmailBackend"}}
 
-DEFAULT_FROM_EMAIL = f"{env.str('EMAIL_SENDER_NAME', default='admin')}@{DOMAIN}"
+# The From address needs a bare domain — no port (R52).
+DEFAULT_FROM_EMAIL = f"{env.str('EMAIL_SENDER_NAME', default='admin')}@{DOMAIN_HOST}"
 SERVER_EMAIL = DEFAULT_FROM_EMAIL

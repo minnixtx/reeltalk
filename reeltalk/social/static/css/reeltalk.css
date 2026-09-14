@@ -357,6 +357,11 @@ ul.errorlist {
   color: var(--error);
 }
 
+/* Inline error line (e.g. a failed /find/ lookup). */
+.error {
+  color: var(--error);
+}
+
 /* --- User films page (M1 increment 6) ------------------------------------- */
 
 .profile-head {
@@ -387,6 +392,11 @@ ul.errorlist {
 .profile-id {
   display: flex;
   flex-direction: column;
+}
+
+/* Follow / edit control, right-aligned on the profile head row. */
+.profile-actions {
+  margin-left: auto;
 }
 
 .handle {

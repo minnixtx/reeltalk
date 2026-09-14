@@ -13,11 +13,24 @@
     <h1>{{ profile_user.get_full_name }}</h1>
     <p class="handle">@{{ profile_user.username }}{% if not profile_user.local %} · on {{ home_instance }}{% endif %}</p>
   </div>
+  <div class="profile-actions">
+    {% if is_self %}
+      <a class="btn" href="{% url 'profile-edit' %}">Edit profile</a>
+    {% elif user.is_authenticated %}
+      {% if is_following %}
+        <form method="post" action="{% url 'user-unfollow' profile_user.localname %}" class="inline">
+          {% csrf_token %}
+          <button type="submit" class="btn">Following</button>
+        </form>
+      {% else %}
+        <form method="post" action="{% url 'user-follow' profile_user.localname %}" class="inline">
+          {% csrf_token %}
+          <button type="submit" class="btn">Follow</button>
+        </form>
+      {% endif %}
+    {% endif %}
+  </div>
 </header>
-
-{% if is_self %}
-<p><a class="btn" href="{% url 'profile-edit' %}">Edit profile</a></p>
-{% endif %}
 
 {% if profile_user.summary %}
 <div class="profile-summary">{{ profile_user.summary|safe }}</div>
