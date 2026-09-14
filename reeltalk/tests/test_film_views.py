@@ -365,6 +365,82 @@ def test_film_detail_unblocking_shows_reviews_again(login, user, film):
     assert "Meh." in login.get(f"/film/{film.id}/").content.decode()
 
 
+# --- delete review (M5 increment 4, R57) ------------------------------------
+
+
+@pytest.mark.django_db
+def test_delete_review_requires_login(client, user, film):
+    entry = review(user, film)
+    resp = client.post(f"/status/{entry.id}/delete/")
+    assert resp.status_code == 302
+    assert "/login/" in resp["Location"]
+
+
+@pytest.mark.django_db
+def test_delete_review_is_post_only(login, user, film):
+    entry = review(user, film)
+    assert login.get(f"/status/{entry.id}/delete/").status_code == 405
+
+
+@pytest.mark.django_db
+def test_delete_review_soft_deletes_and_keeps_watched(login, user, film):
+    # A written review via the finish flow puts the film on Watched.
+    login.post(f"/film/{film.id}/watched/", {"rating": "4.5", "content": "Great."})
+    entry = Status.objects.get(user=user, film=film)
+    resp = login.post(f"/status/{entry.id}/delete/")
+    assert resp.status_code == 302
+    assert resp["Location"] == f"/film/{film.id}/"
+    entry.refresh_from_db()
+    assert entry.deleted is True
+    assert entry.content == ""  # tombstone: content cleared, identity intact
+    assert entry.deleted_date is not None
+    # The film stays on Watched — v0.1 has no unwatch (R19); only the review
+    # is removed, so a bare "watched" feed entry remains (R35).
+    assert ShelfFilm.objects.filter(shelf__identifier=Shelf.READ, film=film).exists()
+    body = login.get(f"/film/{film.id}/").content.decode()
+    assert "Great." not in body
+    assert "No reviews yet." in body
+
+
+@pytest.mark.django_db
+def test_delete_review_cannot_delete_others_review(login, user, film):
+    other = User.objects.create_user(localname="bob", password="s3cretpass")
+    theirs = review(other, film, rating="2", content="<p>Meh.</p>")
+    # alice (the `login` fixture) tries to delete bob's review.
+    resp = login.post(f"/status/{theirs.id}/delete/")
+    assert resp.status_code == 404
+    theirs.refresh_from_db()
+    assert theirs.deleted is False
+
+
+@pytest.mark.django_db
+def test_delete_review_already_deleted_404s(login, user, film):
+    entry = review(user, film)
+    assert login.post(f"/status/{entry.id}/delete/").status_code == 302
+    # A second delete hits the tombstone (deleted=True) and 404s.
+    assert login.post(f"/status/{entry.id}/delete/").status_code == 404
+    entry.refresh_from_db()
+    assert entry.deleted is True
+
+
+@pytest.mark.django_db
+def test_detail_shows_delete_button_on_own_review_only(login, user, film):
+    other = User.objects.create_user(localname="bob", password="s3cretpass")
+    mine = review(user, film, rating="4.5", content="<p>Great.</p>")
+    theirs = review(other, film, rating="2", content="<p>Meh.</p>")
+    body = login.get(f"/film/{film.id}/").content.decode()
+    # The button targets the author's own status only — never another user's.
+    assert f"/status/{mine.id}/delete/" in body
+    assert f"/status/{theirs.id}/delete/" not in body
+
+
+@pytest.mark.django_db
+def test_detail_delete_button_hidden_anonymous(client, user, film):
+    review(user, film)
+    body = client.get(f"/film/{film.id}/").content.decode()
+    assert "review-delete" not in body
+
+
 # --- finish flow: mark watched (rating required) + edit review (D5) ---------
 
 

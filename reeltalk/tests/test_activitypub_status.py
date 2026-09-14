@@ -1049,6 +1049,40 @@ def test_unshelve_view_broadcasts_delete(client):
 
 @responses.activate
 @pytest.mark.django_db
+def test_delete_review_view_broadcasts_delete(client):
+    alice = User.objects.create_user(localname="alice", password="p")
+    bob = User.objects.create_user(localname="bob", password="p")
+    carol = _carol()
+    carol.save()
+    bob.follows.add(alice)  # local follower — never delivered to
+    carol.follows.add(alice)  # remote mirror — delivered to her home inbox
+    film = Film.objects.create(title="Arrival", year=2016)
+    status = Status.objects.create(
+        user=alice,
+        film=film,
+        status_type=Status.Type.REVIEW,
+        rating=Decimal("4.5"),
+        content="Great.",
+        raw_content="Great.",
+    )
+    client.force_login(alice)
+
+    responses.add(responses.POST, REMOTE_INBOX)
+    response = client.post(f"/status/{status.pk}/delete/")
+
+    assert response.status_code == 302
+    status.refresh_from_db()
+    assert status.deleted is True
+    # Only the remote follower's inbox is hit — bob (local) reads the local
+    # tombstone his feed query already filters.
+    assert len(responses.calls) == 1
+    sent = json.loads(responses.calls[0].request.body)
+    assert sent["type"] == "Delete"
+    assert sent["object"]["id"] == f"http://testserver/status/{status.pk}/"
+
+
+@responses.activate
+@pytest.mark.django_db
 def test_search_watchlist_broadcasts(client):
     alice = User.objects.create_user(localname="alice", password="p")
     carol = _carol()

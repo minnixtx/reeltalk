@@ -17,6 +17,7 @@ from django.views.decorators.http import require_POST
 from reeltalk.activitypub.broadcast import (
     broadcast_shelf_event,
     broadcast_status_create,
+    broadcast_status_delete,
     broadcast_status_update,
 )
 from reeltalk.activitypub.identity import accepts_activitypub
@@ -162,6 +163,35 @@ def mark_watched_view(request, film_id):
         broadcast_shelf_event(request, user, film, Shelf.TO_READ, added=False)
     messages.success(request, "Marked as watched.")
     return redirect("film", film_id=film.id)
+
+
+@login_required
+@require_POST
+def delete_review(request, status_id):
+    """Delete the user's own review (M5 increment 4).
+
+    Author-only: the lookup is scoped to the requesting user's local,
+    non-deleted statuses, so someone else's review, a remote mirror, or an
+    already-deleted tombstone all 404. Soft-delete keeps the row as a
+    tombstone with its identity intact (§3.2) and clears its content; the
+    film stays on the Watched shelf (v0.1 has no unwatch — R19), so the feed
+    shows a bare "watched" entry (R35). The deletion is broadcast to the
+    author's remote followers (M4 increment 6); local followers read the
+    local tombstone their feed query already filters on ``deleted=False``.
+    """
+    status = get_object_or_404(
+        Status, id=status_id, user=request.user, local=True, deleted=False
+    )
+    film_id = status.film_id
+    status.delete()
+    # Federation broadcast (M4 increment 6): the deletion to remote followers.
+    # A dead follower drops its send — this request must not fail because of
+    # one unreachable instance.
+    broadcast_status_delete(request, status)
+    messages.success(request, "Your review has been deleted.")
+    if film_id is not None:
+        return redirect("film", film_id=film_id)
+    return redirect("index")
 
 
 @login_required

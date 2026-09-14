@@ -262,6 +262,12 @@ ul.errorlist {
   font-weight: 600;
 }
 
+/* Delete-review control (M5 increment 4): right-aligned in the head row. The
+   more specific selector overrides form.inline's `margin: 0`. */
+.review-head form.review-delete {
+  margin-left: auto;
+}
+
 /* Shelve/edit controls under the film header. */
 .film-actions {
   display: flex;

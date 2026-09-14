@@ -23,6 +23,12 @@ urlpatterns = [
     path("film/<int:film_id>/", views.film_detail, name="film"),
     # A status's wire URL (M4 increment 6): the Note document for AP clients.
     path("status/<int:status_id>/", views.status_detail, name="status"),
+    # Delete the user's own review (M5 increment 4): soft-delete + broadcast.
+    path(
+        "status/<int:status_id>/delete/",
+        views.delete_review,
+        name="status-delete",
+    ),
     path("film/<int:film_id>/edit/", views.film_edit, name="film-edit"),
     path("film/<int:film_id>/shelve/", views.shelve, name="film-shelve"),
     path("film/<int:film_id>/unshelve/", views.unshelve, name="film-unshelve"),

@@ -65,6 +65,12 @@
             <span class="review-author">{{ review.user.localname }}</span>
             {% if review.rating %}<span class="rating" title="{{ review.rating|floatformat:'-1' }} / 5">{{ review.rating|stars }}</span>{% endif %}
             <span class="muted">{{ review.published_date|date:"Y-m-d" }}</span>
+            {% if user.is_authenticated and review.user_id == user.id %}
+              <form method="post" action="{% url 'status-delete' review.id %}" class="inline review-delete">
+                {% csrf_token %}
+                <button type="submit">Delete</button>
+              </form>
+            {% endif %}
           </div>
           {% if review.content %}<div class="review-body">{{ review.content|safe }}</div>{% endif %}
         </li>
