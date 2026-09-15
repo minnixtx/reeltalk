@@ -13,8 +13,10 @@ RUN pip install --no-cache-dir "uv==0.12.10" \
 
 FROM python:3.13-slim
 
+# postgresql-client provides pg_dump/pg_restore for the daily backup job (M6);
+# libpq5 is the client library psycopg already needs.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl libpq5 \
+    && apt-get install -y --no-install-recommends curl libpq5 postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /usr/sbin/nologin appuser
 
@@ -30,11 +32,11 @@ COPY . /app/
 
 # Ensure volume mount points exist and are owned by the runtime user before
 # first use (named volumes inherit permissions from the image on init).
-RUN mkdir -p /app/static /app/images \
+RUN mkdir -p /app/static /app/images /app/backups \
     && python -m compileall /app/reeltalk /app/manage.py \
     && chown -R appuser:appuser /app
 
-VOLUME ["/app/static", "/app/images"]
+VOLUME ["/app/static", "/app/images", "/app/backups"]
 USER appuser
 
 # Entrypoint runs migrations + collectstatic for the web role on start.

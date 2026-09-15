@@ -152,6 +152,14 @@ STATIC_ROOT = env.str("STATIC_ROOT", default=str(BASE_DIR / "static"))
 MEDIA_URL = "/images/"
 MEDIA_ROOT = env.str("MEDIA_ROOT", default=str(BASE_DIR / "images"))
 
+# Database backups (M6): the daily pg_dump job writes custom-format dumps to
+# BACKUP_DIR and keeps the newest BACKUP_RETENTION per database. The `backup`
+# compose service runs it on a schedule; the management command is also runnable
+# by hand or from host cron. BACKUP_DIR defaults to /app/backups — the backups
+# named volume mounted in docker-compose.yml.
+BACKUP_DIR = env.str("BACKUP_DIR", default=str(BASE_DIR / "backups"))
+BACKUP_RETENTION = env.int("BACKUP_RETENTION", default=7)
+
 # Whitenoise serves the collected static files (compressed, immutable-cached)
 # from the web process. Media (/images/) is served by a URL pattern in
 # reeltalk/urls.py — same model, no separate server. Production uses manifest

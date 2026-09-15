@@ -76,10 +76,28 @@ services:
     networks:
       - main
 
+  # Daily database backup (M6): its own service so backups run independently of
+  # web/worker health. Runs the tested `backup_database` management command once
+  # a day (backup-loop.sh) into the backups volume; pg_dump ships in the image via
+  # postgresql-client. Override BACKUP_TIME (HH:MM) / BACKUP_RETENTION in .env.
+  backup:
+    build: .
+    restart: unless-stopped
+    env_file: ${ENV_FILE:-.env}
+    command: bash /app/backup-loop.sh
+    volumes:
+      - backups_volume:/app/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - main
+
 volumes:
   pgdata:
   static_volume:
   media_volume:
+  backups_volume:
 
 networks:
   main:

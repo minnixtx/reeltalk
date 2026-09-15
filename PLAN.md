@@ -264,6 +264,12 @@ New and changed dependencies from the stack audit (§3.9), same method as §4.1 
 |---|---|---|
 | **cryptography** (50.0.1) — new, ActivityPub keys + HTTP signatures | Apache-2.0 OR BSD-3-Clause (PyPI `license_expression`, verified 2026-09-10) | ✅ Dual-licensed; either clause is AGPLv3-compatible. Needed because the stdlib has no Ed25519 and no maintained Python ActivityPub library exists to borrow key handling from (R7: federation built from spec). Transitive deps cffi (MIT) + pycparser (MIT) are permissive. |
 
+### 4.7 M6 additions (2026-09-14)
+
+| Package | License (verified) | Verdict |
+|---|---|---|
+| **postgresql-client** (Debian system package, in-image) — new, for the daily `pg_dump` backup job | PostgreSQL License (the permissive license Postgres ships under; a BSD-style grant) | ✅ Provides `pg_dump`/`pg_restore` inside the app image so the tested `backup_database` command runs in-container and from the `backup` service. Not a Python dependency (no `pyproject.toml` change); installed via apt in the Dockerfile alongside the already-present `libpq5`. |
+
 ## 5. Build plan (milestones for this repo)
 
 Sizing note: federation-from-spec (M4) is the largest single chunk of new code; it was inherited for free in the legacy fork and must be written here against the W3C specs.
