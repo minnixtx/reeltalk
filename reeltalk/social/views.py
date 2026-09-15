@@ -78,6 +78,16 @@ def about(request):
     )
 
 
+def welcome(request):
+    """Getting-started page (M6): the core loop for new users.
+
+    Static and public (Letterboxd-style, owner decision) — anonymous visitors
+    read it with a signup CTA; signed-in users see the same four steps with
+    live links. Reached right after signup and from the footer on every page.
+    """
+    return render(request, "welcome.html")
+
+
 def signup(request):
     if not has_admin():
         return redirect("setup")
@@ -98,7 +108,8 @@ def signup(request):
         )
         login(request, user)
         messages.success(request, f"Welcome, {user.localname}!")
-        return redirect("index")
+        # New users land on the getting-started page (M6), not the feed.
+        return redirect("welcome")
     return render(request, "signup.html", {"form": form})
 
 

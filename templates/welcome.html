@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Getting started — ReelTalk{% endblock %}
+
+{% block content %}
+<h1>Getting started</h1>
+<p class="muted">ReelTalk is a home for tracking and reviewing films. The core loop takes four steps.</p>
+
+{% if user.is_authenticated %}
+  <p>You're signed in as <strong>{{ user.localname }}</strong> — here's how it works.</p>
+{% else %}
+  <p><a class="btn" href="{% url 'signup' %}">Sign up</a> to start your own watchlist, or read on first.</p>
+{% endif %}
+
+<section class="welcome-steps">
+  <div class="step">
+    <span class="step-num">1</span>
+    <div class="step-body">
+      <h2>Find a film</h2>
+      <p>Use the search bar at the top of any page, or the full <a href="{% url 'film-search' %}">search page</a>. Results come from TMDB — click one to open its page.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <span class="step-num">2</span>
+    <div class="step-body">
+      <h2>Add it to your Watchlist</h2>
+      <p>On a film's page choose "Add to watchlist" — or use the one-click button right on the search results. Films you want to see collect here.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <span class="step-num">3</span>
+    <div class="step-body">
+      <h2>Mark it watched</h2>
+      <p>When you've seen a film, mark it watched from its page: pick a star rating (required) and add an optional written review.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <span class="step-num">4</span>
+    <div class="step-body">
+      <h2>Follow film fans</h2>
+      {% if user.is_authenticated %}
+        <p>Use <a href="{% url 'find-user' %}">Find people</a> to discover other members and follow them — their watchlist adds and reviews show up in your feed.</p>
+      {% else %}
+        <p>Once you've signed up, use Find people to discover other members and follow them — their watchlist adds and reviews show up in your feed.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

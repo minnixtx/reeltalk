@@ -77,6 +77,8 @@ def test_signup_blocked_before_setup(client):
 def test_signup_creates_local_user_and_logs_in(client, admin_user):
     response = client.post(reverse("signup"), VALID_SIGNUP)
     assert response.status_code == 302
+    # New users land on the getting-started page (M6), not the feed.
+    assert response.url == reverse("welcome")
     user = User.objects.get(localname="alice")
     assert user.local is True
     assert user.is_superuser is False

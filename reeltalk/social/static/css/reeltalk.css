@@ -645,3 +645,39 @@ table.results th {
   color: var(--muted);
   font-weight: 600;
 }
+
+/* --- Welcome / getting-started page (M6) ----------------------------------- */
+
+.welcome-steps {
+  margin-top: 1.5rem;
+}
+
+.step {
+  display: flex;
+  gap: 0.9rem;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.step-num {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 50%;
+}
+
+.step-body h2 {
+  margin: 0.1rem 0 0.35rem;
+  font-size: 1.15rem;
+}
+
+.step-body p {
+  margin: 0;
+  color: var(--muted);
+}

@@ -35,6 +35,8 @@ urlpatterns = [
     path("signup/", social_views.signup, name="signup"),
     path("setup/", social_views.setup, name="setup"),
     path("about/", social_views.about, name="about"),
+    # Getting-started page (M6): the core loop for new users; public.
+    path("welcome/", social_views.welcome, name="welcome"),
     # The human profile page at the actor URL (M5): Person JSON-LD for AP
     # clients by content negotiation, the profile for browsers. It matches
     # before the activitypub include so it owns the bare /user/<localname>/;
