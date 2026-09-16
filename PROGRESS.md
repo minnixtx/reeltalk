@@ -768,6 +768,8 @@ Sub-increment **B** of the M6 artwork item (plan item 2): `templates/base.html`'
 
 **Verification (:3030, 2026-09-16):** `docker compose build web` + `up -d web`. Anonymous homepage 200 over HTTP with the new markup (header-top grid, Log in / Sign up right, Home-only nav carrying `class="active"`); served stylesheet `reeltalk.e314c8a206dc.css` carries the new rules. Authenticated state verified via the in-container test client: all five nav items + Log out render; the active underline moves correctly across `/`, `/find/`, `/preferences/import/` and `/user/minnix/films/`; the handle links to the profile page; no "Reviews" in the header. Headless-Chromium screenshot confirms the rendered layout (logo left / centered search / actions right / centered nav with red-underlined Home). Gate: ruff check + format green, `makemigrations --check` clean, pytest **723 passed + 5 skipped** — identical to baseline (no Python changes, no new files → no new guard cases). Awaiting the owner's live browser review.
 
+**Owner-review polish (2026-09-16, commit `d7d0fec`):** on the owner's first look at B live, two header tweaks — the Monoton wordmark grew 1.7rem → **2.5rem** to match MOCKUP.png proportions, and the nav-row **Log out lost its button box** (`.site-nav form.inline button`: no border/padding/box-shadow, muted Oswald at nav-link size, cream on hover) so it reads as nav text; inline buttons elsewhere keep their boxed style. Rebuilt + redeployed; full gate green again (**723 passed + 5 skipped**); served stylesheet now `reeltalk.cf2b30a48a9e.css`.
+
 **Decisions:** R62 in §4 below.
 
 ### Clean-room guard (added 2026-09-07)
