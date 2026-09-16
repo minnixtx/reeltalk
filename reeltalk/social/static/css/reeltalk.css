@@ -100,16 +100,25 @@ a {
   padding: 1rem 1rem 3rem;
 }
 
+/* Marquee band (M6 artwork B, R61): a wide dark strip spanning the viewport —
+   top row logo / search / profile, nav row below. The header's inner container
+   is wider than the 40rem page column (which stays until sub-increment C). */
 .site-header {
   border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 0 rgba(212, 43, 38, 0.35), 0 8px 22px rgba(0, 0, 0, 0.5);
 }
 
-.site-header .container.nav {
-  display: flex;
+.site-header .container {
+  max-width: 72rem;
+}
+
+.header-top {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 34rem) 1fr;
   align-items: center;
-  justify-content: space-between;
-  padding-top: 0.75rem;
-  padding-bottom: 0.75rem;
+  gap: 1.25rem;
+  padding-top: 0.9rem;
+  padding-bottom: 0.4rem;
 }
 
 /* Wordmark — Monoton neon-tube treatment (M6 artwork, R60). */
@@ -123,15 +132,76 @@ a {
   text-shadow: 0 0 2px #fff, 0 0 6px var(--red-bright), 0 0 14px var(--red), 0 0 28px rgba(255, 40, 25, 0.9);
 }
 
-.site-header nav a {
-  margin-left: 1rem;
+.header-user {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+}
+
+.header-user a {
   color: var(--muted);
   text-decoration: none;
   font-size: 0.95rem;
 }
 
-.site-header nav a:hover {
-  color: var(--accent);
+.header-user a:hover {
+  color: var(--cream);
+}
+
+/* The signed-in handle is the only item on this side — kept lit like a
+   marquee name, going neon-red on hover. */
+.header-user .user-name {
+  color: var(--cream);
+}
+
+.header-user .user-name:hover {
+  color: var(--red-bright);
+}
+
+/* Nav row under the marquee, centered under the search box; the active page
+   gets the red underline (R61). */
+.nav-inner {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.9rem;
+  padding-top: 0;
+  padding-bottom: 0.7rem;
+}
+
+.site-nav a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.95rem;
+  letter-spacing: 0.03em;
+  padding: 0.2rem 0.1rem;
+  border-bottom: 2px solid transparent;
+}
+
+.site-nav a:hover {
+  color: var(--cream);
+}
+
+.site-nav a.active {
+  color: var(--cream);
+  border-bottom-color: var(--red-bright);
+  text-shadow: 0 0 10px rgba(255, 65, 56, 0.5);
+}
+
+/* Narrow screens: the search box drops to its own full-width line so the
+   suggest dropdown keeps its shape. */
+@media (max-width: 40rem) {
+  .header-top {
+    grid-template-columns: 1fr auto;
+    row-gap: 0.6rem;
+  }
+
+  .global-search {
+    grid-column: 1 / -1;
+    order: 3;
+  }
 }
 
 h1 {
@@ -606,19 +676,15 @@ ul.errorlist {
 
 /* --- Global search + suggest dropdown (M2 increment 4) ---------------------- */
 
-.site-header .container.nav {
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
 .global-search {
   position: relative;
-  margin-left: 1rem;
 }
 
+/* Wide centered search box (M6 artwork B); the suggest dropdown anchors to
+   its bottom edge via the form's position:relative. */
 .global-search input[type="search"] {
-  width: 13rem;
-  padding: 0.35rem 0.6rem;
+  width: 100%;
+  padding: 0.5rem 0.9rem;
   font: inherit;
   color: inherit;
   background: var(--field);
@@ -760,10 +826,14 @@ table.results th {
    Halftone + thin amber/brown trim on display surfaces. No full-page grunge —
    body copy stays clean. */
 
-/* Header band: faint red halftone dot field (border comes from the base rule). */
+/* Header band (marquee, R61): faint red halftone dot field over a deepened
+   brown-black, with a soft red glow bleeding down from the top edge. The
+   border + under-edge come from the base rule. */
 .site-header {
-  background-image: radial-gradient(circle at center, rgba(255, 80, 45, 0.07) 1px, transparent 1.6px);
-  background-size: 7px 7px;
+  background-color: #0d0b09;
+  background-image: radial-gradient(circle at center, rgba(255, 80, 45, 0.07) 1px, transparent 1.6px),
+    linear-gradient(180deg, rgba(114, 23, 19, 0.35), rgba(114, 23, 19, 0) 65%);
+  background-size: 7px 7px, 100% 100%;
 }
 
 /* Buttons: worn look — faint diagonal sheen + amber-brown border + soft shadow. */
@@ -792,7 +862,8 @@ h2 {
   letter-spacing: 0.02em;
 }
 
-.site-header nav a,
+.site-nav a,
+.header-user a,
 button,
 .btn,
 .meta-list,

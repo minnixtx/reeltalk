@@ -10,29 +10,43 @@
 </head>
 <body>
 <header class="site-header">
-  <div class="container nav">
+  {# M6 artwork B (R61): marquee band — logo left, search centered, profile right. #}
+  <div class="container header-top">
     <a class="brand" href="{% url 'index' %}">ReelTalk</a>
     <form class="global-search" action="{% url 'film-search' %}" method="get" role="search">
       <input type="search" name="q" placeholder="Search films…" autocomplete="off" aria-label="Search films">
       <ul id="search-suggest" class="suggest-list" hidden></ul>
     </form>
-    <nav>
+    <div class="header-user">
       {% if user.is_authenticated %}
-        <a href="{% url 'user-profile' user.localname %}">{{ user.localname }}</a>
-        <a href="{% url 'user-films' user.localname %}">My films</a>
-        <a href="{% url 'find-user' %}">Find people</a>
-        <a href="{% url 'import-films' %}">Import</a>
-        <a href="{% url 'export-films' %}">Export</a>
-        <form method="post" action="{% url 'logout' %}" class="inline">
-          {% csrf_token %}
-          <button type="submit">Log out</button>
-        </form>
+        <a class="user-name" href="{% url 'user-profile' user.localname %}">{{ user.localname }}</a>
       {% else %}
         <a href="{% url 'login' %}">Log in</a>
         <a href="{% url 'signup' %}">Sign up</a>
       {% endif %}
-    </nav>
+    </div>
   </div>
+  {# Nav row under the marquee: real pages only; "Reviews" joins when a /reviews/ index exists. #}
+  <nav class="site-nav" aria-label="Main">
+    <div class="container nav-inner">
+      {% url 'index' as home_url %}
+      <a href="{{ home_url }}"{% if request.path == home_url %} class="active"{% endif %}>Home</a>
+      {% if user.is_authenticated %}
+        {% url 'user-films' user.localname as films_url %}
+        {% url 'find-user' as find_url %}
+        {% url 'import-films' as import_url %}
+        {% url 'export-films' as export_url %}
+        <a href="{{ films_url }}"{% if request.path == films_url %} class="active"{% endif %}>My Films</a>
+        <a href="{{ find_url }}"{% if request.path == find_url %} class="active"{% endif %}>Find People</a>
+        <a href="{{ import_url }}"{% if request.path == import_url %} class="active"{% endif %}>Import</a>
+        <a href="{{ export_url }}"{% if request.path == export_url %} class="active"{% endif %}>Export</a>
+        <form method="post" action="{% url 'logout' %}" class="inline">
+          {% csrf_token %}
+          <button type="submit">Log out</button>
+        </form>
+      {% endif %}
+    </div>
+  </nav>
 </header>
 <main class="container">
   {% if messages %}
