@@ -1,31 +1,81 @@
 /* ReelTalk stylesheet. Grindhouse / midnight-movie visual identity (M6
-   artwork, R60): a dark warm-neon-on-black palette with distressed textures
-   on display surfaces. Body copy and form fields stay clean and legible —
-   the grit lives on headings, accents, buttons, and surface textures. */
+   artwork, R60): layered near-black browns, dirty-cream text, and red used as
+   theatrical lighting. Typography carries most of the identity — Bebas Neue
+   for titles/section headings, Oswald for nav/metadata/buttons, Archivo for
+   body/reviews, Monoton only for the neon wordmark. Body copy stays clean;
+   grit is limited to display surfaces (header band, buttons, poster frames). */
 
 :root {
-  /* Named palette — IMAGE2 swatches (M6 artwork). */
-  --blood-red: #a02e24;  /* deep oxblood — solid fills (buttons, header band) */
-  --amber:     #d1581f;  /* burnt orange — secondary accent + error */
-  --mustard:   #dda32b;  /* golden — ratings, badges, small accents */
-  --cream:     #ebe3d3;  /* warm off-white — body text, paper surfaces */
-  --teal:      #2f6b68;  /* muted petrol — tertiary accent */
-  --brown:     #6e4a2c;  /* leather/wood — borders, chrome-trim */
-  --deep-black:#171310;  /* warm near-black — page background */
+  /* Palette — near-black browns + dirty cream + theatrical red. Values per the
+     owner's brief / mockup reference (adapted, not copied). */
+  --black:    #090807;  /* page background */
+  --black-2:  #11100e;  /* deeper alt background */
+  --panel:    #141210;  /* raised panel (cards, dropdowns) */
+  --panel-2:  #1b1713;  /* raised panel / hover */
+  --cream:        #e9dfcb;  /* body text */
+  --cream-muted:  #b8aa91;  /* secondary text */
+  --red:        #d42b26;  /* primary red — fills, display headings */
+  --red-bright: #ff4138;  /* neon/bright red — active, glow, key highlights */
+  --red-dark:   #721713;  /* dark red — deep fills, shadows */
+  --amber:   #e0a52b;  /* amber accent + focus */
+  --mustard: #c79836;  /* mustard */
+  --teal:    #43868a;  /* teal tertiary */
+  --gold:    #f1b51a;  /* star ratings */
+  --line:    #5a432c;  /* thin amber/brown borders */
 
-  /* Derived shades for legibility on the dark base (tints of the palette). */
-  --neon-red: #e2543c;   /* brightened blood red — links + interactive accents */
-  --muted:    #b6a98f;   /* dimmed cream — secondary text */
-  --border:   #40301d;   /* warm dark border (brown-tinted) */
-  --surface:  #221a12;   /* raised panel, one step up from the page bg */
-  --surface-2:#2c2116;   /* hover / active surface */
-  --field:    #120d09;   /* inset form field, a hair darker than the page */
+  /* Typography roles. */
+  --display: "Bebas Neue", sans-serif;  /* film titles + section headings */
+  --ui:      "Oswald", sans-serif;      /* nav, metadata, buttons, small headings */
+  --body:    "Archivo", sans-serif;     /* body text + reviews */
 
   /* Semantic roles — the rest of this sheet references these. */
-  --bg: var(--deep-black);
+  --bg: var(--black);
   --fg: var(--cream);
-  --accent: var(--neon-red);
-  --error: var(--amber);
+  --muted: var(--cream-muted);
+  --accent: #e0554a;   /* theatrical red for links/interactive (not full neon) */
+  --border: var(--line);
+  --error: #ff5a3c;
+  --surface: var(--panel);
+  --surface-2: var(--panel-2);
+  --field: #0d0b09;    /* inset form field, a hair darker than the page */
+
+  /* Aliases kept for existing fill/border rules. */
+  --blood-red: var(--red);
+  --brown: var(--line);
+}
+
+/* Self-hosted SIL OFL fonts (no CDN, no build step — R6). Each font's OFL.txt
+   sits alongside it under static/fonts/. */
+@font-face {
+  font-family: "Monoton";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(../fonts/monoton.woff2) format("woff2");
+}
+
+@font-face {
+  font-family: "Bebas Neue";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(../fonts/bebas-neue.woff2) format("woff2");
+}
+
+@font-face {
+  font-family: "Oswald";
+  font-style: normal;
+  font-weight: 200 700;
+  font-display: swap;
+  src: url(../fonts/oswald.woff2) format("woff2");
+}
+
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url(../fonts/archivo.woff2) format("woff2");
 }
 
 * {
@@ -34,7 +84,7 @@
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--body);
   line-height: 1.55;
   color: var(--fg);
   background: var(--bg);
@@ -62,11 +112,15 @@ a {
   padding-bottom: 0.75rem;
 }
 
+/* Wordmark — Monoton neon-tube treatment (M6 artwork, R60). */
 .brand {
-  font-weight: 700;
-  font-size: 1.25rem;
-  color: var(--fg);
+  font-family: "Monoton", sans-serif;
+  font-weight: 400;
+  font-size: 1.7rem;
+  letter-spacing: 0.02em;
+  color: #ffd5ca;
   text-decoration: none;
+  text-shadow: 0 0 2px #fff, 0 0 6px var(--red-bright), 0 0 14px var(--red), 0 0 28px rgba(255, 40, 25, 0.9);
 }
 
 .site-header nav a {
@@ -167,8 +221,8 @@ ul.messages li {
 }
 
 ul.messages li.error {
-  background: rgba(160, 46, 36, 0.2);
-  border-color: var(--blood-red);
+  background: rgba(212, 43, 38, 0.2);
+  border-color: var(--red);
   color: #e9a58f;
 }
 
@@ -229,7 +283,7 @@ ul.errorlist {
   margin: 0;
 }
 
-/* Star rating: a gray background row with a gold foreground row clipped to the
+/* Star rating: a dim background row with a gold foreground row clipped to the
    rating's width. Shared by read-only display and the interactive widget. */
 .stars {
   position: relative;
@@ -249,7 +303,7 @@ ul.errorlist {
 }
 
 .stars-fg {
-  color: var(--mustard);
+  color: var(--gold);
   position: absolute;
   top: 0;
   left: 0;
@@ -700,4 +754,51 @@ table.results th {
 .step-body p {
   margin: 0;
   color: var(--muted);
+}
+
+/* --- Medium texture pass (M6 artwork, R60) ---------------------------------
+   Halftone + thin amber/brown trim on display surfaces. No full-page grunge —
+   body copy stays clean. */
+
+/* Header band: faint red halftone dot field (border comes from the base rule). */
+.site-header {
+  background-image: radial-gradient(circle at center, rgba(255, 80, 45, 0.07) 1px, transparent 1.6px);
+  background-size: 7px 7px;
+}
+
+/* Buttons: worn look — faint diagonal sheen + amber-brown border + soft shadow. */
+button,
+.btn {
+  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0 6px, rgba(0, 0, 0, 0.06) 6px 12px);
+  border: 1px solid #846b49;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+/* Poster / thumbnail placeholders: halftone dot fill (borders stay warm-brown). */
+.poster-placeholder,
+.thumb-placeholder,
+.suggest-thumb-placeholder {
+  background-image: radial-gradient(circle at center, rgba(233, 223, 203, 0.09) 1px, transparent 1.7px);
+  background-size: 8px 8px;
+}
+
+/* --- Typography roles (M6 artwork, R60) ------------------------------------
+   Placed last so these win over the `font: inherit` shorthands above. Bebas
+   Neue for titles/section headings; Oswald for nav/metadata/buttons/small
+   headings; Archivo (the body default) is used everywhere else. */
+h1,
+h2 {
+  font-family: var(--display);
+  letter-spacing: 0.02em;
+}
+
+.site-header nav a,
+button,
+.btn,
+.meta-list,
+.handle,
+.tabs a,
+table.results th,
+.search-row .watchlist-btn {
+  font-family: var(--ui);
 }
