@@ -125,7 +125,8 @@ a {
 .brand {
   font-family: "Monoton", sans-serif;
   font-weight: 400;
-  font-size: 1.7rem;
+  /* Sized against MOCKUP.png proportions (owner review of M6 increment 5). */
+  font-size: 2.5rem;
   letter-spacing: 0.02em;
   color: #ffd5ca;
   text-decoration: none;
@@ -188,6 +189,20 @@ a {
   color: var(--cream);
   border-bottom-color: var(--red-bright);
   text-shadow: 0 0 10px rgba(255, 65, 56, 0.5);
+}
+
+/* Log out reads as nav text, not a button (owner review of M6 increment 5). */
+.site-nav form.inline button {
+  border: none;
+  padding: 0.2rem 0.1rem;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 0.95rem;
+  letter-spacing: 0.03em;
+}
+
+.site-nav form.inline button:hover {
+  color: var(--cream);
 }
 
 /* Narrow screens: the search box drops to its own full-width line so the
