@@ -116,7 +116,8 @@ a {
   display: grid;
   grid-template-columns: 1fr minmax(0, 34rem) 1fr;
   align-items: center;
-  gap: 1.25rem;
+  /* Wide column gap keeps clear air between the wordmark and the search box. */
+  gap: 1.25rem 4rem;
   padding-top: 0.9rem;
   padding-bottom: 0.4rem;
 }
@@ -126,9 +127,9 @@ a {
   font-family: "Monoton", sans-serif;
   font-weight: 400;
   /* Sized against MOCKUP.png proportions (owner review of M6 increment 5). */
-  font-size: 2.5rem;
+  font-size: 3.6rem;
   letter-spacing: 0.02em;
-  color: #ffd5ca;
+  color: #f9a58f;
   text-decoration: none;
   text-shadow: 0 0 2px #fff, 0 0 6px var(--red-bright), 0 0 14px var(--red), 0 0 28px rgba(255, 40, 25, 0.9);
 }
