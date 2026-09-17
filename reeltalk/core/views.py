@@ -9,7 +9,8 @@ from urllib.parse import quote
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponse, JsonResponse
+from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
@@ -36,6 +37,8 @@ from .models import (
     Shelf,
     ShelfFilm,
     Status,
+    genre_from_slug,
+    live_reviews,
     mark_watched,
     resolve_film_id,
     shelve_to_watchlist,
@@ -538,3 +541,53 @@ def export_films(request):
             headers={"Content-Disposition": disposition},
         )
     return render(request, "core/export_films.html")
+
+
+# --- Genre subfeed (M6 artwork sub-increment C, R64) -------------------------
+
+# Review cards run long, so a page holds fewer rows than the 50-row films list.
+GENRE_PAGE_SIZE = 20
+
+
+def genre(request, slug):
+    """A genre subfeed: the instance's reviews of films in that genre (R64).
+
+    A "Popular Genres" pill lands here — newest review first, every author
+    whose review this instance holds (mirrors included). The film page is the
+    target of each row's title link, so the subfeed reads as a feed rather
+    than a list of names. R55/R56 read-side rules apply to a signed-in viewer:
+    reviews of locally blocked films and by blocked users stay out. Unknown or
+    stale slugs 404 — ``genre_from_slug`` knows only genres carrying reviews,
+    so a pill never leads to an empty page.
+    """
+    genre_row = genre_from_slug(slug)
+    if genre_row is None:
+        raise Http404("No such genre.")
+    reviews = (
+        live_reviews()
+        .filter(film__genres__contains=[genre_row.name])
+        .select_related("user", "film")
+        .order_by("-published_date")
+    )
+    if request.user.is_authenticated:
+        reviews = reviews.exclude(film_id__in=_local_film_ids(request.user))
+        blocked_user_ids = set(request.user.blocks.values_list("id", flat=True))
+        if blocked_user_ids:
+            reviews = reviews.exclude(user_id__in=blocked_user_ids)
+    paginator = Paginator(reviews, GENRE_PAGE_SIZE)
+    try:
+        page_obj = paginator.page(request.GET.get("page"))
+    except PageNotAnInteger:
+        page_obj = paginator.page(1)
+    except EmptyPage:
+        raise Http404("Page not found.") from None
+    return render(
+        request,
+        "core/genre.html",
+        {
+            "genre": genre_row,
+            "reviews": page_obj.object_list,
+            "page_obj": page_obj,
+            "page_query": "?",
+        },
+    )

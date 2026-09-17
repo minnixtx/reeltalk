@@ -6,6 +6,7 @@ binary watch state (D1) lives on the Shelf/ShelfFilm side, not here.
 """
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -14,8 +15,9 @@ from typing import TYPE_CHECKING
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
-from django.db.models import Q
+from django.db.models import Count, Max, Q
 from django.utils import timezone
+from django.utils.text import slugify
 
 if TYPE_CHECKING:
     from reeltalk.social.models import User
@@ -762,3 +764,110 @@ def unshelve_from_watchlist(user, film: Film) -> bool:
         return False
     row.delete()
     return True
+
+
+# --- Home rail (M6 artwork sub-increment C, R61) -----------------------------
+
+# The trending window is strict (owner decision, 2026-09-17): a thin month
+# shows a short stub rather than topping up with older reviews.
+TRENDING_WINDOW = timedelta(days=30)
+TRENDING_LIMIT = 8
+POPULAR_GENRES_LIMIT = 8
+
+
+@dataclass
+class TrendingFilm:
+    """One "Trending Films" rail row (R61): the film and its window count."""
+
+    film: Film
+    review_count: int
+
+
+@dataclass
+class GenreCount:
+    """One "Popular Genres" pill (R61): label, URL slug, review count."""
+
+    name: str
+    slug: str
+    review_count: int
+
+
+def live_reviews():
+    """The review statuses the rail counts (R61).
+
+    D5's review kinds alike — written reviews and rating-only entries — minus
+    soft-deleted rows. Includes remote mirrors: the rail shows what this
+    instance holds, which is the point of federation.
+    """
+    return Status.objects.filter(
+        status_type__in=list(Status.REVIEW_TYPES), deleted=False
+    )
+
+
+def trending_films(limit: int = TRENDING_LIMIT, window: timedelta = TRENDING_WINDOW):
+    """Films with the most live reviews inside ``window``, busiest first (R61).
+
+    Counts written and rating-only reviews alike. Ties break on the newest
+    review and then the film id, so the stub order is stable between requests.
+    """
+    rows = (
+        live_reviews()
+        .filter(published_date__gte=timezone.now() - window)
+        .values("film_id")
+        .annotate(review_count=Count("id"), latest=Max("published_date"))
+        .order_by("-review_count", "-latest", "film_id")[:limit]
+    )
+    films = Film.objects.in_bulk([row["film_id"] for row in rows])
+    return [
+        TrendingFilm(films[row["film_id"]], row["review_count"])
+        for row in rows
+        if row["film_id"] in films
+    ]
+
+
+def _reviewed_genre_tally() -> Counter:
+    """Live review counts per genre, over reviewed films only (R64).
+
+    Shelves hold nearly the whole imported archive, so a shelf-inclusive tally
+    would just echo the TMDB catalog; counting only films somebody reviewed
+    keeps every pill's subfeed non-empty. The count is reviews rather than
+    films, matching the rows the genre page lists. Small-instance scale lets
+    one grouped query plus one film read stand in for an unnest aggregate.
+    """
+    per_film = dict(
+        live_reviews()
+        .exclude(film__isnull=True)
+        .values_list("film_id")
+        .annotate(review_count=Count("id"))
+    )
+    tally: Counter = Counter()
+    for film in Film.objects.filter(pk__in=per_film):
+        for genre in film.genres:
+            name = genre.strip()
+            if name:
+                tally[name] += per_film[film.pk]
+    return tally
+
+
+def ranked_genres(limit: int | None = None) -> list[GenreCount]:
+    """Genres of reviewed films, most-reviewed first (ties alphabetical)."""
+    ordered = sorted(
+        _reviewed_genre_tally().items(),
+        key=lambda item: (-item[1], item[0].lower(), item[0]),
+    )
+    ranked = [GenreCount(name, slugify(name), count) for name, count in ordered]
+    return ranked if limit is None else ranked[:limit]
+
+
+def popular_genres(limit: int = POPULAR_GENRES_LIMIT) -> list[GenreCount]:
+    """The "Popular Genres" pills (R61): the top ``limit`` ranked genres."""
+    return ranked_genres(limit)
+
+
+def genre_from_slug(slug: str) -> GenreCount | None:
+    """The genre a pill's URL addresses; None when nothing carries that slug.
+
+    Ranked genres only, so a pill never leads to an empty subfeed and an
+    unknown or stale slug 404s.
+    """
+    return next((genre for genre in ranked_genres() if genre.slug == slug), None)
