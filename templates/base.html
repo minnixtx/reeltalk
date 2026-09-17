@@ -48,7 +48,8 @@
     </div>
   </nav>
 </header>
-<main class="container">
+{# Pages that run wider than the reading column override main_class (home's 2-pane, R64). #}
+<main class="container{% block main_class %}{% endblock %}">
   {% if messages %}
     <ul class="messages">
       {% for message in messages %}

@@ -80,9 +80,11 @@ def test_footer_links_to_about_on_every_page(client, admin):
 
 
 @pytest.mark.django_db
-def test_logged_in_home_still_shows_feed_with_site_name(client, admin):
+def test_logged_in_home_leads_with_the_feed(client, admin):
+    # M6 artwork C (R64): the wordmark lives in the header, so the signed-in
+    # home opens on the "Now Playing" feed instead of the landing intro.
     User.objects.create_user(localname="alice", password="s3cretpass")
     assert client.login(username="alice", password="s3cretpass")
     body = client.get("/").content.decode()
-    assert "<h1>ReelTalk</h1>" in body
+    assert "Now Playing" in body
     assert 'class="feed"' in body

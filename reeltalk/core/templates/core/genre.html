@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% load film_tags %}
+
+{% block title %}{{ genre.name }} reviews{% endblock %}
+
+{% block content %}
+{# Genre subfeed (M6 artwork C, R64): reached from a "Popular Genres" pill. #}
+<section class="genre-feed">
+  <h1 class="pane-title">{{ genre.name }}</h1>
+  <p class="pane-sub">{{ page_obj.paginator.count }} review{{ page_obj.paginator.count|pluralize }} from this instance, newest first.</p>
+  {% if reviews %}
+    <ul class="review-list">
+      {% for review in reviews %}
+        <li class="review">
+          <div class="review-head">
+            <span class="review-author">{{ review.user.localname }}</span>
+            {% if review.rating %}<span title="{{ review.rating|floatformat:'-1' }} / 5">{{ review.rating|stars }}</span>{% endif %}
+            <span class="muted">{{ review.published_date|date:"Y-m-d" }}</span>
+          </div>
+          <div class="feed-item">
+            {% if review.film.poster %}
+              <img class="thumb" src="{{ review.film.poster.url }}" alt="">
+            {% else %}
+              <span class="thumb thumb-placeholder"></span>
+            {% endif %}
+            <p class="feed-film"><a href="{% url 'film' review.film.id %}">{{ review.film.title }}{% if review.film.year %} ({{ review.film.year }}){% endif %}</a></p>
+          </div>
+          {% if review.content %}<div class="review-body">{{ review.content|safe }}</div>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">Nothing left to show here.</p>
+  {% endif %}
+  {% if page_obj.paginator.num_pages > 1 %}
+    <nav class="pager">
+      {% if page_obj.has_previous %}<a href="{{ page_query }}page={{ page_obj.previous_page_number }}">← Previous</a>{% endif %}
+      <span class="muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+      {% if page_obj.has_next %}<a href="{{ page_query }}page={{ page_obj.next_page_number }}">Next →</a>{% endif %}
+    </nav>
+  {% endif %}
+</section>
+{% endblock %}

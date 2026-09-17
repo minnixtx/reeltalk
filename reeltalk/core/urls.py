@@ -19,6 +19,8 @@ urlpatterns = [
         name="search-watchlist",
     ),
     path("search/suggest/", views.search_suggest, name="search-suggest"),
+    # Genre subfeed (M6 artwork C, R64): the "Popular Genres" pills land here.
+    path("genre/<slug:slug>/", views.genre, name="genre"),
     path("film/create/", views.film_create, name="film-create"),
     path("film/<int:film_id>/", views.film_detail, name="film"),
     # A status's wire URL (M4 increment 6): the Note document for AP clients.

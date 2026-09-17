@@ -936,6 +936,190 @@ button,
   background-size: 8px 8px;
 }
 
+/* --- Home 2-pane + rail (M6 artwork C, R64) ---------------------------------
+   The home page runs as wide as the marquee band above it so the feed's left
+   edge sits under the wordmark and the rail's right edge under the profile
+   corner; every other page keeps the 40rem reading column. Below the stack
+   point the rail falls in from the right and its two panels sit side by side. */
+.container.wide-main {
+  max-width: 72rem;
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22rem;
+  gap: 2.5rem;
+  align-items: start;
+}
+
+.rail {
+  display: grid;
+  gap: 1.5rem;
+}
+
+/* Pane heading with the red hairline running out toward the rail. */
+.pane-title {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 1.25rem 0 1rem;
+  font-size: 2.5rem;
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--cream);
+}
+
+.pane-title::after {
+  content: "";
+  flex: 1;
+  height: 2px;
+  background: linear-gradient(90deg, var(--red-bright), rgba(212, 43, 38, 0));
+  box-shadow: 0 0 8px rgba(255, 65, 56, 0.4);
+}
+
+.pane-sub {
+  margin: -0.6rem 0 1.25rem;
+  font-size: 0.9rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* The owner-supplied ticket graphics head each rail card and print its title
+   themselves (R64), so the cards under them need no heading of their own. */
+.rail-banner {
+  width: 100%;
+  height: auto;
+  transform: rotate(-0.8deg);
+  filter: drop-shadow(0 7px 14px rgba(0, 0, 0, 0.55));
+}
+
+/* The trending card is a plain list on the dark rail surface: rank chip, title,
+   review count. */
+.trending-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.trending-list li {
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 0.55rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid rgba(233, 223, 203, 0.12);
+}
+
+.trending-list li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.trending-rank {
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font-size: 0.72rem;
+  line-height: 1.35rem;
+  text-align: center;
+  color: var(--cream-muted);
+}
+
+.trending-film {
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--cream);
+}
+
+.trending-film:hover {
+  color: var(--red-bright);
+  text-decoration: underline;
+}
+
+.trending-year {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.trending-count {
+  grid-column: 2;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Heading a graphic already shows sighted readers (the ticket banner). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Popular Genres: dark panel matching the feed panels, amber-lit pills on hover. */
+.rail-panel {
+  padding: 0.9rem 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(14, 12, 10, 0.88);
+}
+
+.rail-panel h2 {
+  margin: 0 0 0.7rem;
+  font-size: 1.5rem;
+  text-transform: uppercase;
+  color: var(--cream);
+}
+
+.genre-pills {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.genre-pills a {
+  display: inline-block;
+  padding: 0.2rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(27, 23, 19, 0.85);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--cream-muted);
+}
+
+.genre-pills a:hover {
+  border-color: var(--amber);
+  background: var(--amber);
+  color: #12100d;
+}
+
+@media (max-width: 64rem) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2rem;
+  }
+
+  .rail {
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  }
+}
+
 /* --- Typography roles (M6 artwork, R60) ------------------------------------
    Placed last so these win over the `font: inherit` shorthands above. Bebas
    Neue for titles/section headings; Oswald for nav/metadata/buttons/small
@@ -954,6 +1138,10 @@ button,
 .handle,
 .tabs a,
 table.results th,
-.search-row .watchlist-btn {
+.search-row .watchlist-btn,
+.pane-sub,
+.trending-rank,
+.trending-count,
+.genre-pills a {
   font-family: var(--ui);
 }

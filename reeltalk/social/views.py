@@ -43,7 +43,7 @@ from reeltalk.activitypub.mirrors import (
     refresh_mirror_profile,
     webfinger_actor_url,
 )
-from reeltalk.core.models import Shelf, feed_entries
+from reeltalk.core.models import Shelf, feed_entries, popular_genres, trending_films
 from reeltalk.core.utils import render_markdown
 
 from .forms import ProfileForm, SignupForm
@@ -57,10 +57,18 @@ def has_admin() -> bool:
 def index(request):
     if not has_admin():
         return redirect("setup")
-    data = {"site": SiteSettings.get_instance()}
+    # The home rail (M6 artwork C, R61) is instance-wide and public: its links
+    # go only to pages an anonymous visitor can already open (film pages, the
+    # genre subfeed). Counts stay the same for every viewer — a blocked user's
+    # review still counts toward a film's tally; only the lists hide them.
+    data = {
+        "site": SiteSettings.get_instance(),
+        "trending": trending_films(),
+        "genres": popular_genres(),
+    }
     if request.user.is_authenticated:
         # The v0.1 timeline (§3.6/§3.7): shelf events + statuses (R33/R35);
-        # anonymous visitors get the landing page only.
+        # anonymous visitors get the sign-up CTA in the feed's place.
         data["feed"] = feed_entries(request.user)
     return render(request, "home.html", data)
 
