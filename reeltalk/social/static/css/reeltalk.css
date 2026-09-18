@@ -24,7 +24,6 @@
   --gold:    #f1b51a;  /* star ratings */
   --line:    #5a432c;  /* thin amber/brown borders */
   --steel:   #5c5852;  /* dirty steel gray — search trim (mockup) */
-  --divider: #c1c1be;  /* header/footer rule color (owner pick, 2026-09-16) */
 
   /* Grunge surface stack — dark scrim over the tile; used by the body. */
   --grunge-stack: linear-gradient(rgba(9, 8, 7, 0.86), rgba(9, 8, 7, 0.86)),
@@ -118,11 +117,11 @@ a {
    top row logo / search / profile, nav row below. The header's inner
    container is wider than the 40rem page column (which stays until
    sub-increment C). No own background since the owner texture pass: it shows
-   the site-wide grunge like the rest of the page; a thicker light-steel rule
-   closes the band (see the divider overlays in the texture section). */
+   the site-wide grunge like the rest of the page; a worn chrome rail closes
+   the band (see the rail rules in the texture section). */
 .site-header {
   position: relative;
-  border-bottom: 3px solid var(--divider);
+  border-bottom: 3px solid var(--black-2);
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
 }
 
@@ -700,7 +699,7 @@ ul.errorlist {
 
 .site-footer {
   position: relative;
-  border-top: 3px solid var(--divider);
+  border-top: 3px solid var(--black-2);
   margin-top: 2rem;
 }
 
@@ -876,30 +875,37 @@ table.results th {
    + red-glow marquee treatment was removed so the header carries the same
    site-wide grunge as the rest of the page. */
 
-/* The header/footer rules sit *under* the grunge (owner request, 2026-09-16):
-   a strip of the tile is blended over each border line with soft-light, so
-   scratches and speckles pass across the rule instead of it floating as a
-   flat sticker above the texture. The tile is opaque, so it must be blended,
-   not painted (and no scrim — that would wash the light steel away). */
+/* Grungy chrome rails (owner request, 2026-09-18): the header/footer rules are
+   a worn chrome bar rather than a flat line — bright bevelled metal eaten by
+   corrosion pits, re-polished in short streaks, warm rust stains and grime
+   bleeding past the edges. Painted from an original strip (generated for this
+   project, so rule 4 of REWRITE.md is satisfied) because CSS blend modes could
+   not do it: the grunge tile is a dark texture, so every blend that eats metal
+   (hard-light / overlay / multiply) crushed the whole rail to black instead of
+   pitting it, and soft-light against the page backdrop was far too faint. The
+   3px borders under/over these strips are now near-black (--black-2) so the
+   pits read as dark gaps; the light steel lives in the strip itself. */
 .site-header::after,
 .site-footer::before {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
-  height: 3px;
-  background-image: url("../images/grunge-background.png");
-  background-size: 1000px;
-  mix-blend-mode: soft-light;
+  height: 17px;
+  background-image: url("../images/chrome-rail.png");
+  background-repeat: repeat-x;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.55));
   pointer-events: none;
 }
 
 .site-header::after {
-  bottom: -3px;
+  bottom: -10px;
 }
 
 .site-footer::before {
-  top: -3px;
+  top: -10px;
+  /* Start mid-strip so the footer rail is not a copy of the header's pattern. */
+  background-position: -1150px 0;
 }
 
 /* Content panels stay dark and nearly opaque over the grunge (owner texture
