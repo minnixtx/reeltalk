@@ -25,9 +25,13 @@
   --line:    #5a432c;  /* thin amber/brown borders */
   --steel:   #5c5852;  /* dirty steel gray — search trim (mockup) */
 
-  /* Grunge surface stack — dark scrim over the tile; used by the body. */
-  --grunge-stack: linear-gradient(rgba(9, 8, 7, 0.86), rgba(9, 8, 7, 0.86)),
-    url("../images/grunge-background.png");
+  /* Grunge surface stack — dark scrim over the weathered plate; used by the body.
+     The scrim sits at .62 (was .86 over the raw tile) because the page background
+     measured luminance stddev 1.9 — flat — where the reference look sits at 15-32.
+     Prominence comes from the plate's contrast, not from lifting this scrim: the
+     plate averages near-black, so the mean holds at ~7.8 while stddev rises. */
+  --grunge-stack: linear-gradient(rgba(9, 8, 7, 0.62), rgba(9, 8, 7, 0.62)),
+    url("../images/grunge-weathered.png");
   --grunge-size: auto, 1000px;
 
   /* Typography roles. */
@@ -94,9 +98,10 @@ body {
   font-family: var(--body);
   line-height: 1.55;
   color: var(--fg);
-  /* Site-wide grunge tile under a dark scrim (owner texture pass, 2026-09-16):
-     the rgba(9,8,7,.86) wash keeps the texture at ~14% so body copy stays
-     legible; raise the alpha if it ever fights text. */
+  /* Site-wide weathered plate under a dark scrim (owner pass, 2026-09-18): the
+     scrim lets ~38% of the plate through so the wear actually reads, while the
+     plate's near-black average keeps the page dark enough for cream body copy.
+     Raise the alpha if it ever fights text; see --grunge-stack above. */
   background-color: var(--black);
   background-image: var(--grunge-stack);
   background-size: var(--grunge-size);
