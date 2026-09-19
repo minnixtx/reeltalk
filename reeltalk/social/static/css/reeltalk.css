@@ -144,16 +144,30 @@ a {
   padding-bottom: 0.4rem;
 }
 
-/* Wordmark — Monoton neon-tube treatment (M6 artwork, R60). */
+/* Wordmark — Monoton neon-tube treatment (M6 artwork, R60; relit per R68). */
 .brand {
   font-family: "Monoton", sans-serif;
   font-weight: 400;
   /* Sized against MOCKUP.png proportions (owner review of M6 increment 5). */
   font-size: 3.6rem;
   letter-spacing: 0.02em;
-  color: #f9a58f;
+  /* Fill is the filament, the stroke over it is the red glass: painting the stroke
+     last carves red back into each Monoton bar and leaves a narrow white-hot core,
+     which is what made the mockup's wordmark read as lit (a flat fill capped at
+     luminance 193 with nothing above 200 read as paint). The stroke is in em, not px:
+     the brand steps down to 2.2rem under 40rem, where a fixed 1px edge swallows the
+     bars whole and the wordmark goes dark red (measured max lum 171 — worse than the
+     flat fill it replaced). */
+  color: #fff4ee;
+  -webkit-text-stroke: 0.0174em var(--red);
   text-decoration: none;
-  text-shadow: 0 0 2px #fff, 0 0 6px var(--red-bright), 0 0 14px var(--red), 0 0 28px rgba(255, 40, 25, 0.9);
+  text-shadow:
+    0 0 2px #fff,
+    0 0 5px var(--red-bright),
+    0 0 12px var(--red-bright),
+    0 0 26px var(--red),
+    0 0 48px rgba(255, 40, 25, 0.7),
+    0 0 80px rgba(255, 30, 20, 0.35);
 }
 
 .header-user {
