@@ -180,7 +180,7 @@ a {
 .header-user a {
   color: var(--muted);
   text-decoration: none;
-  font-size: 0.95rem;
+  font-size: 0.88rem;
 }
 
 .header-user a:hover {
@@ -212,8 +212,8 @@ a {
 .site-nav a {
   color: var(--muted);
   text-decoration: none;
-  font-size: 0.95rem;
-  letter-spacing: 0.03em;
+  font-size: 0.88rem;
+  letter-spacing: 0.02em;
   padding: 0.2rem 0.1rem;
   position: relative;
   border-bottom: 2px solid transparent;
@@ -259,8 +259,8 @@ a {
   padding: 0.2rem 0.1rem;
   box-shadow: none;
   color: var(--muted);
-  font-size: 0.95rem;
-  letter-spacing: 0.03em;
+  font-size: 0.88rem;
+  letter-spacing: 0.02em;
 }
 
 .site-nav form.inline button:hover {
@@ -1172,16 +1172,15 @@ button,
 
 /* --- Typography roles (M6 artwork, R60) ------------------------------------
    Placed last so these win over the `font: inherit` shorthands above. Bebas
-   Neue for titles/section headings; Oswald for nav/metadata/buttons/small
-   headings; Archivo (the body default) is used everywhere else. */
+   Neue for titles/section headings; Oswald for metadata/buttons/small headings;
+   Archivo (the body default) is used everywhere else, including the header's own
+   text — see the rule below. */
 h1,
 h2 {
   font-family: var(--display);
   letter-spacing: 0.02em;
 }
 
-.site-nav a,
-.header-user a,
 button,
 .btn,
 .meta-list,
@@ -1194,4 +1193,15 @@ table.results th,
 .trending-count,
 .genre-pills a {
   font-family: var(--ui);
+}
+
+/* The header's text takes the film-title face (owner pass, R69): the nav row, its
+   borderless Log out control and the profile link read in Archivo at the trending
+   card's weight, so the marquee speaks the same voice as the rail it leads into.
+   Log out is listed because the `button` role above claims it otherwise. */
+.site-nav a,
+.site-nav form.inline button,
+.header-user a {
+  font-family: var(--body);
+  font-weight: 600;
 }
