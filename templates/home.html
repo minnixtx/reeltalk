@@ -16,6 +16,11 @@
           {% for entry in feed %}
             <li class="review">
               <div class="review-head">
+                {% if entry.user.avatar %}
+                  <img class="avatar avatar-row" src="{{ entry.user.avatar.url }}" alt="">
+                {% else %}
+                  <span class="avatar avatar-row avatar-placeholder" aria-hidden="true"></span>
+                {% endif %}
                 <span class="review-author">{{ entry.user.localname }}</span>
                 {% if entry.rating %}<span title="{{ entry.rating|floatformat:'-1' }} / 5">{{ entry.rating|stars }}</span>{% endif %}
                 <span class="muted">{{ entry.date|date:"Y-m-d" }}</span>

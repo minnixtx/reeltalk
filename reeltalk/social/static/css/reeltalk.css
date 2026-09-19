@@ -24,6 +24,7 @@
   --gold:    #f1b51a;  /* star ratings */
   --line:    #5a432c;  /* thin amber/brown borders */
   --steel:   #5c5852;  /* dirty steel gray — search trim (mockup) */
+  --avatar-ring: #d9c3b3;  /* worn cream bezel around an avatar disc */
 
   /* Grunge surface stack — dark scrim over the weathered plate; used by the body.
      The scrim sits at .62 (was .86 over the raw tile) because the page background
@@ -188,8 +189,12 @@ a {
 }
 
 /* The signed-in handle is the only item on this side — kept lit like a
-   marquee name, going neon-red on hover. */
+   marquee name, going neon-red on hover. The avatar rides inside the same link
+   so the corner stays one tab stop, with the reference's ~12px disc-to-name gap. */
 .header-user .user-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
   color: var(--cream);
 }
 
@@ -606,12 +611,23 @@ ul.errorlist {
   gap: 0.75rem;
 }
 
+/* Every avatar disc, at every size: a worn cream bezel with saturated red hugging
+   the portrait inside it — the same hot-core-in-coloured-glass family as the nav
+   tube and the wordmark. Sizes are rem so they scale with the root font. */
 .avatar {
   width: 3rem;
   height: 3rem;
   border-radius: 50%;
   object-fit: cover;
-  border: 1px solid var(--border);
+  flex: none;
+  border: 2px solid var(--avatar-ring);
+  box-shadow: inset 0 0 0 2px rgba(196, 30, 24, 0.85), 0 0 7px rgba(255, 65, 56, 0.25);
+}
+
+/* Row heads are compact; the marquee corner and the profile pages share the base size. */
+.avatar-row {
+  width: 2.05rem;
+  height: 2.05rem;
 }
 
 .profile-head h1 {
@@ -620,9 +636,14 @@ ul.errorlist {
 
 /* --- Profile page (M5) ---------------------------------------------------- */
 
+/* No uploaded avatar — every new account and most remote mirrors: a hand-drawn
+   silhouette on a distressed red-to-black plate, so an empty disc still reads as
+   lit rather than broken. */
 .avatar-placeholder {
   display: inline-block;
-  background: var(--border);
+  background: radial-gradient(circle at 50% 34%, #d9b78e 0 15%, transparent 16%),
+    radial-gradient(ellipse 78% 46% at 50% 96%, #d9b78e 0 52%, transparent 53%),
+    linear-gradient(160deg, #7e1a15, #14100e);
 }
 
 .profile-id {

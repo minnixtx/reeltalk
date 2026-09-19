@@ -62,6 +62,11 @@
       {% for review in reviews %}
         <li class="review">
           <div class="review-head">
+            {% if review.user.avatar %}
+              <img class="avatar avatar-row" src="{{ review.user.avatar.url }}" alt="">
+            {% else %}
+              <span class="avatar avatar-row avatar-placeholder" aria-hidden="true"></span>
+            {% endif %}
             <span class="review-author">{{ review.user.localname }}</span>
             {% if review.rating %}<span class="rating" title="{{ review.rating|floatformat:'-1' }} / 5">{{ review.rating|stars }}</span>{% endif %}
             <span class="muted">{{ review.published_date|date:"Y-m-d" }}</span>

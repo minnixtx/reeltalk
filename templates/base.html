@@ -19,7 +19,15 @@
     </form>
     <div class="header-user">
       {% if user.is_authenticated %}
-        <a class="user-name" href="{% url 'user-profile' user.localname %}">{{ user.localname }}</a>
+        {# The avatar rides inside the handle link so the corner stays one tab stop. #}
+        <a class="user-name" href="{% url 'user-profile' user.localname %}">
+          {% if user.avatar %}
+            <img class="avatar" src="{{ user.avatar.url }}" alt="">
+          {% else %}
+            <span class="avatar avatar-placeholder" aria-hidden="true"></span>
+          {% endif %}
+          {{ user.localname }}
+        </a>
       {% else %}
         <a href="{% url 'login' %}">Log in</a>
         <a href="{% url 'signup' %}">Sign up</a>
