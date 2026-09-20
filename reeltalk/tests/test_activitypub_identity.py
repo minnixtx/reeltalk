@@ -10,7 +10,7 @@ from io import BytesIO
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
-from django.test import RequestFactory
+from django.test import RequestFactory, override_settings
 from PIL import Image
 
 from reeltalk.activitypub import crypto
@@ -153,14 +153,39 @@ def test_actor_endpoint_remote_mirror_404(client):
 
 
 @pytest.mark.django_db
-def test_actor_endpoint_follows_forwarded_proto(client):
+def test_actor_endpoint_follows_forwarded_proto_from_a_trusted_proxy(client):
+    User.objects.create_user(localname="alice", password="p")
+    with override_settings(
+        TRUSTED_PROXIES=["192.168.1.141/32"],
+        SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"),
+    ):
+        # Host is sent explicitly because a real proxy always sends one: with
+        # no Host header Django rebuilds it from SERVER_NAME/SERVER_PORT and
+        # appends the port whenever it isn't 443 on a secure request, which
+        # would publish "testserver:80" and hide the actual behaviour here.
+        response = client.get(
+            "/user/alice/",
+            HTTP_ACCEPT="application/activity+json",
+            HTTP_X_FORWARDED_PROTO="https",
+            HTTP_HOST="testserver",
+            REMOTE_ADDR="192.168.1.141",
+        )
+    assert response.json()["id"] == "https://testserver/user/alice/"
+
+
+@pytest.mark.django_db
+def test_actor_endpoint_ignores_forwarded_proto_from_an_untrusted_peer(client):
+    # Same header, different peer: the actor id stays on the real scheme. A
+    # stranger must not be able to push our identity onto https (R74) — the
+    # scheme we publish is only ever what our own TLS terminator reported.
     User.objects.create_user(localname="alice", password="p")
     response = client.get(
         "/user/alice/",
         HTTP_ACCEPT="application/activity+json",
         HTTP_X_FORWARDED_PROTO="https",
+        REMOTE_ADDR="203.0.113.9",
     )
-    assert response.json()["id"] == "https://testserver/user/alice/"
+    assert response.json()["id"] == "http://testserver/user/alice/"
 
 
 @pytest.mark.django_db

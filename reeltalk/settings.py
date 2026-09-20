@@ -26,7 +26,15 @@ WEB_PORT = env.int("WEB_PORT", default=3030)
 DOMAIN_HOST = DOMAIN.split(":", 1)[0]
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[DOMAIN_HOST, "localhost"])
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
-BASE_URL = f"http://{DOMAIN}" if ":" in DOMAIN else f"http://{DOMAIN}:{WEB_PORT}"
+
+# Which peers are allowed to tell us the scheme a request arrived with (the
+# TLS terminator's address/CIDR, e.g. 192.168.1.141/32). Empty means no proxy
+# in front of us: nothing forwarded is believed and SECURE_PROXY_SSL_HEADER stays
+# off, so a misconfigured deploy can never trust a scheme from a stranger.
+TRUSTED_PROXIES = env.list("TRUSTED_PROXIES", default=[])
+SECURE_PROXY_SSL_HEADER = (
+    ("HTTP_X_FORWARDED_PROTO", "https") if TRUSTED_PROXIES else None
+)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -52,6 +60,9 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # Must be first: it decides whether the forwarded scheme downstream code
+    # (request.scheme, build_absolute_uri, ActivityPub IDs) may be believed.
+    "reeltalk.proxy_trust.TrustedProxySchemeMiddleware",
     "django.middleware.security.SecurityMiddleware",
     # Serves collected static files from the web process — this stack has no
     # separate static server (PLAN.md §3.8).
@@ -177,6 +188,17 @@ STORAGES = {
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Cookies carry the session, so they must never travel over plain HTTP. Both
+# Secure flags default off in Django, which means an instance reached once over
+# http:// leaks the session id in the clear. SameSite=Lax is already the
+# Django default and is spelled out here because the invite-only deployment
+# relies on it: top-level navigations still carry the cookie (a follow link
+# from another instance still logs you in), cross-site POSTs do not.
+SECURE_COOKIES = env.bool("SECURE_COOKIES", default=True)
+SESSION_COOKIE_SECURE = SECURE_COOKIES
+CSRF_COOKIE_SECURE = SECURE_COOKIES
+SESSION_COOKIE_SAMESITE = "Lax"
 
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/"
