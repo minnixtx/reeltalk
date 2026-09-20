@@ -459,6 +459,43 @@ ul.errorlist {
   margin: 0;
 }
 
+/* Narrow screens (owner pass, 2026-09-20): side by side, the 6rem label column
+   left the value only 74px at a 390px viewport, so the cast wrapped to thirteen
+   lines down the right edge. The poster and title become a centred plate and each
+   field stacks label-over-value across the full column. Scoped to `.film` so the
+   About page's short meta-list keeps the two-column shape it reads fine in. */
+@media (max-width: 40rem) {
+  .film {
+    flex-direction: column;
+    gap: 1.15rem;
+  }
+
+  .film-poster {
+    align-self: center;
+  }
+
+  .film-meta h1 {
+    text-align: center;
+  }
+
+  .film .meta-list div {
+    display: block;
+    margin: 0.8rem 0 0;
+  }
+
+  .film .meta-list dt {
+    min-width: 0;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .film .meta-list dd {
+    margin-top: 0.2rem;
+    line-height: 1.55;
+  }
+}
+
 /* Star rating: a dim background row with a gold foreground row clipped to the
    rating's width. Shared by read-only display and the interactive widget. */
 .stars {
