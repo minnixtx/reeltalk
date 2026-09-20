@@ -1,0 +1,65 @@
+name: attribution-guard
+
+# Last line of defence. Local hooks can be skipped with `git commit --no-verify`;
+# this cannot. GitHub turns `Co-authored-by:` trailers into contributor-graph
+# entries credited to whatever account the email maps to, so a trailer naming an
+# address the owner does not control puts a stranger in this repo's contributor
+# list. No co-author trailer of any kind is allowed.
+#
+# Make this job REQUIRED (Settings -> Branches -> branch protection for main ->
+# "Require a status check to pass" -> attribution-guard) so it blocks rather
+# than merely warns.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  no-co-author-trailers:
+    name: no co-author trailers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan pushed commits for co-author trailers
+        env:
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          ZERO="0000000000000000000000000000000000000000"
+          PATTERN='^[[:space:]]*(co-?authored-by|coauthor-by)[[:space:]]*:'
+
+          # Empty/unknown "before" (new branch, force-push, initial push) -> scan
+          # the whole branch rather than nothing.
+          if [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "$ZERO" ] \
+             && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            RANGE="${BEFORE}..${SHA}"
+            SCOPE="pushed range"
+          else
+            RANGE="$SHA"
+            SCOPE="whole branch"
+          fi
+
+          echo "Scanning ${SCOPE}: ${RANGE}"
+
+          BAD="$(git log -i --grep='co-authored-by' --pretty='  %h  %s' "$RANGE" || true)"
+
+          if [ -n "$BAD" ]; then
+            echo ""
+            echo "::error::Co-author trailers are not allowed in this repo."
+            echo "GitHub credits these to the account the email maps to, which"
+            echo "adds strangers to this repo's contributor list."
+            echo ""
+            echo "Offending commits:"
+            echo "$BAD"
+            echo ""
+            echo "Strip them and force-push, or amend the commits before merging."
+            exit 1
+          fi
+
+          echo "Clean: no co-author trailers found."

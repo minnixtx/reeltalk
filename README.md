@@ -56,4 +56,16 @@ I am not an application developer by trade, but a DevOps engineer, so local AI h
 
 No external API provider has had any part in the ReelTalk project. All inference has been ran in-house.
 
-The inference server used is based on AMD's Strix Halo platform and idles at ~ 5 watts, with the power limited to 90 watts at full load. My energy provider is 100% renewable energy. 
+The inference server used is based on AMD's Strix Halo platform and idles at ~ 5 watts, with the power limited to 90 watts at full load. My energy provider is 100% renewable energy.
+
+### Commit hygiene: no co-author trailers
+
+Commits in this repository carry **no `Co-authored-by` trailer of any kind** — they show only the repo identity. This is deliberate, and it is enforced rather than merely requested:
+
+- **`.githooks/commit-msg`** rejects any commit that tries to add a co-author trailer.
+- **`.githooks/pre-push`** refuses to push a range that contains one (catches amends, cherry-picks and merges).
+- **`.github/workflows/attribution-guard.yml`** fails the build if one arrives anyway — the layer that `--no-verify` cannot skip.
+
+The reason it matters: GitHub parses `Co-authored-by:` trailers into the **contributors graph** and credits whichever GitHub account the email address maps to. A trailer naming an address nobody in this project controls therefore puts a **stranger** in the contributor list — and blocking that account does not remove them, because the graph is recomputed on every push and simply re-reads the trailer.
+
+Hooks are per-clone local config. Run `bash .githooks/install.sh` after cloning (`./setup.sh` does it for you). To make the CI layer blocking rather than advisory, set it as a required check: **Settings → Branches → branch protection for `main` → Require a status check to pass → `attribution-guard`**. 

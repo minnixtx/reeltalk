@@ -49,6 +49,16 @@ for var in SECRET_KEY POSTGRES_PASSWORD; do
 done
 
 echo
+# Enable the versioned git hooks (blocks co-author trailers, which GitHub would
+# otherwise turn into contributor-graph entries for accounts we don't control).
+# Best effort: a non-git checkout just skips it.
+if git rev-parse --show-toplevel >/dev/null 2>&1 && [ -d .githooks ]; then
+    bash .githooks/install.sh
+else
+    echo "(not a git checkout -- skipping attribution guard; run 'bash .githooks/install.sh' once cloned)"
+fi
+
+echo
 echo "Done. Next steps:"
 echo "  docker compose up -d --build"
 echo "  curl -4 http://localhost:3030   (IPv6 docker-proxy quirk on this host)"

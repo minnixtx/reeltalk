@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+#
+# Guard: this repo takes NO co-author trailers.
+#
+# GitHub parses `Co-authored-by:` trailers into the contributors graph and credits
+# whatever account the email resolves to. A trailer naming an address the owner does
+# not control therefore puts a stranger in the repo's contributor list, and
+# blocking that account does not help -- the graph is recomputed on every push and
+# just re-reads the trailer. The only fix is to never create one.
+#
+# Owner's standing rule (2026-09-09, re-affirmed 2026-09-20 after two clean-ups):
+# no Co-authored-by trailer of ANY kind. Commits show only the repo identity.
+#
+# Enabled by `git config core.hooksPath .githooks` (done by ./setup.sh).
+# Bypassing it with --no-verify is caught by the pre-push hook and by CI.
+
+set -uo pipefail
+
+msg_file="${1:-}"
+if [ -z "$msg_file" ] || [ ! -f "$msg_file" ]; then
+  echo "attribution-guard: no commit message file supplied." >&2
+  exit 1
+fi
+
+if grep -qiE '^[[:space:]]*(co-?authored-by|coauthor-by)[[:space:]]*:' "$msg_file"; then
+  {
+    echo ""
+    echo "  COMMIT REJECTED -- co-author trailer not allowed in this repo."
+    echo ""
+    echo "  Found:"
+    grep -inE '^[[:space:]]*(co-?authored-by|coauthor-by)[[:space:]]*:' "$msg_file" \
+      | sed 's/^/      /'
+    echo ""
+    echo "  GitHub credits co-author trailers to the GitHub account that the"
+    echo "  email maps to, which puts strangers in this repo's contributor list."
+    echo "  Remove every Co-authored-by line and commit again."
+    echo ""
+    echo "  Rule: PROGRESS.md -> 'Contributor attribution re-clean' (2026-09-20)."
+    echo ""
+  } >&2
+  exit 1
+fi
+
+exit 0
