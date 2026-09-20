@@ -12,21 +12,11 @@ never end up believing a forwarded scheme from an arbitrary client.
 
 import pytest
 from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpResponse
 from django.test import RequestFactory, override_settings
-from django.urls import reverse
 
 from reeltalk.proxy_trust import FORWARDED_PROTO_META, TrustedProxySchemeMiddleware
-
-User = get_user_model()
-
-
-@pytest.fixture
-def admin_user(db):
-    return User.objects.create_superuser(localname="admin", password="s3cretpass")
-
 
 # The deployed shape: a TLS terminator whose address we know, plus the header
 # Django is allowed to read *because* of that. Both derive from TRUSTED_PROXIES
@@ -163,27 +153,25 @@ def test_the_gate_runs_before_anything_that_reads_the_scheme():
     )
 
 
-# --- cookie flags ---------------------------------------------------------
+# --- cookie flags (settings level; per-request behaviour in
+#     test_cookie_policy.py, since the Secure flag now follows the scheme) ---
 
 
 def test_cookies_are_secure_by_default():
     assert settings.SECURE_COOKIES is True
+    assert settings.COOKIES_FOLLOW_SCHEME is True
     assert settings.SESSION_COOKIE_SECURE is True
     assert settings.CSRF_COOKIE_SECURE is True
     assert settings.SESSION_COOKIE_SAMESITE == "Lax"
 
 
-@pytest.mark.django_db
-def test_the_session_cookie_arrives_secure_httponly_and_lax(client, admin_user):
-    client.post(reverse("login"), {"username": "admin", "password": "s3cretpass"})
-    morsel = client.cookies[settings.SESSION_COOKIE_NAME]
-    assert morsel["secure"] is True
-    assert morsel["httponly"] is True
-    assert morsel["samesite"] == "Lax"
-
-
-@pytest.mark.django_db
-def test_the_csrf_cookie_arrives_secure(client):
-    client.get(reverse("login"))
-    morsel = client.cookies[settings.CSRF_COOKIE_NAME]
-    assert morsel["secure"] is True
+def test_the_cookie_policy_runs_right_after_the_gate():
+    # It keys off request.is_secure(), so it must never be reordered ahead of
+    # the middleware that makes that value trustworthy.
+    gate = settings.MIDDLEWARE.index(
+        "reeltalk.proxy_trust.TrustedProxySchemeMiddleware"
+    )
+    cookies = settings.MIDDLEWARE.index(
+        "reeltalk.cookie_policy.SchemeAwareCookieMiddleware"
+    )
+    assert cookies == gate + 1

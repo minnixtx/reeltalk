@@ -63,6 +63,9 @@ MIDDLEWARE = [
     # Must be first: it decides whether the forwarded scheme downstream code
     # (request.scheme, build_absolute_uri, ActivityPub IDs) may be believed.
     "reeltalk.proxy_trust.TrustedProxySchemeMiddleware",
+    # Must stay after the gate above: it keys the cookie Secure flag off
+    # request.is_secure(), which is only trustworthy once the gate has run.
+    "reeltalk.cookie_policy.SchemeAwareCookieMiddleware",
     "django.middleware.security.SecurityMiddleware",
     # Serves collected static files from the web process — this stack has no
     # separate static server (PLAN.md §3.8).
@@ -196,6 +199,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # relies on it: top-level navigations still carry the cookie (a follow link
 # from another instance still logs you in), cross-site POSTs do not.
 SECURE_COOKIES = env.bool("SECURE_COOKIES", default=True)
+# One instance can front two transports: the public https domain and a plain
+# http://<lan-ip> endpoint. true (default) sets Secure only on requests that
+# actually arrived over https, so the LAN endpoint can still hold a session;
+# false makes the Secure flag unconditional (strict -- and it makes plain-HTTP
+# login impossible anywhere, including the LAN).
+COOKIES_FOLLOW_SCHEME = env.bool("COOKIES_FOLLOW_SCHEME", default=True)
 SESSION_COOKIE_SECURE = SECURE_COOKIES
 CSRF_COOKIE_SECURE = SECURE_COOKIES
 SESSION_COOKIE_SAMESITE = "Lax"
