@@ -24,8 +24,10 @@ ReelTalk has an original **theatrical grindhouse / midnight-movie identity** —
 - **Palette** — layered near-black browns under dirty cream text, with red used as *stage lighting* (glow, active states) rather than as a brand colour, and thin amber borders.
 - **Surfaces** — a weathered background plate under a dark scrim, worn-chrome rails painted along the header and footer edges, content panels sitting nearly opaque over the grain.
 - **Light** — the active nav page is marked by a lit neon tube (white-hot core inside red, with real bloom), and the wordmark is relit the same way: a hot filament inside red glass, its stroke scaled in `em` so it survives the mobile step-down.
-- **Type** — self-hosted [SIL OFL](reeltalk/social/static/fonts/) faces, no CDN: **Monoton** for the wordmark, **Bebas Neue** for titles and section headings, **Oswald** for metadata and controls, **Archivo** for body copy and for the header's own nav text, so the marquee speaks the same face as the film titles it leads to.
+- **Controls** — a primary button is a *lit* object: an original mottled crimson tile over a dark red gradient, boxed by a hot rim with real bloom and labelled in Bebas Neue caps. Quieter actions (block, follow, one-click add to watchlist) stay plain outlined controls, so the lit ones still mean something.
+- **Type** — self-hosted [SIL OFL](reeltalk/social/static/fonts/) faces, no CDN: **Monoton** for the wordmark, **Bebas Neue** for titles, section headings and lit button labels, **Oswald** for metadata, tabs and genre pills, **Archivo** for body copy and for the header's own nav text, so the marquee speaks the same face as the film titles it leads to.
 - **Home** — a two-pane "Now Playing" layout: the feed beside a rail of ticket-stub graphics heading the Trending Films and Popular Genres cards, each genre pill opening its own review subfeed.
+- **Footer** — three zones under the lower chrome rail: the wordmark with the tagline *A Federated Home For Film Fans*, wayfinding links in the middle, and a closing "**Keep Watching.**" in Kaushan Script neon beside a film reel drawn as inline SVG.
 
 All of it is one hand-written stylesheet with no CSS framework, and every asset is original or freely licensed.
 
