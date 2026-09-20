@@ -296,12 +296,15 @@ def test_follow_user_delivery_passes_own_verification(person_doc):
     post = responses.calls[1].request
     parsed = urlparse(REMOTE_INBOX)
     rf_request = RequestFactory().post(
-        parsed.path, data=post.body, content_type="application/activity+json"
+        parsed.path,
+        data=post.body,
+        content_type="application/activity+json",
+        secure=parsed.scheme == "https",
     )
-    # Reconstruct the request as our inbox would see it (same host/scheme the
-    # sender signed against).
+    # Reconstruct the request as our inbox would see it: the sender signed
+    # the https target, so the transport has to be https — @target-uri reads
+    # request.scheme, which only the trusted-proxy gate may raise (R74).
     rf_request.META["HTTP_HOST"] = parsed.netloc
-    rf_request.META["HTTP_X_FORWARDED_PROTO"] = parsed.scheme
     for header in ("Signature-Input", "Signature", "Content-Digest"):
         meta_key = f"HTTP_{header.upper().replace('-', '_')}"
         rf_request.META[meta_key] = post.headers[header]

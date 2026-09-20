@@ -25,8 +25,9 @@ than raising (an invalid signature means "reject this activity").
 Deliberately minimal for v0.1: no replay window on ``created``/``date``
 (activities are idempotent, keyed by origin ids), one signature label per
 request, and the legacy path covers only the ``(request-target) host date
-digest`` components in use. The ``@target-uri`` scheme follows
-``X-Forwarded-Proto`` when present (D14's operator proxy forwards it).
+digest`` components in use. The ``@target-uri`` scheme is ``request.scheme``,
+which only the trusted-proxy gate may raise (D14's operator proxy forwards
+``X-Forwarded-Proto``; R74 makes it trustworthy before we read it).
 """
 
 import base64
@@ -262,15 +263,16 @@ def sign_request(
 def _target_uri(request: Any) -> str:
     """Reconstruct the request's target URI for ``@target-uri``.
 
-    The scheme follows ``X-Forwarded-Proto`` when the operator proxy
-    forwards it (D14), else the WSGI scheme; the authority is the Host
-    header as sent, so default-port and case quirks match what the sender
-    signed.
+    The scheme is ``request.scheme`` — the one value the trusted-proxy gate
+    (R74) has already vouched for, so it is the terminator's forwarded
+    scheme or the real transport and nothing else. Reading
+    ``X-Forwarded-Proto`` here would be a second path to the scheme, this
+    one bypassing the gate, and the URI we compare against what the sender
+    signed would move under us. The authority is the Host header as sent, so
+    default-port and case quirks match what the sender signed.
     """
-    forwarded = request.headers.get("X-Forwarded-Proto", "")
-    scheme = forwarded.split(",")[0].strip() or request.scheme
     host = request.headers.get("Host", "")
-    return f"{scheme}://{host}{request.get_full_path()}"
+    return f"{request.scheme}://{host}{request.get_full_path()}"
 
 
 def _verify_rfc9421(request: Any, public_key: Any) -> bool:

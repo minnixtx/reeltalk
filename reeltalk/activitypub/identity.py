@@ -7,9 +7,9 @@ browsers to the films page. The user's collections sit under the same path
 (``inbox/``, ``outbox/``, ``followers/``, ``following/`` — their routes land
 in increments 3-4), and the instance has one shared inbox at ``/inbox/``.
 
-URLs are built from the request so they carry the host as sent and follow
-``X-Forwarded-Proto`` when the operator proxy forwards it (D14) — the same
-scheme rule as signature verification (R39). The wire document itself is
+URLs are built from the request so they carry the host as sent and the
+scheme the trusted-proxy gate settled on (D14, R74) — the same single
+trusted source as signature verification (R39). The wire document itself is
 built fresh against the ActivityPub spec (R7); federation targets are
 ReelTalk instances and current Mastodon, so no legacy server's extensions
 are needed (R39).
@@ -58,14 +58,15 @@ def shared_inbox_path() -> str:
 def absolute_uri(request, path: str) -> str:
     """Absolute URL for a site path.
 
-    The scheme follows ``X-Forwarded-Proto`` when the operator proxy
-    forwards it (D14), else the request scheme; the authority is the host
-    as sent (``get_host()`` reads the Host header, falling back to the
-    server name) — so documents served behind the proxy carry public URLs.
+    The scheme is ``request.scheme``, which ``TrustedProxySchemeMiddleware``
+    has already reconciled with the operator terminator's forwarded
+    ``X-Forwarded-Proto`` (D14, R74); reading that header here instead would
+    give this module a second, ungated path to a scheme a stranger picked.
+    The authority is the host as sent (``get_host()`` reads the Host header,
+    falling back to the server name) — so documents served behind the proxy
+    carry public URLs.
     """
-    forwarded = request.headers.get("X-Forwarded-Proto", "")
-    scheme = forwarded.split(",")[0].strip() or request.scheme
-    return f"{scheme}://{request.get_host()}{path}"
+    return f"{request.scheme}://{request.get_host()}{path}"
 
 
 def accepts_activitypub(request) -> bool:

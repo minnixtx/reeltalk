@@ -8,6 +8,10 @@ cookies carry ``Secure`` so they can never ride a plain-HTTP channel, and
 The pairing matters on its own: ``SECURE_PROXY_SSL_HEADER`` is only set when
 ``TRUSTED_PROXIES`` is non-empty, so a deploy that forgets the trust list can
 never end up believing a forwarded scheme from an arbitrary client.
+
+The last section checks what the gate is actually worth downstream: a remote's
+RFC 9421 ``@target-uri`` signature verifies only when the gate put the
+terminator's scheme in place, because that is the only scheme we now read.
 """
 
 import pytest
@@ -16,6 +20,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpResponse
 from django.test import RequestFactory, override_settings
 
+from reeltalk.activitypub import crypto, signatures
 from reeltalk.proxy_trust import FORWARDED_PROTO_META, TrustedProxySchemeMiddleware
 
 # The deployed shape: a TLS terminator whose address we know, plus the header
@@ -151,6 +156,57 @@ def test_the_gate_runs_before_anything_that_reads_the_scheme():
     assert settings.MIDDLEWARE[0] == (
         "reeltalk.proxy_trust.TrustedProxySchemeMiddleware"
     )
+
+
+# --- what the gate buys: a signed ``@target-uri`` that means something -----
+
+
+SIGNED_TARGET = "https://reeltalk.example/user/alice/inbox/"
+SIGNED_KEY_ID = "https://reeltalk.example/user/alice/#main-key"
+SIGNED_BODY = b'{"type": "Follow"}'
+
+
+def verify_signed_inbox_post(remote_addr, forwarded) -> bool:
+    """Verify a post signed for the https target, delivered by ``remote_addr``.
+
+    The signature is fixed; only the delivering peer and what it claims about
+    the scheme vary — exactly the axis the gate is drawn on. This is the
+    composition increment 2 depends on: ``@target-uri`` now reads
+    ``request.scheme``, so it can only match what a remote signed if the gate
+    put the terminator's forwarded scheme there.
+    """
+    private_pem, public_pem = crypto.generate_keypair()
+    signed = signatures.sign_request(
+        "POST", SIGNED_TARGET, private_pem, key_id=SIGNED_KEY_ID, body=SIGNED_BODY
+    )
+    request = RequestFactory().post(
+        "/user/alice/inbox/",
+        data=SIGNED_BODY,
+        content_type="application/activity+json",
+        REMOTE_ADDR=remote_addr,
+    )
+    request.META["HTTP_HOST"] = "reeltalk.example"
+    if forwarded is not None:
+        request.META[FORWARDED_PROTO_META] = forwarded
+    for name, value in signed.items():
+        request.META[f"HTTP_{name.upper().replace('-', '_')}"] = value
+    TrustedProxySchemeMiddleware(lambda r: HttpResponse("ok"))(request)
+    return signatures.verify_request(request, public_pem)
+
+
+@DEPLOYED
+def test_an_https_signed_post_verifies_behind_the_trusted_proxy():
+    # The real cutover path: the terminator terminates TLS and reports https,
+    # so the https target the sender signed is the URI we reconstruct.
+    assert verify_signed_inbox_post("192.168.1.141", "https") is True
+
+
+@DEPLOYED
+def test_an_https_signed_post_fails_from_an_untrusted_peer():
+    # Same bytes, different peer: the scheme stays http, the reconstructed
+    # target no longer matches what was signed, and the activity is rejected
+    # rather than accepted on a scheme the sender never delivered over.
+    assert verify_signed_inbox_post("203.0.113.9", "https") is False
 
 
 # --- cookie flags (settings level; per-request behaviour in

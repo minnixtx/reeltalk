@@ -154,9 +154,15 @@ def test_parse_signature_input_rejects_malformed(value):
 
 
 def _signed_request(method, url, private_pem, key_id=KEY_ID, body=None):
-    """Build a Django request carrying the signed headers for ``url``."""
+    """Build a Django request carrying the signed headers for ``url``.
+
+    The transport matches the URL's scheme: ``@target-uri`` is rebuilt from
+    ``request.scheme``, which only the trusted-proxy gate may raise (R74), so
+    a target signed as https has to arrive over https.
+    """
     factory = RequestFactory()
     parsed = urlparse(url)
+    secure = parsed.scheme == "https"
     path = parsed.path or "/"
     if parsed.query:
         path += "?" + parsed.query
@@ -164,10 +170,13 @@ def _signed_request(method, url, private_pem, key_id=KEY_ID, body=None):
         method, url, private_pem, key_id=key_id, body=body
     )
     if method.upper() == "GET":
-        request = factory.get(path)
+        request = factory.get(path, secure=secure)
     else:
         request = factory.post(
-            path, data=body or b"", content_type="application/activity+json"
+            path,
+            data=body or b"",
+            content_type="application/activity+json",
+            secure=secure,
         )
     # HttpHeaders is read-only — set through the underlying META. Real HTTP
     # requests always carry a Host header; RequestFactory does not.
@@ -238,11 +247,37 @@ def test_verify_rfc9421_query_string_is_covered(keypair):
     assert signatures.verify_request(request, public_pem) is False
 
 
-def test_verify_rfc9421_follows_forwarded_proto(keypair):
-    # Behind the operator's TLS proxy (D14), remotes sign the https target
-    # URI while WSGI sees http — X-Forwarded-Proto reconciles them.
+def test_verify_rfc9421_verifies_an_https_target_over_https_transport(keypair):
+    # Behind the operator's TLS terminator (D14) the remote signs the https
+    # target URI. The gate has already turned the terminator's forwarded
+    # proto into request.scheme, so verification needs no header of its own.
     private_pem, public_pem = keypair
     request = _signed_request("GET", "https://example.com/user/alice/", private_pem)
+    assert "HTTP_X_FORWARDED_PROTO" not in request.META
+    assert signatures.verify_request(request, public_pem) is True
+
+
+def test_verify_rfc9421_a_forwarded_header_cannot_bless_a_plain_http_delivery(
+    keypair,
+):
+    # Signed as https but really delivered over http, with the header claiming
+    # otherwise. Before R74 this verified — that is how an unverified peer
+    # could pick the URI we compare against what the sender signed.
+    private_pem, public_pem = keypair
+    request = _signed_request("GET", "https://example.com/user/alice/", private_pem)
+    request.META["wsgi.url_scheme"] = "http"
+    request.META["HTTP_X_FORWARDED_PROTO"] = "https"
+    assert signatures.verify_request(request, public_pem) is False
+
+
+def test_verify_rfc9421_a_forwarded_header_does_not_break_a_plain_http_target(
+    keypair,
+):
+    # The header is inert, not merely distrusted: an http-signed target over
+    # http transport still verifies while a stray X-Forwarded-Proto rides
+    # along, so collapsing onto request.scheme costs no real delivery.
+    private_pem, public_pem = keypair
+    request = _signed_request("GET", "http://example.com/user/alice/", private_pem)
     request.META["HTTP_X_FORWARDED_PROTO"] = "https"
     assert signatures.verify_request(request, public_pem) is True
 
