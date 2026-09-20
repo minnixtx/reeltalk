@@ -68,9 +68,36 @@
   {% block content %}{% endblock %}
 </main>
 <footer class="site-footer">
+  {# Owner pass 2026-09-19: wordmark + tagline left, wayfinding center, neon sign-off right. #}
   <div class="container">
-    <a href="{% url 'welcome' %}">Getting started</a>
-    <a href="{% url 'about' %}">About this instance</a>
+    <div class="footer-brand">
+      <span class="footer-wordmark">ReelTalk</span>
+      <span class="footer-tagline">A Federated Home For Film Fans</span>
+    </div>
+    <nav class="footer-links" aria-label="About ReelTalk">
+      <a href="{% url 'welcome' %}">Getting Started</a>
+      <span class="footer-sep" aria-hidden="true">|</span>
+      <a href="{% url 'about' %}">About This Site</a>
+      <span class="footer-sep" aria-hidden="true">|</span>
+      <a href="https://github.com/minnixtx/reeltalk" target="_blank" rel="noopener">Code</a>
+    </nav>
+    <div class="footer-signoff">
+      <span class="footer-neon">Keep Watching.</span>
+      {# Decorative film reel, drawn here so the identity stays original art. #}
+      <svg class="footer-reel" viewBox="0 0 44 44" aria-hidden="true" focusable="false">
+        <circle cx="21" cy="20" r="15.5" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <circle cx="21" cy="20" r="3.4" fill="none" stroke="currentColor" stroke-width="2"/>
+        <g fill="currentColor">
+          <circle cx="21" cy="10.6" r="3.1"/>
+          <circle cx="29.14" cy="15.3" r="3.1"/>
+          <circle cx="29.14" cy="24.7" r="3.1"/>
+          <circle cx="21" cy="29.4" r="3.1"/>
+          <circle cx="12.86" cy="24.7" r="3.1"/>
+          <circle cx="12.86" cy="15.3" r="3.1"/>
+        </g>
+        <path d="M25 39.5c5 1.6 10 1 14-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </div>
   </div>
 </footer>
 </body>

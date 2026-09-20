@@ -1,10 +1,11 @@
 /* ReelTalk stylesheet. Grindhouse / midnight-movie visual identity (M6
    artwork, R60): layered near-black browns, dirty-cream text, and red used as
-   theatrical lighting. Typography carries most of the identity — Bebas Neue
-   for titles/section headings, Oswald for nav/metadata/buttons, Archivo for
-   body/reviews, Monoton only for the neon wordmark. A grunge tile sits behind
-   the whole site under a heavy dark scrim; content panels stay nearly opaque
-   and body copy clean. */
+   theatrical lighting. Typography carries most of the identity — Bebas Neue for
+   titles/section headings and the lit red controls, Oswald for metadata and
+   small headings, Archivo for body/reviews and the header's own text, Monoton
+   only for the neon wordmark, Kaushan Script only for the footer sign-off. A
+   grunge tile sits behind the whole site under a heavy dark scrim; content
+   panels stay nearly opaque and body copy clean. */
 
 :root {
   /* Palette — near-black browns + dirty cream + theatrical red. Values per the
@@ -25,6 +26,12 @@
   --line:    #5a432c;  /* thin amber/brown borders */
   --steel:   #5c5852;  /* dirty steel gray — search trim (mockup) */
   --avatar-ring: #d9c3b3;  /* worn cream bezel around an avatar disc */
+  --neon-rim: #ff6a5b;  /* hot glass edge on a lit red control (button, step disc) */
+
+  /* Worn crimson fill for lit red controls: an original mottled tile (generated
+     for this project) painted over a dark-to-darker red gradient, so the fill is
+     uneven like lacquered metal instead of flat paint. */
+  --neon-mottle: url("../images/button-mottle.png");
 
   /* Grunge surface stack — dark scrim over the weathered plate; used by the body.
      The scrim sits at .62 (was .86 over the raw tile) because the page background
@@ -36,9 +43,10 @@
   --grunge-size: auto, 1000px;
 
   /* Typography roles. */
-  --display: "Bebas Neue", sans-serif;  /* film titles + section headings */
-  --ui:      "Oswald", sans-serif;      /* nav, metadata, buttons, small headings */
+  --display: "Bebas Neue", sans-serif;  /* film titles, section headings, lit red controls */
+  --ui:      "Oswald", sans-serif;      /* metadata, tabs, genre pills, small headings */
   --body:    "Archivo", sans-serif;     /* body text + reviews */
+  --script:  "Kaushan Script", cursive;  /* the footer sign-off only — neon signage */
 
   /* Semantic roles — the rest of this sheet references these. */
   --bg: var(--black);
@@ -88,6 +96,14 @@
   font-weight: 400 800;
   font-display: swap;
   src: url(../fonts/archivo.woff2) format("woff2");
+}
+
+@font-face {
+  font-family: "Kaushan Script";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(../fonts/kaushan-script.woff2) format("woff2");
 }
 
 * {
@@ -356,12 +372,14 @@ form.inline button {
   background: none;
   color: var(--muted);
   border: 1px solid var(--border);
+  box-shadow: none;
 }
 
 form.inline button:hover {
   color: var(--accent);
   border-color: var(--accent);
   filter: none;
+  box-shadow: none;
 }
 
 ul.messages {
@@ -762,6 +780,11 @@ ul.errorlist {
   font-size: 1.2rem;
 }
 
+/* --- Footer (owner pass, 2026-09-19) ---------------------------------------
+   Three zones on the worn chrome rail: the wordmark and tagline bottom-left,
+   the wayfinding links in the middle, and a lit neon sign-off with a film reel
+   on the right. The band runs as wide as the marquee above it (72rem) so its
+   edges line up with the header and the home rail. */
 .site-footer {
   position: relative;
   border-top: 3px solid var(--black-2);
@@ -769,8 +792,13 @@ ul.errorlist {
 }
 
 .site-footer .container {
-  padding-top: 0.75rem;
-  padding-bottom: 0.75rem;
+  max-width: 72rem;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 1.5rem;
+  padding-top: 1.6rem;
+  padding-bottom: 2.4rem;
 }
 
 .site-footer a {
@@ -780,7 +808,109 @@ ul.errorlist {
 }
 
 .site-footer a:hover {
-  color: var(--accent);
+  color: var(--cream);
+}
+
+.footer-brand {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.9rem;
+  min-width: 0;
+}
+
+.footer-wordmark {
+  font-family: var(--display);
+  font-size: 2.4rem;
+  line-height: 1;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--cream);
+}
+
+.footer-tagline {
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.footer-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+}
+
+.footer-links a {
+  font-size: 0.82rem;
+}
+
+.footer-sep {
+  color: #4a3a2c;
+  user-select: none;
+}
+
+.footer-signoff {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+/* Neon script sign-off: the same hot-core-in-coloured-glass reading as the nav
+   tube (R67) and the wordmark (R68), set at a slight tilt like bent tubing. */
+.footer-neon {
+  font-family: var(--script);
+  font-size: 1.9rem;
+  line-height: 1;
+  color: #ff5f4d;
+  transform: rotate(-3deg);
+  text-shadow:
+    0 0 3px rgba(255, 130, 110, 0.9),
+    0 0 10px rgba(255, 65, 56, 0.75),
+    0 0 24px rgba(255, 45, 32, 0.5),
+    0 0 46px rgba(255, 30, 20, 0.3);
+}
+
+.footer-reel {
+  width: 2rem;
+  height: 2rem;
+  flex: none;
+  color: var(--red-bright);
+  filter: drop-shadow(0 0 4px rgba(255, 65, 56, 0.8)) drop-shadow(0 0 12px rgba(255, 45, 32, 0.45));
+}
+
+@media (max-width: 40rem) {
+  .site-footer .container {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 1rem;
+    padding-top: 1.3rem;
+    padding-bottom: 2rem;
+  }
+
+  .footer-brand {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .footer-wordmark {
+    font-size: 2rem;
+  }
+
+  .footer-signoff {
+    justify-content: center;
+  }
+
+  .footer-neon {
+    font-size: 1.6rem;
+  }
+
+  .footer-reel {
+    width: 1.7rem;
+    height: 1.7rem;
+  }
 }
 
 /* --- Global search + suggest dropdown (M2 increment 4) ---------------------- */
@@ -856,16 +986,21 @@ ul.errorlist {
   background: none;
   color: var(--accent);
   border: 1px solid var(--border);
+  box-shadow: none;
 }
 
 .search-row .watchlist-btn:hover {
   border-color: var(--accent);
   filter: none;
+  box-shadow: none;
 }
 
 .search-row .watchlist-btn:disabled {
   color: var(--muted);
   cursor: default;
+  border-color: var(--border);
+  box-shadow: none;
+  filter: none;
 }
 
 .pager {
@@ -908,6 +1043,8 @@ table.results th {
   border-bottom: 1px solid var(--border);
 }
 
+/* The step discs carry the same lit-red recipe as the buttons (owner pass,
+   2026-09-19): mottled crimson under a hot rim, bloom scaled to the disc. */
 .step-num {
   flex-shrink: 0;
   width: 2rem;
@@ -917,8 +1054,15 @@ table.results th {
   justify-content: center;
   font-weight: 700;
   color: var(--cream);
-  background: var(--blood-red);
+  background-color: #861713;
+  background-image: var(--neon-mottle), radial-gradient(circle at 50% 28%, #a0221b, #6d1210);
+  border: 2px solid var(--neon-rim);
   border-radius: 50%;
+  box-shadow:
+    inset 0 0 7px rgba(255, 74, 52, 0.5),
+    0 0 4px rgba(255, 96, 74, 0.8),
+    0 0 12px rgba(255, 45, 32, 0.4);
+  text-shadow: 0 1px 2px rgba(46, 2, 2, 0.8);
 }
 
 .step-body h2 {
@@ -991,12 +1135,45 @@ table.results th {
   padding-right: 0.6rem;
 }
 
-/* Buttons: worn look — faint diagonal sheen + amber-brown border + soft shadow. */
+/* Buttons: lit red controls (owner pass, 2026-09-19). The reference button is
+   not flat paint — sampling its interior gives luminance 44-53 with broad dark
+   and light blotching, wrapped in a ~2px rim that peaks at (248,134,128) and a
+   bloom that fades out over ~10px. So the fill is a mottled crimson tile over a
+   dark-to-darker red gradient (the light lives in the edge, not the middle),
+   and the rim carries hot glass plus four bloom stops, same motif as the nav
+   tube (R67) and the relit wordmark (R68). */
 button,
 .btn {
-  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0 6px, rgba(0, 0, 0, 0.06) 6px 12px);
-  border: 1px solid #846b49;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 1px 3px rgba(0, 0, 0, 0.5);
+  background-color: #861713;
+  background-image: var(--neon-mottle),
+    linear-gradient(180deg, #9c1d17 0%, #861713 45%, #6b100e 100%);
+  border: 2px solid var(--neon-rim);
+  border-radius: 7px;
+  box-shadow:
+    inset 0 0 10px rgba(255, 74, 52, 0.5),
+    inset 0 1px 0 rgba(255, 205, 195, 0.3),
+    0 0 4px rgba(255, 96, 74, 0.85),
+    0 0 13px rgba(255, 45, 32, 0.5),
+    0 0 28px rgba(255, 30, 20, 0.26);
+  text-shadow: 0 1px 2px rgba(46, 2, 2, 0.8);
+}
+
+button:hover,
+.btn:hover {
+  box-shadow:
+    inset 0 0 12px rgba(255, 96, 70, 0.6),
+    inset 0 1px 0 rgba(255, 205, 195, 0.35),
+    0 0 6px rgba(255, 110, 86, 0.95),
+    0 0 18px rgba(255, 55, 40, 0.6),
+    0 0 40px rgba(255, 35, 24, 0.34);
+}
+
+/* A disabled control must not read as lit. */
+button:disabled {
+  border-color: #93504a;
+  box-shadow: inset 0 0 8px rgba(120, 30, 22, 0.5);
+  filter: saturate(0.55) brightness(0.8);
+  cursor: default;
 }
 
 /* Poster / thumbnail placeholders: halftone dot fill (borders stay warm-brown). */
@@ -1193,17 +1370,15 @@ button,
 
 /* --- Typography roles (M6 artwork, R60) ------------------------------------
    Placed last so these win over the `font: inherit` shorthands above. Bebas
-   Neue for titles/section headings; Oswald for metadata/buttons/small headings;
-   Archivo (the body default) is used everywhere else, including the header's own
-   text — see the rule below. */
+   Neue for titles/section headings and the lit red controls; Oswald for
+   metadata/small headings; Archivo (the body default) is used everywhere else,
+   including the header's own text — see the rules below. */
 h1,
 h2 {
   font-family: var(--display);
   letter-spacing: 0.02em;
 }
 
-button,
-.btn,
 .meta-list,
 .handle,
 .tabs a,
@@ -1214,6 +1389,35 @@ table.results th,
 .trending-count,
 .genre-pills a {
   font-family: var(--ui);
+}
+
+/* The lit red controls take the marquee face (owner pass, 2026-09-19): Bebas
+   Neue in caps, which is what the reference's button label reads as. Bebas
+   ships a single weight, so 400 is explicit — leaving the inherited 600 would
+   synthesise faux-bold — and it runs condensed, so the size and tracking step up
+   to hold the control's presence; line-height holds the box at the height it had
+   under Oswald. */
+button,
+.btn {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 1.1rem;
+  line-height: 1.4;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Ghost controls (Block / Follow / one-click Add to watchlist) share the
+   `button` element but are not lit red, so they keep the metadata face and their
+   own sentence case, weight, tracking and leading rather than inheriting the
+   marquee label above. */
+form.inline button,
+.search-row .watchlist-btn {
+  font-family: var(--ui);
+  font-weight: 600;
+  line-height: 1.55;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 /* The header's text takes the film-title face (owner pass, R69): the nav row, its
