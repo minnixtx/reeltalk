@@ -386,8 +386,15 @@ in the response cookies, `COOKIES_FOLLOW_SCHEME` has been turned off.
 
 Named rather than hidden, so nobody discovers them in production:
 
-- **`search_suggest` has no login gate** (`reeltalk/core/views.py:439`). Strangers
-  can drive it and burn the shared TMDB quota even with signup closed.
+- **Film pages and genre subfeeds are readable by anyone who has the URL.** The
+  home rail shows strangers the trending titles and popular genres as plain
+  text and links nothing out (R81), but `/film/<id>/` and `/genre/<slug>/`
+  themselves carry no login gate. Removing the link removes the affordance,
+  not the access. This cannot be closed with a one-line `@login_required`:
+  `film_detail` serves the Film wire document to ActivityPub clients by
+  content negotiation so a remote instance can resolve a referenced film by
+  its id URL, and that fetch is anonymous. Gating it means gating only the
+  HTML branch and leaving the AP branch open.
 - **No login brute-force throttling.**
 - **No HSTS preload.** Worth adding once the domain is stable.
 - **Invite-only has no invite mechanism** — no codes, no expiry, no email invites.
