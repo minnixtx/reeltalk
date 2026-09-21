@@ -70,7 +70,12 @@
           {% for row in trending %}
             <li>
               <span class="trending-rank">{{ forloop.counter }}</span>
-              <a class="trending-film" href="{% url 'film' row.film.id %}">{{ row.film.title }}{% if row.film.year %} <span class="trending-year">({{ row.film.year }})</span>{% endif %}</a>
+              {% if user.is_authenticated %}
+                <a class="trending-film" href="{% url 'film' row.film.id %}">{{ row.film.title }}{% if row.film.year %} <span class="trending-year">({{ row.film.year }})</span>{% endif %}</a>
+              {% else %}
+                {# Teaser, not a doorway: the title shows, the link does not. #}
+                <span class="trending-film">{{ row.film.title }}{% if row.film.year %} <span class="trending-year">({{ row.film.year }})</span>{% endif %}</span>
+              {% endif %}
               <span class="trending-count">{{ row.review_count }} review{{ row.review_count|pluralize }}</span>
             </li>
           {% endfor %}
@@ -86,7 +91,11 @@
       {% if genres %}
         <ul class="genre-pills">
           {% for genre in genres %}
-            <li><a href="{% url 'genre' genre.slug %}" title="{{ genre.review_count }} review{{ genre.review_count|pluralize }} in {{ genre.name }}">{{ genre.name }}</a></li>
+            {% if user.is_authenticated %}
+              <li><a class="genre-pill" href="{% url 'genre' genre.slug %}" title="{{ genre.review_count }} review{{ genre.review_count|pluralize }} in {{ genre.name }}">{{ genre.name }}</a></li>
+            {% else %}
+              <li><span class="genre-pill" title="{{ genre.review_count }} review{{ genre.review_count|pluralize }} in {{ genre.name }}">{{ genre.name }}</span></li>
+            {% endif %}
           {% endfor %}
         </ul>
       {% else %}

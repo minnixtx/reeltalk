@@ -13,10 +13,14 @@
   {# M6 artwork B (R61): marquee band — logo left, search centered, profile right. #}
   <div class="container header-top">
     <a class="brand" href="{% url 'index' %}">ReelTalk</a>
+    {# R80: search spends the shared paid TMDB quota, so anonymous visitors get #}
+    {# no box at all. The grid loses its middle child — see .header-user's pin. #}
+    {% if user.is_authenticated %}
     <form class="global-search" action="{% url 'film-search' %}" method="get" role="search">
       <input type="search" name="q" placeholder="Search films…" autocomplete="off" aria-label="Search films">
       <ul id="search-suggest" class="suggest-list" hidden></ul>
     </form>
+    {% endif %}
     <div class="header-user">
       {% if user.is_authenticated %}
         {# The avatar rides inside the handle link so the corner stays one tab stop. #}

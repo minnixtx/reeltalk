@@ -145,8 +145,8 @@ def test_search_local_no_match_returns_empty():
 
 
 @pytest.mark.django_db
-def test_search_page_empty_query_shows_hint(client):
-    resp = client.get("/search/")
+def test_search_page_empty_query_shows_hint(login):
+    resp = login.get("/search/")
     assert resp.status_code == 200
     assert "Use the search box" in resp.content.decode()
 
@@ -173,14 +173,19 @@ def test_search_page_tmdb_results_for_authenticated_user(login):
 @responses.activate
 @override_settings(TMDB_API_KEY="fake-key")
 @pytest.mark.django_db
-def test_search_page_anonymous_sees_results_without_actions(client):
-    _mock_search([{"tmdb_id": 78, "title": "Blade Runner", "year": 1982}])
+def test_search_page_anonymous_redirected_to_login(client):
+    """R80 supersedes the anonymous half of R29 — no results page for strangers.
+
+    ``responses`` is active with a key configured, so a leaked lookup would
+    raise *and* show up in ``responses.calls``; the zero count is the quota
+    proof, which the redirect alone does not give.
+    """
     resp = client.get("/search/?q=blade+runner")
-    assert resp.status_code == 200
-    body = resp.content.decode()
-    assert "Blade Runner" in body
-    assert "/search/film/78/" not in body  # no click-through link
-    assert "watchlist-btn" not in body  # no one-click action
+    assert resp.status_code == 302
+    assert "/login/" in resp["Location"]
+    assert len(responses.calls) == 0
+    # The gate covers the whole surface, so an empty query bounces too.
+    assert client.get("/search/").status_code == 302
 
 
 @responses.activate
@@ -217,9 +222,9 @@ def test_search_page_tmdb_failure_degrades_to_local(login):
 @responses.activate
 @override_settings(TMDB_API_KEY="")
 @pytest.mark.django_db
-def test_search_page_without_key_is_local_only(client):
+def test_search_page_without_key_is_local_only(login):
     Film.objects.create(title="Dune", year=2021)
-    resp = client.get("/search/?q=dune")
+    resp = login.get("/search/?q=dune")
     assert resp.status_code == 200
     body = resp.content.decode()
     assert "Dune" in body
@@ -334,8 +339,8 @@ def test_watchlist_tmdb_error_returns_502(login):
 
 
 @pytest.mark.django_db
-def test_suggest_short_query_returns_empty(client):
-    resp = client.get("/search/suggest/?q=a")
+def test_suggest_short_query_returns_empty(login):
+    resp = login.get("/search/suggest/?q=a")
     assert resp.status_code == 200
     assert resp.json() == {"results": []}
 
@@ -392,11 +397,29 @@ def test_suggest_local_rows_carry_the_film_poster(login):
 @responses.activate
 @override_settings(TMDB_API_KEY="fake-key")
 @pytest.mark.django_db
-def test_suggest_anonymous_rows_link_to_search_page(client):
-    _mock_search([{"tmdb_id": 78, "title": "Blade Runner", "year": 1982}])
+def test_suggest_anonymous_gets_401_json_not_a_login_redirect(client, user):
+    """R80: the XHR contract rules out ``@login_required`` on this route.
+
+    A 302 would hand the dropdown the login page's HTML where it parses
+    JSON, so the anonymous answer is a 401 payload. The member request then
+    hits the same route through the same middleware and gets 200 + rows —
+    that pairing is what makes the 401 the gate rather than a broken view.
+    """
     resp = client.get("/search/suggest/?q=blade")
-    url = resp.json()["results"][0]["url"]
-    assert url.startswith("/search/?q=")
+    assert resp.status_code == 401
+    assert resp["Content-Type"] == "application/json"
+    assert resp.json() == {"error": "login required"}
+    assert len(responses.calls) == 0
+    # The auth guard sits ahead of the min-length check, so a short anonymous
+    # query is refused rather than answered with an empty-but-successful body.
+    assert client.get("/search/suggest/?q=a").status_code == 401
+
+    member = Client()
+    assert member.login(username="alice", password="s3cretpass")
+    _mock_search([{"tmdb_id": 78, "title": "Blade Runner", "year": 1982}])
+    served = member.get("/search/suggest/?q=blade")
+    assert served.status_code == 200
+    assert served.json()["results"][0]["url"] == "/search/film/78/"
 
 
 @responses.activate
@@ -415,9 +438,9 @@ def test_suggest_caps_at_eight_rows(login):
 @responses.activate
 @override_settings(TMDB_API_KEY="")
 @pytest.mark.django_db
-def test_suggest_local_when_no_key(client):
+def test_suggest_local_when_no_key(login):
     film = Film.objects.create(title="Dune", year=2021)
-    resp = client.get("/search/suggest/?q=dune")
+    resp = login.get("/search/suggest/?q=dune")
     data = resp.json()
     assert data["results"] == [
         {
@@ -434,9 +457,31 @@ def test_suggest_local_when_no_key(client):
 @responses.activate
 @override_settings(TMDB_API_KEY="fake-key")
 @pytest.mark.django_db
-def test_suggest_falls_back_to_local_on_tmdb_failure(client):
+def test_suggest_falls_back_to_local_on_tmdb_failure(login):
     film = Film.objects.create(title="Dune", year=2021)
     responses.add(responses.GET, SEARCH_URL, status=500)
-    resp = client.get("/search/suggest/?q=dune")
+    resp = login.get("/search/suggest/?q=dune")
     data = resp.json()
     assert data["results"][0]["url"] == f"/film/{film.id}/"
+
+
+# --- Header affordance (R80) --------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_header_search_box_hidden_for_anonymous_shown_for_members(user):
+    """No box for strangers: the entry point itself is gone, not just inert.
+
+    Both halves run in one test on separate ``Client`` instances against the
+    same URL, so the assertion can't be satisfied by a header that never
+    renders the form. The profile page is the probe rather than ``/`` because
+    a fresh test database has no admin, and ``index`` sends that state to
+    ``/setup/`` — which would hide the header behind a redirect.
+    """
+    url = "/user/alice/"
+    anonymous = Client()
+    assert 'class="global-search"' not in anonymous.get(url).content.decode()
+
+    member = Client()
+    assert member.login(username="alice", password="s3cretpass")
+    assert 'class="global-search"' in member.get(url).content.decode()

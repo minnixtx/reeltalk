@@ -3,7 +3,9 @@
 "Trending Films" counts live reviews inside a strict 30-day window — written
 reviews and rating-only entries alike (owner-confirmed) — and "Popular Genres"
 covers only genres somebody has reviewed, so every pill leads to content. The
-rail is public; the feed pane stays signed-in and now opens with "Now Playing".
+rail is visible to everyone but followable only by members (R81) — a stranger
+sees the titles and genres as plain text, not links. The feed pane stays
+signed-in and now opens with "Now Playing".
 """
 
 from datetime import timedelta
@@ -185,11 +187,52 @@ def test_anonymous_home_shows_the_rail_and_a_cta(client, admin):
     assert 'class="visually-hidden">Trending Films' in body
     assert "popular-genres.png" in body
     assert 'class="visually-hidden">Popular Genres' in body
-    assert f'href="/film/{film.id}/"' in body
-    assert 'href="/genre/horror/"' in body
+    # R81: for a stranger the rail is a showcase, not a doorway. The titles
+    # and genres still render — that is what sells the instance — but nothing
+    # in it can be followed.
+    assert "Alien" in body
+    assert "Horror" in body
+    assert f'href="/film/{film.id}/"' not in body
+    assert 'href="/genre/horror/"' not in body
     # No feed for anonymous visitors — the sign-up CTA holds its pane instead.
     assert "Now Playing" not in body
     assert 'href="/signup/"' in body
+
+
+@pytest.mark.django_db
+def test_anonymous_rail_rows_are_spans_not_anchors(client, admin):
+    """Non-clickable means no anchor at all, not a link with a dead href.
+
+    A styled-but-disabled ``<a>`` still takes a tab stop and still shows the
+    target in the status bar; a ``<span>`` takes neither, which is the point.
+    """
+    film = Film.objects.create(title="Alien", year=1979, genres=["Horror"])
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    review(alice, film)
+
+    body = client.get("/").content.decode()
+
+    assert '<span class="trending-film">' in body
+    assert '<span class="genre-pill"' in body
+    assert '<a class="trending-film"' not in body
+    assert '<a class="genre-pill"' not in body
+
+
+@pytest.mark.django_db
+def test_signed_in_rail_links_to_films_and_genres(client, admin, alice):
+    """The other half of the same switch, so the spans above aren't vacuous.
+
+    Without this the rail could satisfy the anonymous assertions by never
+    rendering a link for anybody.
+    """
+    film = Film.objects.create(title="Alien", year=1979, genres=["Horror"])
+    review(alice, film)
+    assert client.login(username="alice", password="s3cretpass")
+
+    body = client.get("/").content.decode()
+
+    assert f'<a class="trending-film" href="/film/{film.id}/"' in body
+    assert '<a class="genre-pill" href="/genre/horror/"' in body
 
 
 @pytest.mark.django_db

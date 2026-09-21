@@ -188,6 +188,10 @@ a {
 }
 
 .header-user {
+  /* Pinned to the last column (R80): with the search box gone for anonymous
+     visitors this row has only two children, and auto-placement would drop the
+     handle into the 34rem middle column, rendering "Log in" centered. */
+  grid-column: 3;
   justify-self: end;
   display: flex;
   align-items: center;
@@ -305,6 +309,12 @@ a {
   .global-search {
     grid-column: 1 / -1;
     order: 3;
+  }
+
+  /* Two columns here, so the handle's last column is 2, not 3 — the base pin
+     would open an implicit third track and leave a gap on the right. */
+  .header-user {
+    grid-column: 2;
   }
 }
 
@@ -1323,7 +1333,10 @@ button:disabled {
   color: var(--cream);
 }
 
-.trending-film:hover {
+/* Scoped to the anchor: the anonymous rail renders the same text in a <span>,
+   and :hover matches spans too — an unscoped rule would make the dead text
+   light up as if it were clickable. */
+a.trending-film:hover {
   color: var(--red-bright);
   text-decoration: underline;
 }
@@ -1378,7 +1391,9 @@ button:disabled {
   gap: 0.45rem;
 }
 
-.genre-pills a {
+/* One class on both the member's <a> and the visitor's <span>, so the pill
+   looks identical either way; only the anchor gets the hover treatment. */
+.genre-pill {
   display: inline-block;
   padding: 0.2rem 0.65rem;
   border: 1px solid var(--line);
@@ -1391,7 +1406,7 @@ button:disabled {
   color: var(--cream-muted);
 }
 
-.genre-pills a:hover {
+a.genre-pill:hover {
   border-color: var(--amber);
   background: var(--amber);
   color: #12100d;
@@ -1427,7 +1442,7 @@ table.results th,
 .pane-sub,
 .trending-rank,
 .trending-count,
-.genre-pills a {
+.genre-pill {
   font-family: var(--ui);
 }
 

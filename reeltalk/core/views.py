@@ -5,8 +5,6 @@ layer (``mark_watched``, the shelf helpers, D5's partial index), and the
 TMDB/catalog logic lives in ``tmdb``/``catalog``.
 """
 
-from urllib.parse import quote
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
@@ -365,11 +363,15 @@ def _local_rows(films, user) -> list[dict]:
     return rows
 
 
+@login_required
 def film_search(request):
     """Global search page (D6): TMDB when a key is configured, else local.
 
     With a key, a TMDB failure (bad key / rate limit / network) degrades to
     the local library with a user-facing message instead of an error page.
+
+    Login-gated (R80): every query spends the instance's shared paid TMDB
+    quota, so the whole search surface is members-only.
     """
     query = request.GET.get("q", "").strip()
     try:
@@ -440,10 +442,17 @@ def search_suggest(request):
     """JSON suggestions for the header dropdown (search-as-you-type, D6).
 
     TMDB when a key is configured (falling back to the local library on a
-    TMDB failure or empty hit list), local only without a key. Anonymous
-    users' TMDB rows link to the search page rather than the login-gated
-    click-through route. Locally blocked films are excluded.
+    TMDB failure or empty hit list), local only without a key. Locally
+    blocked films are excluded.
+
+    Members-only like the rest of the surface (R80), but *not* via
+    ``@login_required``: this answers an XHR that parses JSON, and a 302 to
+    the login page would hand the client HTML where it expects a payload.
+    Anonymous callers get an explicit 401 instead.
     """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "login required"}, status=401)
+
     query = request.GET.get("q", "").strip()
     if len(query) < 2:
         return JsonResponse({"results": []})
@@ -455,8 +464,7 @@ def search_suggest(request):
         except TmdbError:
             results = None
         if results is not None:
-            authenticated = request.user.is_authenticated
-            blocked = _blocked_tmdb_ids(request.user) if authenticated else set()
+            blocked = _blocked_tmdb_ids(request.user)
             for hit in results.rows[:SUGGEST_LIMIT]:
                 if hit.tmdb_id in blocked:
                     continue
@@ -466,11 +474,7 @@ def search_suggest(request):
                         "year": hit.year,
                         "poster_url": hit.poster_url,
                         "tmdb_id": hit.tmdb_id,
-                        "url": (
-                            reverse("search-clickthrough", args=[hit.tmdb_id])
-                            if authenticated
-                            else f"/search/?q={quote(hit.title)}"
-                        ),
+                        "url": reverse("search-clickthrough", args=[hit.tmdb_id]),
                     }
                 )
     if not rows:
