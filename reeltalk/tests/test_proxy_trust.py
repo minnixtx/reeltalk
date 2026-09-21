@@ -35,7 +35,20 @@ NO_PROXY = override_settings(TRUSTED_PROXIES=[], SECURE_PROXY_SSL_HEADER=None)
 
 
 def pass_through(remote_addr, forwarded=None, *, trusted=("192.168.1.141/32",)):
-    """Run one request through the middleware; return the request passed on."""
+    """Run one request through the middleware; return the request passed on.
+
+    ``remote_addr=None`` means *genuinely absent*. RequestFactory fills
+    ``REMOTE_ADDR`` with ``127.0.0.1`` whether or not you pass one, so
+    without the explicit delete below a "missing address" case silently
+    becomes a loopback case — and against a trust list that contains
+    ``0.0.0.0/0``, loopback is trusted, so the header is kept.
+
+    The scheme is read inside the override on purpose. ``request.scheme`` is
+    a cached property, so a test that reads it after this block exits gets a
+    value computed against the *ambient* ``SECURE_PROXY_SSL_HEADER`` — which
+    the operator's ``.env`` sets. Pinning it here keeps every assertion in
+    this file about the settings under test rather than the deploy config.
+    """
     seen = {}
 
     def get_response(request):
@@ -55,7 +68,10 @@ def pass_through(remote_addr, forwarded=None, *, trusted=("192.168.1.141/32",)):
         if forwarded is not None:
             extra[FORWARDED_PROTO_META] = forwarded
         request = RequestFactory().get("/", **extra)
+        if remote_addr is None:
+            del request.META["REMOTE_ADDR"]
         middleware(request)
+        seen["scheme"] = request.scheme
     return seen["request"]
 
 

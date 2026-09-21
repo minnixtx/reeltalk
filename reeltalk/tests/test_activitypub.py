@@ -16,11 +16,22 @@ from urllib.parse import urlparse
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
-from django.test import RequestFactory
+from django.http import HttpResponse
+from django.test import RequestFactory, override_settings
 
 from reeltalk.activitypub import crypto, signatures
+from reeltalk.proxy_trust import TrustedProxySchemeMiddleware
 
 KEY_ID = "http://example.com/user/alice/#main-key"
+
+# The deployed shape: a terminator whose address we know, plus the header
+# Django is allowed to read *because* of that. Both derive from
+# TRUSTED_PROXIES in settings.py, so tests that need the production posture
+# set them together the way the env does.
+DEPLOYED = override_settings(
+    TRUSTED_PROXIES=["192.168.1.141/32"],
+    SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"),
+)
 
 
 @pytest.fixture()
@@ -186,6 +197,21 @@ def _signed_request(method, url, private_pem, key_id=KEY_ID, body=None):
     return request
 
 
+def _through_gate(request, remote_addr):
+    """Run the trusted-proxy gate over a built request, as the chain does.
+
+    A hand-built request never meets ``TrustedProxySchemeMiddleware``, so a
+    test that skips this asserts only against whatever
+    ``SECURE_PROXY_SSL_HEADER`` happens to be in the ambient ``.env``. That
+    was true while no operator trust list existed and stopped being true the
+    moment one did. Running the gate makes the assertion about the control
+    rather than about the default.
+    """
+    request.META["REMOTE_ADDR"] = remote_addr
+    TrustedProxySchemeMiddleware(lambda r: HttpResponse("ok"))(request)
+    return request
+
+
 def test_sign_request_get_headers(keypair):
     private_pem, _public_pem = keypair
     headers = signatures.sign_request(
@@ -257,28 +283,38 @@ def test_verify_rfc9421_verifies_an_https_target_over_https_transport(keypair):
     assert signatures.verify_request(request, public_pem) is True
 
 
+@DEPLOYED
 def test_verify_rfc9421_a_forwarded_header_cannot_bless_a_plain_http_delivery(
     keypair,
 ):
-    # Signed as https but really delivered over http, with the header claiming
-    # otherwise. Before R74 this verified — that is how an unverified peer
-    # could pick the URI we compare against what the sender signed.
+    # Signed as https but really delivered over http by a peer that is not
+    # the terminator. Under the deployed posture the header *is* believed --
+    # that is what SECURE_PROXY_SSL_HEADER is for -- so the only thing
+    # standing between this delivery and a verified signature is the gate
+    # stripping the header from a peer it did not name. With it stripped the
+    # scheme stays http, the target we rebuild no longer matches what the
+    # sender signed, and the request is rejected.
     private_pem, public_pem = keypair
     request = _signed_request("GET", "https://example.com/user/alice/", private_pem)
     request.META["wsgi.url_scheme"] = "http"
     request.META["HTTP_X_FORWARDED_PROTO"] = "https"
+    request = _through_gate(request, "203.0.113.9")
+    assert "HTTP_X_FORWARDED_PROTO" not in request.META
     assert signatures.verify_request(request, public_pem) is False
 
 
+@DEPLOYED
 def test_verify_rfc9421_a_forwarded_header_does_not_break_a_plain_http_target(
     keypair,
 ):
     # The header is inert, not merely distrusted: an http-signed target over
     # http transport still verifies while a stray X-Forwarded-Proto rides
-    # along, so collapsing onto request.scheme costs no real delivery.
+    # along, because the gate removes it before anything reads the scheme.
+    # So collapsing onto request.scheme costs no real delivery.
     private_pem, public_pem = keypair
     request = _signed_request("GET", "http://example.com/user/alice/", private_pem)
     request.META["HTTP_X_FORWARDED_PROTO"] = "https"
+    request = _through_gate(request, "203.0.113.9")
     assert signatures.verify_request(request, public_pem) is True
 
 
