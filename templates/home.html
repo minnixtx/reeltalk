@@ -50,7 +50,12 @@
       <h1>{{ site.name }}</h1>
       {% if site.description %}<p class="landing-desc">{{ site.description }}</p>{% endif %}
       <p>A federated home for tracking, reviewing, and discovering films.</p>
+      {% if signup_open %}
       <p><a class="btn" href="{% url 'signup' %}">Sign up</a> to get started, or <a href="{% url 'login' %}">log in</a>.</p>
+      {% else %}
+      {# Invite-only: the signup CTA is gone, not redirected. #}
+      <p><a href="{% url 'login' %}">Log in</a> if you have an account.</p>
+      {% endif %}
     </section>
   {% endif %}
 

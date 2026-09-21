@@ -92,6 +92,10 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                # The signup CTA on the anonymous surfaces has to follow the
+                # instance policy; `site` is only passed by the views that
+                # happen to need it, so the bit itself goes through here.
+                "reeltalk.social.context_processors.signup_open",
             ],
         },
     },

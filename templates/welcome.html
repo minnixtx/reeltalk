@@ -8,7 +8,7 @@
 
 {% if user.is_authenticated %}
   <p>You're signed in as <strong>{{ user.localname }}</strong> — here's how it works.</p>
-{% else %}
+{% elif signup_open %}
   <p><a class="btn" href="{% url 'signup' %}">Sign up</a> to start your own watchlist, or read on first.</p>
 {% endif %}
 

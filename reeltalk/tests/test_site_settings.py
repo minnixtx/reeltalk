@@ -7,10 +7,12 @@ gates hrefs in user-authored markdown at write time, and the /signup/ gate
 """
 
 import pytest
+from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.test import Client
+from django.test import Client, RequestFactory
 
 from reeltalk.core.utils import render_markdown
+from reeltalk.social.context_processors import signup_open
 from reeltalk.social.models import LinkDomain, SiteSettings
 
 User = get_user_model()
@@ -159,3 +161,54 @@ def test_signup_stays_open_when_policy_is_open_after_editing_other_fields(
     site.name = "Renamed"
     site.save()
     assert signup_post(client).status_code == 302
+
+
+# --- signup CTA visibility (deploy-readiness increment 4) --------------------
+#
+# Four anonymous surfaces used to hard-link to /signup/ regardless of policy,
+# so an invite-only instance still advertised "Sign up" everywhere and the
+# click landed on a page saying it was not accepted. ``signup_open`` now
+# reaches every template through a context processor and each CTA hides with
+# the policy. Parametrised over all four surfaces because the whole point is
+# that none of them is special: the header rides every page, so /about/ is
+# what checks it.
+
+CTA_SURFACES = ["/", "/welcome/", "/login/", "/about/"]
+
+
+@pytest.mark.parametrize("path", CTA_SURFACES)
+@pytest.mark.django_db
+def test_open_policy_shows_the_signup_cta(client, admin, path):
+    body = client.get(path).content.decode()
+    assert 'href="/signup/"' in body, f"missing signup CTA on {path}"
+
+
+@pytest.mark.parametrize("path", CTA_SURFACES)
+@pytest.mark.django_db
+def test_invite_policy_hides_the_signup_cta(client, admin, path):
+    site = SiteSettings.get_instance()
+    site.signup_policy = SiteSettings.INVITE
+    site.save()
+
+    body = client.get(path).content.decode()
+    assert 'href="/signup/"' not in body, f"signup CTA survived on {path}"
+    # Hiding signup must not hide the door in: login stays where it was.
+    assert 'href="/login/"' in body, f"login link missing on {path}"
+
+
+@pytest.mark.django_db
+def test_signup_open_processor_is_registered():
+    processors = settings.TEMPLATES[0]["OPTIONS"]["context_processors"]
+    assert "reeltalk.social.context_processors.signup_open" in processors
+
+
+@pytest.mark.django_db
+def test_signup_open_processor_exposes_only_the_boolean(db):
+    ctx = signup_open(RequestFactory().get("/"))
+    assert set(ctx) == {"signup_open"}
+    assert ctx["signup_open"] is True
+
+    site = SiteSettings.get_instance()
+    site.signup_policy = SiteSettings.INVITE
+    site.save()
+    assert signup_open(RequestFactory().get("/"))["signup_open"] is False

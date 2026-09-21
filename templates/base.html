@@ -30,7 +30,9 @@
         </a>
       {% else %}
         <a href="{% url 'login' %}">Log in</a>
-        <a href="{% url 'signup' %}">Sign up</a>
+        {# Invite-only: no signup CTA. Hiding it beats dangling one onto the #}
+        {# "not accepting new signups" notice. #}
+        {% if signup_open %}<a href="{% url 'signup' %}">Sign up</a>{% endif %}
       {% endif %}
     </div>
   </div>
