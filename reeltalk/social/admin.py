@@ -20,11 +20,15 @@ from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.core.exceptions import ValidationError
 
 from .forms import LOCALNAME_RE
-from .models import LinkDomain, SiteSettings, User
+from .models import Invite, LinkDomain, SiteSettings, User
 
 
 class InviteUserCreationForm(UserCreationForm):
     """Admin-side account creation — the invite-only path (R76).
+
+    Named before the R82 invite links existed: this is "the admin creates
+    the account directly", not the other half of that feature. The two are
+    alternatives on an invite-only instance, not steps of one flow.
 
     Hashes the password through ``set_password`` and applies the same identity
     rules as signup (R12), so an admin cannot mint a name that other instances
@@ -143,7 +147,51 @@ class UserAdmin(admin.ModelAdmin):
 
 @admin.register(SiteSettings)
 class SiteSettingsAdmin(admin.ModelAdmin):
-    list_display = ["name", "signup_policy"]
+    list_display = ["name", "signup_policy", "invite_scope"]
+
+
+@admin.register(Invite)
+class InviteAdmin(admin.ModelAdmin):
+    """The invite ledger, read-only (R82).
+
+    No add: an invite minted here has no inviter to credit, and an admin
+    who just wants an account already has the direct create-user path. No
+    edit either — the code is generated, not authored, and the used/live
+    state is the record of something that happened rather than a setting.
+    What this page is for is answering who sent what, whether it landed,
+    and who it landed on. Deleting a row stays available: that is how an
+    owner clears an outstanding invite for good.
+    """
+
+    list_display = ["short_code", "created_by", "created_at", "state", "used_by"]
+    list_filter = ["created_by"]
+    search_fields = ["code", "created_by__localname", "used_by__localname"]
+    date_hierarchy = "created_at"
+    readonly_fields = [
+        "code",
+        "created_by",
+        "created_at",
+        "expires_at",
+        "used_by",
+        "used_at",
+    ]
+
+    @admin.display(description="Invite code", ordering="code")
+    def short_code(self, obj):
+        # Truncated in the list on purpose: a full live code on a screen is
+        # a credential a screenshot can carry, the same reason private_key
+        # never reaches this page. The detail view shows it in full for the
+        # admin who actually needs to send it.
+        return f"{obj.code[:8]}…"
+
+    @admin.display(description="State", ordering="used_at")
+    def state(self, obj):
+        if obj.used_at:
+            return "used"
+        return "live" if obj.is_live else "expired"
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(LinkDomain)

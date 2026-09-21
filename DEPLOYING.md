@@ -289,22 +289,69 @@ the restore path stays proven rather than merely documented.
 
 ---
 
-## 10. Invite-only signup
+## 10. Invite-only signup and invite links
 
-Set the policy in Django admin → **Site settings** → `signup_policy` =
-**Invite-only**. Effects:
+Two settings in Django admin → **Site settings**, and they are independent:
+`signup_policy` decides whether a link is *needed*; `invite_scope` decides who
+may *make* one.
 
-- `/signup/` renders "not accepting new signups right now" and a `POST` returns
-  **403** with no account created.
+### `signup_policy` = Invite-only
+
+- `/signup/` renders "not accepting new signups right now" and a `POST` to it
+  returns **200** with that same closed page and no account created. (Not 403 —
+  the gate is the view declining, not the CSRF layer.)
 - All four signup calls-to-action (header, home landing, Getting Started, login
   page) are **hidden**, not redirected onto the closed notice. `Log in` is
   untouched everywhere.
 - nodeinfo reports `openRegistration: false`.
 
-### Creating the accounts
+### `invite_scope`
 
-Invite-only in v0.1 means *closed*: **an admin creates the account.** There are
-no invite links or codes.
+| Value | Who sees the INVITE button |
+|---|---|
+| **Admins only** (default) | `is_staff` accounts |
+| **All members** | every signed-in user |
+
+Anonymous can never mint under either value. The check lives on
+`SiteSettings.may_send_invites()`, not only behind the `login_required`
+decorator, so a caller that forgets the decorator still cannot open the door.
+
+### The link flow
+
+A member opens their own profile and clicks **Invite** ("Invite a fellow movie
+freak to ReelTalk"). That `POST`s to `/invite/create/`, which mints a code and
+redirects back to the profile carrying it: a read-only field with a **Copy link**
+button, and a line saying what state the link is in (live / used by whom /
+expired). The invitee opens `https://<domain>/invite/<code>/` and gets the
+normal signup page, prefaced with who invited them.
+
+Properties worth knowing before you rely on one of these:
+
+- **One account per link.** The liveness check and the mark-as-used happen under
+  a single `select_for_update` row lock inside the signup transaction. Checked-
+  then-marked as two statements is true until two strangers open the same link in
+  the same second — on an invite-only instance that is an extra account the
+  owner never approved.
+- **It expires in 7 days** whether or not anyone claims it
+  (`INVITE_TTL_DAYS` in `reeltalk/social/models.py`).
+- **The code is a credential**: 32 characters from `secrets.token_urlsafe`, not
+  a counter or a guessable word. The route's charset matches that alphabet, so a
+  malformed code 404s at the URL rather than reaching a lookup.
+- **Spent stays spent.** Deleting the account a link created leaves the invite
+  used — the link had already been handed around once.
+- **A valid link works whatever `signup_policy` says.** The link is a stronger
+  statement than the setting; making it depend on the setting would mean flipping
+  signup open silently invalidated every link already sent.
+- **Every mint is a new code.** Nothing is reused, so a leaked link costs one
+  seat, not the whole feature.
+
+The mint is `POST`-only because it is not idempotent — a `GET` that mints would
+let a page render or a browser prefetch spend someone's invite.
+
+### Creating accounts directly
+
+The admin can still just make an account, and under `invite_scope = admins`
+that is the same thing as sending an invite, minus the link.
 
 Django admin → **Users** → **Add user**. The form takes `localname`, display
 name, email, and a password + confirmation; it hashes through `set_password`
@@ -325,13 +372,28 @@ Deliberately not editable from the admin:
   admin would leave the two permanently out of step.
 - The follow/block relations are app-managed and not exposed here.
 
-CLI equivalent, if you prefer:
+### The invite ledger
+
+Django admin → **Invites** is read-only: who minted it, when, whether it is
+live, and who joined on it. There is no **Add** — a link minted here has no
+inviter to credit, and an admin who just wants an account has the path above.
+The list shows the code truncated; the full code appears only on the detail page,
+for the same screenshot reason as `private_key`. Deleting a row is left
+available — that is how you clear an outstanding invite for good.
+
+### CLI equivalents, if you prefer
 
 ```bash
+# create an account directly
 docker compose run --rm web python manage.py shell -c \
   "from reeltalk.social.models import User; \
    User.objects.create_user('friend', password='their password', \
                           email='', display_name='Their Name')"
+
+# mint an invite link from the command line
+docker compose run --rm web python manage.py shell -c \
+  "from reeltalk.social.models import User, Invite; \
+   print(Invite.mint(User.objects.get(localname='minnix')).code)"
 ```
 
 `createsuperuser` and the first-run wizard are both fine — they go through

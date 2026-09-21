@@ -30,13 +30,18 @@ from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
+from django.db import transaction
 from django.http import Http404, HttpResponse, JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import redirect, render, reverse
 from django.views.decorators.http import require_POST
 
 import reeltalk
 from reeltalk.activitypub.follow import follow_user, unfollow_user
-from reeltalk.activitypub.identity import accepts_activitypub, person_document
+from reeltalk.activitypub.identity import (
+    absolute_uri,
+    accepts_activitypub,
+    person_document,
+)
 from reeltalk.activitypub.mirrors import (
     RemoteFetchError,
     ensure_mirror,
@@ -47,7 +52,7 @@ from reeltalk.core.models import Shelf, feed_entries, popular_genres, trending_f
 from reeltalk.core.utils import render_markdown
 
 from .forms import ProfileForm, SignupForm
-from .models import SiteSettings, User
+from .models import Invite, SiteSettings, User
 
 
 def has_admin() -> bool:
@@ -103,7 +108,9 @@ def signup(request):
         return redirect("index")
     site = SiteSettings.get_instance()
     if site.signup_policy != SiteSettings.OPEN:
-        # Invite-only in v0.1 means closed: an admin creates the account.
+        # Invite-only: the door is this page plus a link. R82 gave a member
+        # something to send, so the closed notice now says where the link
+        # comes from instead of just refusing.
         return render(request, "signup.html", {"closed": True})
     form = SignupForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
@@ -138,6 +145,117 @@ def setup(request):
         messages.success(request, "Instance set up — you are now the admin.")
         return redirect("index")
     return render(request, "social/setup.html", {"form": form})
+
+
+@require_POST
+@login_required
+def invite_create(request):
+    """Mint a single-use invite link for the signed-in user (R82).
+
+    POST-only because it is not idempotent — every click makes a new code,
+    and a GET that mints would let a link on a page (or a browser prefetch)
+    spend the inviter's allowance by accident.
+
+    The new code comes back on the inviter's *own* profile as a query
+    param rather than being rendered here, so the mint follows the same
+    redirect-then-render shape the rest of the POST surfaces use. Rendering
+    it is gated again in ``_invite_context`` on the code belonging to the
+    requester, so a bookmarked or forwarded ``?invite=`` on someone else's
+    profile shows nothing at all.
+    """
+    if not SiteSettings.get_instance().may_send_invites(request.user):
+        messages.error(
+            request,
+            "This instance only lets its admins send invites — ask one to "
+            "send you a link.",
+        )
+        return redirect("user-profile", localname=request.user.localname)
+    invite = Invite.mint(request.user)
+    profile = reverse("user-profile", kwargs={"localname": request.user.localname})
+    return redirect(f"{profile}?invite={invite.code}")
+
+
+def invite_accept(request, code):
+    """The invitee's landing page: ``/invite/<code>/`` → sign up (R82).
+
+    Public by necessity — the person at the other end of the link does not
+    have an account yet, that being the entire point of the link. The code
+    is therefore the only credential in this flow, which is why it is long
+    and random (``Invite.mint``) and why the redemption below holds a row
+    lock across creating the account: without the lock, two people opening
+    one link at the same instant would both pass the liveness check before
+    either marked it spent, and an invite-only instance would hand out a
+    second seat the owner never approved.
+
+    Deliberately independent of ``signup_policy``. A valid link works whether
+    the instance is open or invite-only — the link is a stronger statement
+    than the setting, and making it depend on the setting would mean an owner
+    flipping signup open silently invalidated every link already sent.
+    """
+    if request.user.is_authenticated:
+        messages.info(request, "You already have an account on this instance.")
+        return redirect("index")
+    invite = Invite.objects.filter(code=code).first()
+    if request.method != "POST":
+        if invite is None:
+            return render(
+                request,
+                "signup.html",
+                {"invite_error": "That invite link is not valid."},
+            )
+        reason = invite.unusable_reason()
+        if reason is not None:
+            return render(request, "signup.html", {"invite_error": reason})
+        return render(request, "signup.html", {"form": SignupForm(), "invite": invite})
+
+    if invite is None:
+        return render(
+            request, "signup.html", {"invite_error": "That invite link is not valid."}
+        )
+    form = SignupForm(request.POST)
+    if not form.is_valid():
+        # Re-render with the invite still shown: the link is fine, the form
+        # is not, and dropping the invite here would read as the link having
+        # broken.
+        return render(request, "signup.html", {"form": form, "invite": invite})
+    data = form.cleaned_data
+    with transaction.atomic():
+        claimed = Invite.lock_live(code)
+        if claimed is None:
+            # Lost the race, or the window closed while the form was open.
+            return render(
+                request, "signup.html", {"invite_error": invite.unusable_reason()}
+            )
+        user = User.objects.create_user(
+            localname=data["localname"],
+            email=data.get("email", ""),
+            password=data["password1"],
+            display_name=data.get("display_name", ""),
+        )
+        claimed.redeem(user)
+    login(request, user)
+    messages.success(request, f"Welcome, {user.localname}!")
+    return redirect("welcome")
+
+
+def _invite_context(request, profile_user) -> dict:
+    """The invite block for a profile the visitor owns (R82).
+
+    ``invite_link`` is only ever built for a code the requesting user
+    minted themselves. That scoping is not cosmetic: without it this becomes
+    an oracle that renders any code handed to it, and an attacker could use
+    the rendered link to confirm a code they guessed actually exists.
+    """
+    can = SiteSettings.get_instance().may_send_invites(request.user)
+    out = {"can_invite": can}
+    code = request.GET.get("invite", "").strip()
+    if not can or not code:
+        return out
+    invite = Invite.objects.filter(code=code, created_by=profile_user).first()
+    if invite is not None:
+        out["invite"] = invite
+        out["invite_link"] = absolute_uri(request, f"/invite/{invite.code}/")
+    return out
 
 
 def _resolve_profile_user(localname):
@@ -178,6 +296,9 @@ def user_profile(request, localname):
         user.refresh_from_db()
     is_self = request.user.is_authenticated and request.user.pk == user.pk
     data = {"profile_user": user, "is_self": is_self}
+    if is_self:
+        # The invite box only lives on one's own profile (R82).
+        data.update(_invite_context(request, user))
     if request.user.is_authenticated and not is_self:
         # The follow + block buttons' state (the template hides the controls
         # on one's own profile and for anonymous visitors).

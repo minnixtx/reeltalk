@@ -7,15 +7,25 @@ builds on. It is defined before any social migration exists so
 ``AUTH_USER_MODEL`` never has to move later.
 """
 
+import secrets
+from datetime import timedelta
+
 from django.conf import settings
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
 from django.db.models import OuterRef, Subquery
 from django.utils import timezone
+from django.utils.dateformat import format as date_format
 
 from reeltalk.activitypub.crypto import generate_keypair
 from reeltalk.core.models import Film, Shelf, ShelfFilm, Status
+
+# A minted invite stays open this long before it lapses unused (R82). Long
+# enough that a link pasted into a chat app gets opened from it days later;
+# short enough that a link nobody claims stops being a live door by itself
+# rather than staying one forever.
+INVITE_TTL_DAYS = 7
 
 
 class UserManager(BaseUserManager):
@@ -238,19 +248,33 @@ class SiteSettings(models.Model):
     """Instance-wide settings — a single row (pk=1), admin-managed (§3.2).
 
     The signup policy gates /signup/ once the instance is operational (R12's
-    wizard covers first run, which happens before any settings exist). In
-    v0.1 ``invite`` means closed: accounts are created by an admin — the
-    invite mechanism itself is a later, deliberate step.
+    wizard covers first run, which happens before any settings exist).
+    ``invite`` means the open door is shut: every new account arrives either
+    through the admin or on a link a member sent — see ``Invite`` and
+    ``invite_scope`` (R82), which is the mechanism this field used to point
+    at as future work.
     """
 
     OPEN = "open"
     INVITE = "invite"
     SIGNUP_POLICIES = ((OPEN, "Open"), (INVITE, "Invite-only"))
 
+    INVITE_ADMINS = "admins"
+    INVITE_ALL = "all"
+    INVITE_SCOPES = ((INVITE_ADMINS, "Admins only"), (INVITE_ALL, "All members"))
+
     name = models.CharField(max_length=100, default="ReelTalk")
     description = models.TextField(blank=True, default="")
     signup_policy = models.CharField(
         max_length=20, choices=SIGNUP_POLICIES, default=OPEN
+    )
+    # Who may hand out an invite link (R82). Orthogonal to signup_policy:
+    # this decides who can mint a link, that one decides whether a link is
+    # needed at all. Deliberately conservative by default — on a live
+    # invite-only instance the owner should decide to widen the circle, not
+    # discover it was wide open.
+    invite_scope = models.CharField(
+        max_length=20, choices=INVITE_SCOPES, default=INVITE_ADMINS
     )
 
     class Meta:
@@ -264,6 +288,126 @@ class SiteSettings(models.Model):
         """The single settings row, created on first use with defaults."""
         instance, _ = cls.objects.get_or_create(pk=1)
         return instance
+
+    def may_send_invites(self, user) -> bool:
+        """Whether ``user`` may mint an invite link under this scope.
+
+        ``admins`` keeps the growth valve with ``is_staff`` — the accounts
+        that can reach /admin/, which is this instance's working meaning of
+        "site admin". Checked here as well as behind the login_required
+        decorator, so a caller that forgets the decorator still cannot open
+        the door to an anonymous request.
+        """
+        if not user.is_authenticated:
+            return False
+        if self.invite_scope == self.INVITE_ALL:
+            return True
+        return user.is_staff
+
+
+class Invite(models.Model):
+    """One single-use invitation to join the instance (R82).
+
+    The invite *is* the credential on an invite-only instance, so it is
+    treated like one: a long random code (``secrets.token_urlsafe``, not a
+    counter or a short human-readable word an attacker could enumerate), a
+    clock on it, and a redemption path that locks the row so two people who
+    open the same link at the same moment cannot both walk through. That
+    last part is the whole reason this is not a boolean column: the check and
+    the mark have to be one atomic step, or "exactly one account per invite"
+    is only true until someone tries twice at once.
+
+    ``used_by`` is the account the link created, kept for the audit trail —
+    who brought whom in. It is SET_NULL rather than CASCADE so deleting a
+    member does not reopen a link that was already handed around; ``used_at``
+    stays set, and the seat stays spent.
+    """
+
+    code = models.CharField(max_length=64, unique=True, editable=False)
+    created_by = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="invites_sent"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_by = models.OneToOneField(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="invite_received",
+    )
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        state = "used" if self.used_at else ("expired" if not self.is_live else "live")
+        return f"invite {self.code[:8]}… ({state})"
+
+    @classmethod
+    def mint(cls, inviter) -> "Invite":
+        """Create a fresh single-use invite on ``inviter``'s behalf."""
+        return cls.objects.create(
+            code=cls._fresh_code(),
+            created_by=inviter,
+            expires_at=timezone.now() + timedelta(days=INVITE_TTL_DAYS),
+        )
+
+    @classmethod
+    def _fresh_code(cls) -> str:
+        # The unique index is the real guard; this loop just keeps a
+        # astronomically unlucky collision from surfacing as a 500 on a
+        # button click.
+        while True:
+            code = secrets.token_urlsafe(24)
+            if not cls.objects.filter(code=code).exists():
+                return code
+
+    @property
+    def is_live(self) -> bool:
+        """Usable right now: redeemed by nobody and still inside its window."""
+        return self.used_at is None and self.expires_at > timezone.now()
+
+    @classmethod
+    def lock_live(cls, code: str) -> "Invite | None":
+        """Return the live invite for ``code`` with its row write-locked.
+
+        ``None`` for an unknown, used, or expired code. The lock only means
+        anything inside a transaction — the caller holds one across creating
+        the account and calling ``redeem``, so the liveness check and the
+        redemption cannot be interleaved with a second signup on the same
+        code.
+        """
+        invite = cls.objects.select_for_update().filter(code=code).first()
+        if invite is None or not invite.is_live:
+            return None
+        return invite
+
+    def redeem(self, user) -> None:
+        """Spend this invite on the account it just created."""
+        self.used_by = user
+        self.used_at = timezone.now()
+        self.save(update_fields=["used_by", "used_at"])
+
+    def unusable_reason(self) -> str | None:
+        """Human sentence for why sign-up can't run on this link, if any.
+
+        Composed here rather than in the view because both the GET branch and
+        the lost-the-race POST branch have to say the same thing, and the two
+        used to be one place apart in the code and three places apart in the
+        copy.
+        """
+        if self.used_at is not None:
+            return (
+                "That invite link has already been used — each one opens "
+                "exactly one account."
+            )
+        if self.expires_at <= timezone.now():
+            return (
+                f"That invite link expired on {date_format(self.expires_at, 'F j, Y')}."
+            )
+        return None
 
 
 class LinkDomain(models.Model):

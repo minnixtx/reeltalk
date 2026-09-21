@@ -363,6 +363,12 @@ button,
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  /* An anchor dressed as a control must not keep the link's underline: the
+     browser default applies to <a> and nothing here overrode it, so every
+     <a class="btn"> (Edit profile, Edit, Sign up) read as underlined text
+     while its <button class="btn"> siblings did not — same control, two
+     looks. Set on the shared rule so the tag stops mattering. */
+  text-decoration: none;
 }
 
 button:hover {
@@ -1484,4 +1490,62 @@ form.inline button,
 .header-user a {
   font-family: var(--body);
   font-weight: 600;
+}
+
+/* --- Invite box (R82) -------------------------------------------------
+   The pitch and the INVITE control on one's own profile, with the freshly
+   minted single-use link under it once generated. Panel treatment matches
+   the home rail's panels so it reads as an object the site already has.
+   The Invite control deliberately sits in a plain <form>, NOT form.inline:
+   form.inline strips the lit red fill and forces sentence case, and the
+   label here is the caps control. */
+.invite-box {
+  margin: 1.5rem 0;
+  padding: 0.9rem 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(14, 12, 10, 0.88);
+}
+
+.invite-pitch {
+  margin: 0;
+  font-family: var(--ui);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--cream);
+}
+
+.invite-form {
+  margin: 0;
+}
+
+.invite-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+/* flex-basis instead of the base input's width:100%, so the copy button sits
+   beside the link and the pair wraps rather than overflowing under 40rem.
+   min-width:0 is what lets a long URL shrink instead of shoving the button
+   out of the row. */
+.invite-url {
+  flex: 1 1 16rem;
+  min-width: 0;
+  font-family: var(--ui);
+  font-size: 0.78rem;
+}
+
+.invite-result .btn {
+  margin-top: 0;
+  white-space: nowrap;
+}
+
+.invite-note {
+  flex-basis: 100%;
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
 }

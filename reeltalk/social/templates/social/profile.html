@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ profile_user.get_full_name }} — ReelTalk{% endblock %}
 
@@ -45,6 +46,35 @@
 
 {% if profile_user.summary %}
 <div class="profile-summary">{{ profile_user.summary|safe }}</div>
+{% endif %}
+
+{% if can_invite %}
+{# R82: the invite box lives only on one's own profile, and only for a user
+   the instance lets mint links (SiteSettings.invite_scope). #}
+<section class="invite-box" aria-labelledby="invite-pitch">
+  <p class="invite-pitch" id="invite-pitch">Invite a fellow movie freak to ReelTalk</p>
+  <form method="post" action="{% url 'invite-create' %}" class="invite-form">
+    {% csrf_token %}
+    <button type="submit" class="btn">Invite</button>
+  </form>
+  {% if invite_link %}
+  <div class="invite-result">
+    <label class="visually-hidden" for="invite-url">Your invite link</label>
+    <input type="text" id="invite-url" class="invite-url" readonly value="{{ invite_link }}">
+    <button type="button" class="btn invite-copy" data-copy-target="invite-url">Copy link</button>
+    <p class="invite-note">
+      {% if invite.used_at %}
+        Used — {{ invite.used_by.get_full_name }} joined on {{ invite.used_at|date:"F j, Y" }}.
+      {% elif invite.is_live %}
+        Opens exactly one account, until {{ invite.expires_at|date:"F j, Y" }}.
+      {% else %}
+        This link expired on {{ invite.expires_at|date:"F j, Y" }} — send a new one.
+      {% endif %}
+    </p>
+  </div>
+  {% endif %}
+</section>
+<script src="{% static 'js/invite.js' %}" defer></script>
 {% endif %}
 
 <nav class="tabs">

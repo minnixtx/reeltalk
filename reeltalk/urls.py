@@ -34,6 +34,17 @@ urlpatterns = [
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("signup/", social_views.signup, name="signup"),
     path("setup/", social_views.setup, name="setup"),
+    # Invites (R82): the mint is a POST from the inviter's own profile;
+    # the landing page is what the invitee opens. The create route sits
+    # first so "create" is never swallowed as someone's code. The charset is
+    # what ``Invite.mint`` emits (``secrets.token_urlsafe``), so junk in the
+    # URL 404s instead of reaching a database lookup.
+    path("invite/create/", social_views.invite_create, name="invite-create"),
+    re_path(
+        r"^invite/(?P<code>[A-Za-z0-9_-]{8,64})/$",
+        social_views.invite_accept,
+        name="invite-accept",
+    ),
     path("about/", social_views.about, name="about"),
     # Getting-started page (M6): the core loop for new users; public.
     path("welcome/", social_views.welcome, name="welcome"),

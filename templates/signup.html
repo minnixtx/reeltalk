@@ -4,9 +4,15 @@
 
 {% block content %}
 <h1>Sign up</h1>
-{% if closed %}
-<p class="muted">This instance is not accepting new signups right now.</p>
+{% if invite_error %}
+<p class="error">{{ invite_error }}</p>
+<p class="muted">Invite links come from ReelTalk members — ask someone for a fresh one.</p>
+{% elif closed %}
+<p class="muted">This instance is not accepting new signups right now. If someone sent you a ReelTalk invite link, open it here to join.</p>
 {% else %}
+{% if invite %}
+<p>{{ invite.created_by.get_full_name }} invited you to join ReelTalk.</p>
+{% endif %}
 <form method="post">
   {% csrf_token %}
   {{ form.as_p }}
