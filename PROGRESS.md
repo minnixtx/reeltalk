@@ -7,7 +7,7 @@
 
 ## 1. Current state
 
-> **Next feature:** the forward plan for **likes, comments and per-post pages** is in **§2A** — six increments, each sized for one session, with the six owner decisions that must be settled before any of it is built. Read §2A before starting that work.
+> **Next feature:** **likes, comments and per-post pages.** Increment 1 (feed row identity) is **done 2026-09-22** (`9b78651`). **Next is increment 2 — the per-post page.** All six owner decisions are settled as **R83**, so no increment after this needs a decision from the owner before it starts. Read §2A before starting that work.
 
 | Area | State |
 |---|---|
@@ -1323,9 +1323,22 @@ Owner spotted it on the live page: the profile rendered the literal text `{# R82
 | Inbox | `HANDLERS` = Follow, Undo, Create, Update, Delete (`inbox.py:29`). **`handle_undo` returns unless the inner type is exactly `"Follow"`** (`follow.py:70`) — `Undo(Like)` is silently ignored. No `Accept`/`Reject` is ever emitted, despite `PLAN.md:91`. |
 | Inbound threading | **Dropped.** `_mirror_status` (`activitypub/statuses.py`) never reads `inReplyTo`; remote replies land as flat mirrors. |
 
-### Decisions the owner must make — do not decide these solo (D17)
+### The six decisions — ALL SETTLED by the owner 2026-09-22 as R83
 
-A Mastodon-style per-post page appears **nowhere** in `PLAN.md`: neither planned nor deferred. `PLAN.md §7` rule 1 makes that a decision to make *with the owner*. Six are load-bearing:
+A Mastodon-style per-post page appears **nowhere** in `PLAN.md`: neither planned nor deferred. `PLAN.md §7` rule 1 makes that a decision to make *with the owner*. Six were load-bearing; the owner answered all six on 2026-09-22, before any code was written. The frame the owner gave for the whole set:
+
+> **Use Mastodon as the conceptual model for ReelTalk's social layer, with reviews functioning as ReelTalk's specialized equivalent of statuses.**
+
+| # | Question | Owner's answer |
+| --- | --- | --- |
+| 1 | The R35 fold vs "like this review" | **Keep the fold.** A folded watched+review row points at the underlying `Status`, and that `Status` is the interactive social object. Plain shelf activity with no review behind it stays non-interactive. |
+| 2 | Replies as top-level feed entries? | **No** — not as ordinary feed entries. But they stay `Status`/thread objects underneath, *"so we aren't designing ourselves out of Mastodon-style reply behavior later."* Selective timeline visibility can come later. |
+| 3 | Permalink URL shape | **A — reuse `/status/<id>/` and content-negotiate.** *"I want the architecture to remain Mastodon/ActivityPub-like."* Prettier human shapes such as `/@user/<id>` may be revisited later, explicitly **not** part of these increments. |
+| 4 | Like semantics | **Binary.** One Like/Favourite state per user per Status, mapping naturally to ActivityPub `Like`. No reaction types. |
+| 5 | Interim behaviour on remote posts | **Hide** the controls on mirrors until remote interactions actually work — temporary; once federation lands, remote reviews should be interactive like remote Mastodon statuses. **Add the locality/interactivity information to `FeedEntry` now** so templates don't have to query for it. |
+| 6 | Is the HTML post page public? | **Public** — human-facing pages for public reviews/statuses are viewable anonymously. Additional visibility levels may come later. |
+
+The six questions as originally posed, kept for the reasoning behind each answer:
 
 1. **The R35 fold vs "like this review."** A review by a user of a film they watched is *folded into* the "watched" `FeedEntry` (`core/models.py:634–641`), which then wears the review's rating and prose. So "like this review from the feed" is ambiguous — the row is a shelf event. Either keep the fold and attach the like to the underlying `Status` anyway, un-fold reviews into their own rows, or make shelf events non-likeable and only interact with real statuses.
 2. **Do replies appear as top-level feed entries?** Mastodon shows them but commonly hides them. Recommendation: **no** — replies live on the post page only. This keeps the feed from exploding and matches "click the post to read the thread."
@@ -1338,7 +1351,7 @@ A Mastodon-style per-post page appears **nowhere** in `PLAN.md`: neither planned
 
 Each is sized for one session and ends at a committed, deployed, verified checkpoint.
 
-1. **Give feed rows an identity.** Add `status`/`status_id` to `FeedEntry`; settle decision 1 (the fold); make shelf-only rows explicitly non-interactive. **No user-visible feature** — it is the unblocking prerequisite, and everything after assumes it.
+1. ✅ **Give feed rows an identity.** *(done 2026-09-22, `9b78651` — recorded below.)* Add `status`/`status_id` to `FeedEntry`; settle decision 1 (the fold); make shelf-only rows explicitly non-interactive. **No user-visible feature** — it is the unblocking prerequisite, and everything after assumes it.
 2. **The per-post page.** Fill in the HTML arm of `status_detail`'s existing negotiation branch per decision 3. Block-aware rendering (see gotcha 4). Renders the status in full plus its reply list — empty at first, and that is fine. This is the destination every later increment attaches to.
 3. **Likes, local only.** `Like` model with **day-one AP identity discipline (R41/R42)** even though nothing federates yet — `origin_id` on create, unique constraint on `(user, status)`, so increment 5 doesn't need to re-shape the table. `POST /status/<id>/like/` toggle. AJAX with no reload, following the one existing precedent (`base.html:8` csrf meta + `search.js:144` fetch → `JsonResponse`). Counts on feed rows and the post page.
 4. **Comments, local only.** Finally gives `reply_parent` a writer. Reply form, thread rendering with an explicit depth policy, `film_id` inheritance (see gotcha 2), soft-delete orphan handling (gotcha 3), block filtering.
@@ -1353,6 +1366,43 @@ Each is sized for one session and ends at a committed, deployed, verified checkp
 ### Out of scope here
 
 Notifications (`PLAN.md:58`, `§5`) — "you got a like / someone replied" needs the whole unbuilt `Notification` model, page and count badge. This feature will want it, but it is a separate piece of work, not a tail on these six.
+
+### Feed interactions increment 1 — feed row identity (executed 2026-09-22, commit `9b78651`)
+
+Implements decision 1 and the storage half of decision 5. **No user-visible change, no template and no CSS in the diff, by design** — this is the prerequisite increments 2–6 all assume.
+
+**What landed.** `FeedEntry` (`core/models.py`) gains `status_id: int | None` and `remote: bool`, plus a derived `interactive` property. `feed_entries` fills them at the two places a row stands for a `Status`: the R35 fold now sets `status_id`/`remote` alongside `rating`/`content`, and the standalone `"status"` branch passes them through the constructor. Shelf events with no review behind them keep `status_id=None`.
+
+**Four cases, not two.** The plan named the fold and the shelf-only row; the code actually has two more, and they decide differently:
+
+| Row | `status_id` | `interactive` |
+| --- | --- | --- |
+| Folded `watched` + review | the review's id | ✅ |
+| Standalone `status` (comment, or a review with no Watched row) | its own id | ✅ |
+| Bare `watched` / `added`, no review behind it | `None` | ❌ |
+| R37 bulk aggregate — "added Y and 1,376 other films" | `None` | ❌ |
+
+The bulk aggregate is the one worth naming: it has no single film and therefore no single status, so under decision 1 there is simply nothing for it to point at. It is non-interactive for a **structural** reason, not a policy one — no future decision about likes can change that without first un-aggregating the row.
+
+**`interactive` is a property, not a stored field.** Deliberate, and pinned by `test_feed_entry_interactive_is_derived_not_stored`, which asserts the name is absent from `dataclasses.fields(FeedEntry)`. Decision 5's "hide on mirrors" is explicitly temporary, so the rule lives in one line — `status_id is not None and not self.remote` — and increments 5–6 change it by deleting `not self.remote`, rather than hunting for stored `False`s that would by then be wrong. A derived flag also cannot drift from the two facts behind it.
+
+**The finding to carry into increment 6: a remote user has no shelves until federation gives them one.** The first cut of the remote-fold test failed `Shelf.DoesNotExist`. `User.save()` calls `Shelf.create_default_shelves` only when `self.local` (`social/models.py:143–145`, itself pinned by `test_shelf.py::test_remote_user_gets_no_default_shelves`), and a mirror's shelves arrive only when an inbound `ShelfEvent` creates them through `_ensure_default_shelf` (`activitypub/statuses.py:265`). So **"remote review folded into a watched row" exists only if the home instance also announced the Watched shelf** — a remote review with no shelf event lands as its own `kind="status"` row instead. Anything reasoning about remote threads in increments 5–6 should expect the flat form considerably more often than the folded one. The test now builds that state through the real federation helper rather than hand-rolling a `Shelf` lookup, per the R79 rule about modelling the real chain instead of leaning on an ambient default.
+
+**Gate** (all three images rebuilt, fresh `docker compose run --rm web`): `ruff check` — *All checks passed!*; `ruff format --check` — *90 files already formatted*; `makemigrations --check` — *No changes detected*; pytest **892 passed + 5 skipped in 381.11s**. Eight new tests, all in `test_user_films.py` (47 → 55, counted against `git show HEAD`). **Baseline correction:** the 8b record says 883; the tree at `6b8dbbc` collects **884**. The delta this increment introduces is exactly 8, counted repo-wide against HEAD, so the previously recorded figure was one low. Nothing failed and no existing test changed state.
+
+**Verified live on `reeltalk.minnix.dev` after `up -d web` on the rebuilt image.** Against real instance data (1 status, 1,378 shelf rows):
+
+```
+-- minnix (local=True): 2 entries
+     kind=watched   has_status=True  remote=False interactive=True  -> 1
+     kind=watchlist has_status=False remote=False interactive=False -> 1
+
+FOLD PROOF: minnix / Alien from L.A. : entry.status_id=1 review.id=1 match=True interactive=True
+```
+
+The authed home page rendered over the real host — `HTTP_HOST='reeltalk.minnix.dev'`, applying the 8b lesson about never trusting a response whose status was not checked; the first attempt 400'd on the test client's `testserver` default — returns **200** with the feed markup unchanged from before: the folded review row plus the bulk "added … and 1376 other films" row, and **no controls added**. Anonymous `https://reeltalk.minnix.dev/` 200, plain-HTTP LAN `http://192.168.1.138:3030/` 200, deployed image `cbb1935`.
+
+**No browser verification was needed, and none was performed** — with no template and no CSS in the diff there is nothing new to see. The first increment that genuinely needs a click-through is increment 2 (the per-post page), and increment 3's like button should be clicked specifically on a **folded** row, since that is exactly where "which object did I just like" could go wrong.
 
 ## 3. Host facts (this box)
 
@@ -1468,3 +1518,25 @@ New owner decisions for the rewrite are recorded here, numbered R1, R2, … The 
   **Verified live over real HTTPS on `reeltalk.minnix.dev`:** minted as `minnix`, redeemed by an anonymous client — landing page showed "minnix invited you to join ReelTalk" plus the form, `POST` → `302 /welcome/`, `created_by = minnix | used_by = r82probe | used_at = 2026-09-21 20:47:42Z | live = False`; a second stranger on the same link got no form at all, just *"That invite link has already been used — each one opens exactly one account."* Unknown code → 200 with "not valid" and no form; malformed code → `404` at the route, no lookup. **R80 re-checked on the same deploy rather than assumed:** `/search/` still `302`, `/search/suggest/` still `401 application/json`; plain-HTTP LAN still `200` with the same behaviour, so the invite routes are scheme-independent too. Probe account and invite deleted afterwards (`Invite.objects.count() = 0`, no stray accounts). Two `curl` artifacts recorded so nobody chases them as bugs: the first `POST` 403'd because Django does strict `Referer` checking over HTTPS and `curl` sends none, and the 64-char form token against the 32-char cookie is Django's CSRF masking working as designed. **After the policy was set back to Invite-only:** `openRegistration = False`, `/signup/` renders the closed notice with no form, `POST /signup/` returns 200 with no account created, and all four CTA surfaces carry `signup=0` with `login` intact (`/` 2, `/welcome/` 1, `/login/` 1, `/about/` 1). Cert re-checked rather than trusted: `CN=*.minnix.dev`, `notAfter=Nov 1 02:26:19 2026 GMT`.
 
   **Docs, and the same interest-rate lesson as R80.** `DEPLOYING.md` §10 had been asserting *"Invite-only in v0.1 means closed: an admin creates the account. There are no invite links or codes,"* and also had `POST /signup/` returning **403** when it returns **200** with the closed page — the gate is the view declining, not the CSRF layer. Both rewritten, with the link flow, the scope table, and the ledger documented. R80's point generalises: a limit or a behaviour written down before a deploy is a debt with an interest rate, and this one was two sentences from being followed as an operating instruction after it stopped being true.
+
+- **R83 — Feed interactions: Mastodon as the model, reviews as our statuses; all six §2A decisions settled, and the fold survives (owner brief + owner decisions 2026-09-22, code `9b78651`).** The owner answered all six open decisions from §2A in one pass before any code was written, and led with the frame that decides several of them at once: **"Use Mastodon as the conceptual model for ReelTalk's social layer, with reviews functioning as ReelTalk's specialized equivalent of statuses."** The full table of answers is in §2A; what each one closes off:
+
+  **(1) The fold survives.** A folded `watched`+review row keeps wearing the review's rating and prose and now points at the review `Status` underneath it, which is the interactive social object. Of the three options on the table this is the only one that is a *prerequisite* rather than a redesign: un-folding undoes R35 and rewrites a large block of `test_user_films.py`, and "make shelf events non-likeable, only interact with real statuses" **collapses into un-folding** — under the fold, the row carrying review prose *is* a shelf event, so that option either makes the single most common interactive thing (a review) uninteractable, or forces the review into its own row. Worth naming, because option C reads as the conservative choice and is not.
+
+  **(2) Replies stay thread objects but leave the feed.** Not top-level feed entries — but they remain `Status` objects under `reply_parent`, *"so we aren't designing ourselves out of Mastodon-style reply behavior later."* This is why increment 4 gives `reply_parent` its first writer rather than inventing a comment table, and why selective timeline visibility stays a later knob instead of a schema change.
+
+  **(3) `/status/<id>/` is reused, not sidestepped.** A separate `/p/<id>/` would have dodged the collision with the AP id URL at the cost of being less canonical; the owner chose the canonical shape. Practical consequence for increment 2: the AP branch keeps `local=True` — we must never mint identity for another instance's object — while the HTML branch serves local **and** mirrors, which incidentally fixes "remote posts have no resolvable page here at all." Prettier human shapes such as `/@user/<id>` are explicitly deferred, not part of these six.
+
+  **(4) Likes are binary.** One Like/Favourite state per user per Status, mapping straight onto ActivityPub `Like`. No reaction types, so increment 5 invents no wire type.
+
+  **(5) Mirrors hide their controls, and the locality flag lands now rather than being needed later.** An honest absence beats a button that no-ops. The owner asked for the locality information to go onto `FeedEntry` *in this increment* even though nothing renders it yet, which is exactly what makes the later flip cheap.
+
+  **(6) The human post page is public.** Anonymous-readable like film pages (R56), not members-only like search (R80). The AP branch stays anonymous regardless.
+
+  **The shape that actually fell out of decision 1 has four cases, not the two the plan named.** Folded `watched`+review → the review's id, interactive. Standalone `status` → its own id, interactive. Bare `watched`/`added` with no review behind it → `None`, inert. **R37 bulk aggregate → `None`, inert, and permanently so**: an aggregated row has no single film and therefore no single status, so it is non-interactive for a *structural* reason that no future likes-policy decision can change without un-aggregating the row first.
+
+  **`interactive` is a derived property, deliberately not a dataclass field** — pinned by a test asserting the name is absent from `dataclasses.fields(FeedEntry)`. Decision 5's hide-on-mirrors is explicitly temporary, so the whole rule is one line (`status_id is not None and not self.remote`) and increments 5–6 change it by *deleting half an expression* rather than tracking down stored `False`s that would by then be wrong. Storing it would have frozen a temporary policy into rows.
+
+  **Carried into increments 5–6: a remote user has no shelves until federation gives them one.** `User.save()` calls `Shelf.create_default_shelves` only when `self.local` (`social/models.py:143–145`, itself pinned by `test_shelf.py::test_remote_user_gets_no_default_shelves`); a mirror's shelves arrive only via an inbound `ShelfEvent` through `_ensure_default_shelf` (`activitypub/statuses.py:265`). So the folded remote shape exists **only when the home instance also announced the Watched shelf** — a remote review with no shelf event lands as a flat `kind="status"` row instead. Remote threads will be flat considerably more often than folded, and increment 5–6 reasoning built on the folded case would be reasoning about the minority. This surfaced as a `Shelf.DoesNotExist` in the first cut of the remote-fold test; the test now builds that state through the real federation helper rather than hand-rolling a `Shelf` lookup, per R79.
+
+  **Baseline correction, so nobody chases a phantom regression.** The 8b record gives the suite as 883 passed + 5 skipped; the tree at `6b8dbbc` collects **884**. This increment adds exactly 8 tests, counted repo-wide against HEAD, and lands at **892 passed + 5 skipped in 381.11s**. Nothing failed and no existing test changed state — the earlier figure was simply one low.
