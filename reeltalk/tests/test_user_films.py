@@ -10,6 +10,7 @@ members' ShelfFilm rows, folding a watched film's D5 review into its watched
 entry (R35).
 """
 
+import dataclasses
 from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
@@ -21,7 +22,9 @@ from django.test import Client
 from django.utils import timezone
 from PIL import Image
 
+from reeltalk.activitypub.statuses import _ensure_shelf_row
 from reeltalk.core.models import (
+    FeedEntry,
     Film,
     Shelf,
     ShelfFilm,
@@ -489,6 +492,162 @@ def test_feed_entries_comment_on_watched_film_stays_separate(db):
     )
     kinds = sorted(e.kind for e in feed_entries(alice))
     assert kinds == ["status", "watched"]
+
+
+# --- Feed row identity (R83) -------------------------------------------------
+
+
+def _remote_user(localname: str = "carol@remote.example") -> User:
+    """A remote mirror account, as federation creates it (no local password)."""
+    user = User(
+        localname=localname,
+        local=False,
+        actor_url="https://remote.example/users/carol",
+        inbox_url="https://remote.example/users/carol/inbox",
+    )
+    user.set_unusable_password()
+    user.save()
+    return user
+
+
+@pytest.mark.django_db
+def test_feed_entry_folded_review_carries_the_review_status_id(db):
+    # R83 decision 1: the R35 fold stays, and the review Status underneath
+    # is what the row speaks for — a like rendered on this row points here.
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    dune = Film.objects.create(title="Dune", year=2021)
+    mark_watched(alice, dune, rating="4.5", content="<p>Desert planet.</p>")
+    review = Status.objects.get(user=alice, film=dune)
+    entry = feed_entries(alice)[0]
+    assert entry.kind == "watched"
+    assert entry.status_id == review.id
+    assert entry.remote is False
+    assert entry.interactive is True
+
+
+@pytest.mark.django_db
+def test_feed_entry_bare_watched_has_no_identity_and_is_not_interactive(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    dune = Film.objects.create(title="Dune", year=2021)
+    mark_watched(alice, dune, rating="3")
+    Status.objects.get(user=alice, film=dune).delete()  # soft delete
+    entry = feed_entries(alice)[0]
+    assert entry.kind == "watched"
+    assert entry.status_id is None
+    assert entry.interactive is False
+
+
+@pytest.mark.django_db
+def test_feed_entry_watchlist_add_is_not_interactive(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    dune = Film.objects.create(title="Dune", year=2021)
+    shelve_to_watchlist(alice, dune)
+    entry = feed_entries(alice)[0]
+    assert entry.kind == "watchlist"
+    assert entry.status_id is None
+    assert entry.remote is False
+    assert entry.interactive is False
+
+
+@pytest.mark.django_db
+def test_feed_entry_bulk_aggregate_has_no_identity(db):
+    # R37's aggregated row has no single film and no single status, so under
+    # R83 there is nothing for it to point at.
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    to_read = Shelf.objects.get(user=alice, identifier=Shelf.TO_READ)
+    now = timezone.now()
+    for offset, title in enumerate(("Dune", "Arrival", "Blade Runner")):
+        ShelfFilm.objects.create(
+            shelf=to_read,
+            film=Film.objects.create(title=title, year=2016 + offset),
+            user=alice,
+            shelved_date=now - timedelta(minutes=10 - offset),
+        )
+    entries = feed_entries(alice)
+    assert len(entries) == 1
+    assert entries[0].other_count == 2
+    assert entries[0].status_id is None
+    assert entries[0].interactive is False
+
+
+@pytest.mark.django_db
+def test_feed_entry_standalone_status_carries_its_id(db):
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    dune = Film.objects.create(title="Dune", year=2021)
+    comment = Status.objects.create(
+        user=alice, film=dune, status_type=Status.Type.COMMENT, content="<p>Hi.</p>"
+    )
+    entry = feed_entries(alice)[0]
+    assert entry.kind == "status"
+    assert entry.status_id == comment.id
+    assert entry.remote is False
+    assert entry.interactive is True
+
+
+@pytest.mark.django_db
+def test_feed_entry_remote_mirror_is_not_interactive(db):
+    # R83 decision 5: a mirror carries its identity but no interactions
+    # until Like / threaded Create can actually federate.
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    carol = _remote_user()
+    alice.follows.add(carol)
+    dune = Film.objects.create(title="Dune", year=2021)
+    mirror = Status.objects.create(
+        user=carol,
+        film=dune,
+        status_type=Status.Type.REVIEW,
+        rating="4",
+        content="<p>Their review.</p>",
+        local=False,
+        remote_url="https://remote.example/status/1",
+    )
+    entry = next(e for e in feed_entries(alice) if e.user == carol)
+    assert entry.kind == "status"
+    assert entry.status_id == mirror.id
+    assert entry.remote is True
+    assert entry.interactive is False
+
+
+@pytest.mark.django_db
+def test_feed_entry_remote_review_folded_into_watched_is_not_interactive(db):
+    # The fold reaches mirrors too. The row does carry the mirror's id — it's
+    # the locality flag, not a missing id, that makes the row inert.
+    #
+    # A remote user has no shelves until a federated ShelfEvent creates one
+    # (R15), so this state only exists when the home instance also announced
+    # the Watched shelf — hence the real federation helper rather than a
+    # hand-rolled Shelf lookup.
+    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    carol = _remote_user()
+    alice.follows.add(carol)
+    dune = Film.objects.create(title="Dune", year=2021)
+    _ensure_shelf_row(carol, Shelf.READ, dune)
+    mirror = Status.objects.create(
+        user=carol,
+        film=dune,
+        status_type=Status.Type.REVIEW,
+        rating="4",
+        content="<p>Their review.</p>",
+        local=False,
+        remote_url="https://remote.example/status/2",
+    )
+    entries = [e for e in feed_entries(alice) if e.user == carol]
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.kind == "watched"
+    assert entry.status_id == mirror.id
+    assert entry.content == "<p>Their review.</p>"
+    assert entry.remote is True
+    assert entry.interactive is False
+
+
+@pytest.mark.django_db
+def test_feed_entry_interactive_is_derived_not_stored():
+    # ``interactive`` is derived, so it cannot drift from status_id/remote
+    # and the federation flip is one line in the property (R83).
+    field_names = {f.name for f in dataclasses.fields(FeedEntry)}
+    assert "interactive" not in field_names
+    assert {"status_id", "remote"} <= field_names
 
 
 # --- Feed membership honors blocks (M5 increment 3, R54) ----------------------

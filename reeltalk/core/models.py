@@ -520,6 +520,21 @@ class FeedEntry:
     text when they have one; the review is not a separate row. Aggregated
     bulk entries (R37) show the newest film plus ``other_count`` — "added Y
     and N other films" — and carry no rating or content.
+
+    ``status_id`` is the ``Status`` the row speaks for (R83). It is set on a
+    ``"status"`` entry and on a ``"watched"`` entry that folded a review —
+    the fold stays (R35) and the review ``Status`` underneath it is the
+    social object the row stands for — and stays ``None`` on a shelf event
+    with no review behind it, which is not a social object and has nothing to
+    interact with.
+
+    ``remote`` marks a row whose status is another instance's mirror.
+    ``interactive`` is the one flag a template reads, so no template has to
+    reach for the database to find out. Mirrors are non-interactive for now
+    (R83 decision 5): this instance cannot yet deliver ``Like`` or a threaded
+    ``Create``, so the controls are hidden rather than shown and left to
+    no-op. When the federation increments land, dropping ``not self.remote``
+    from the property below is the whole change.
     """
 
     kind: str
@@ -531,6 +546,13 @@ class FeedEntry:
     rating: Decimal | None = None
     content: str = ""
     other_count: int = 0
+    status_id: int | None = None
+    remote: bool = False
+
+    @property
+    def interactive(self) -> bool:
+        """Whether this row can carry a like or a reply (R83)."""
+        return self.status_id is not None and not self.remote
 
 
 def _group_has_written_review(user_id: int, film_ids: list[int]) -> bool:
@@ -562,6 +584,12 @@ def feed_entries(user) -> list[FeedEntry]:
     review rating + text, so the review is not a second row; everything else
     ``Status.feed_for`` returns (comments, reviews without a Watched row)
     appears as its own entry.
+
+    Every entry that stands for a ``Status`` — a standalone one, or a folded
+    ``"watched"`` row — gets its ``status_id`` and ``remote`` filled in
+    (R83), so a like or reply rendered on a feed row has something to point
+    at. A shelf event with no review behind it stays ``status_id=None``, and
+    ``FeedEntry.interactive`` is False for it and for every remote mirror.
     """
     member_ids = user.feed_member_ids()
 
@@ -638,6 +666,10 @@ def feed_entries(user) -> list[FeedEntry]:
         if target is not None:
             target.rating = status.rating
             target.content = status.content
+            # R83: the folded row keeps the review as its identity — the row
+            # reads as a shelf event but interacts as the review it carries.
+            target.status_id = status.id
+            target.remote = not status.local
             continue
         entries.append(
             FeedEntry(
@@ -647,6 +679,8 @@ def feed_entries(user) -> list[FeedEntry]:
                 date=status.published_date,
                 rating=status.rating,
                 content=status.content,
+                status_id=status.id,
+                remote=not status.local,
             )
         )
 
