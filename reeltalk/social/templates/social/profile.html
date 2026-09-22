@@ -49,8 +49,8 @@
 {% endif %}
 
 {% if can_invite %}
-{# R82: the invite box lives only on one's own profile, and only for a user
-   the instance lets mint links (SiteSettings.invite_scope). #}
+{# R82: the invite box lives only on one's own profile, and only for a user #}
+{# the instance lets mint links (SiteSettings.invite_scope). #}
 <section class="invite-box" aria-labelledby="invite-pitch">
   <p class="invite-pitch" id="invite-pitch">Invite a fellow movie freak to ReelTalk</p>
   <form method="post" action="{% url 'invite-create' %}" class="invite-form">
