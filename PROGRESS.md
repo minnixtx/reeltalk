@@ -1,13 +1,13 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-09-21
+**Last updated:** 2026-09-22
 **Audience:** any new session picking up this project. Read [REWRITE.md](REWRITE.md) first (the binding clean-room rules), then [PLAN.md](PLAN.md) (functional spec + build plan + license audit), then this file for current state.
 
 ---
 
 ## 1. Current state
 
-> **Next feature:** **likes, comments and per-post pages.** Increment 1 (feed row identity) is **done 2026-09-22** (`9b78651`). **Next is increment 2 — the per-post page, plus linking the feed rows into it**; its scope is settled as **R84**, so it can start without further decisions. All six feature-level decisions are settled as **R83**. Read §2A before starting that work.
+> **Next feature:** **likes, comments and per-post pages.** Increment 1 (feed row identity, `9b78651`) and increment 2 (the per-post page, plus linking the feed rows into it, `a93947b`) are **done 2026-09-22**. **Next is increment 3 — likes, local only**; its shape is already settled by R83 decisions 4 and 5 plus the day-one identity discipline of R41/R42, so it needs no new owner decision. All six feature-level decisions are settled as **R83**. Read §2A before starting that work.
 
 | Area | State |
 |---|---|
@@ -1352,7 +1352,7 @@ The six questions as originally posed, kept for the reasoning behind each answer
 Each is sized for one session and ends at a committed, deployed, verified checkpoint.
 
 1. ✅ **Give feed rows an identity.** *(done 2026-09-22, `9b78651` — recorded below.)* Add `status`/`status_id` to `FeedEntry`; settle decision 1 (the fold); make shelf-only rows explicitly non-interactive. **No user-visible feature** — it is the unblocking prerequisite, and everything after assumes it.
-2. **The per-post page, plus linking the feed rows into it.** *(scope settled by the owner 2026-09-22 as **R84**.)* Fill in the HTML arm of `status_detail`'s existing negotiation branch per decision 3. Block-aware rendering (see gotcha 4). Renders the status in full plus its reply list — empty at first, and that is fine. This is the destination every later increment attaches to. **Also in scope:** feed rows link through to the post page, gated on `entry.status_id is not None` — **not** on `entry.interactive` (R84).
+2. ✅ **The per-post page, plus linking the feed rows into it.** *(done 2026-09-22, `a93947b` — recorded below.)* Fill in the HTML arm of `status_detail`'s existing negotiation branch per decision 3. Block-aware rendering (see gotcha 4). Renders the status in full plus its reply list — empty at first, and that is fine. This is the destination every later increment attaches to. **Also in scope:** feed rows link through to the post page, gated on `entry.status_id is not None` — **not** on `entry.interactive` (R84).
 3. **Likes, local only.** `Like` model with **day-one AP identity discipline (R41/R42)** even though nothing federates yet — `origin_id` on create, unique constraint on `(user, status)`, so increment 5 doesn't need to re-shape the table. `POST /status/<id>/like/` toggle. AJAX with no reload, following the one existing precedent (`base.html:8` csrf meta + `search.js:144` fetch → `JsonResponse`). Counts on feed rows and the post page.
 4. **Comments, local only.** Finally gives `reply_parent` a writer. Reply form, thread rendering with an explicit depth policy, `film_id` inheritance (see gotcha 2), soft-delete orphan handling (gotcha 3), block filtering.
 5. **Federation, outbound.** Emit `Like` and `Undo(Like)`; extend `handle_undo` past the Follow-only check; emit threaded `Create(Note)` carrying `inReplyTo`. **Ids need a uuid fragment** or a re-like dedups as a redelivery (see `objects.py:update_activity`).
@@ -1403,6 +1403,39 @@ FOLD PROOF: minnix / Alien from L.A. : entry.status_id=1 review.id=1 match=True 
 The authed home page rendered over the real host — `HTTP_HOST='reeltalk.minnix.dev'`, applying the 8b lesson about never trusting a response whose status was not checked; the first attempt 400'd on the test client's `testserver` default — returns **200** with the feed markup unchanged from before: the folded review row plus the bulk "added … and 1376 other films" row, and **no controls added**. Anonymous `https://reeltalk.minnix.dev/` 200, plain-HTTP LAN `http://192.168.1.138:3030/` 200, deployed image `cbb1935`.
 
 **No browser verification was needed, and none was performed** — with no template and no CSS in the diff there is nothing new to see. The first increment that genuinely needs a click-through is increment 2 (the per-post page), and increment 3's like button should be clicked specifically on a **folded** row, since that is exactly where "which object did I just like" could go wrong.
+
+### Feed interactions increment 2 — the per-post page, and the feed opens it (executed 2026-09-22, commit `a93947b`)
+
+**What landed.** `status_detail` is now two real arms instead of one arm and a stub 404. ActivityPub clients get the **Note** document as before; browsers get a human page — the status in full, plus its reply list — at the same URL, for local statuses **and** remote mirrors alike (decision 3). A new `core/status/detail.html` renders it, and one line in `home.html` turns a feed row's date into a permalink when `entry.status_id is not None`.
+
+**The `local=True` filter had to move, not simply disappear.** The old view carried locality inside the query (`get_object_or_404(Status, id=…, local=True, deleted=False)`), which made the AP-only contract implicit — there was only one arm, so a filter in the lookup did double duty. With two arms that shape breaks: the HTML arm must *not* filter on locality, and the AP arm still must. So the lookup is now locality-blind and the AP branch re-asserts it explicitly (`if not status.local: raise Http404`). Worth naming because the risk inverts: the danger is no longer "a browser sees JSON," it is "we mint identity for another instance's object," and that guarantee now lives in a branch rather than a `WHERE` clause. Anyone touching this view should see the check, not infer it.
+
+**Two things the plan's phrasing hid.** First, serving mirrors is not a nicety bolted onto URL reuse — before this increment a federated review had **no resolvable page anywhere on this instance**, for anyone. That absence is most of what decision 3 was buying, and it is now closed. Second, the block rule for a *page* differs in kind from the block rule for a *list*. In a list you drop a row and the rest stands; on a page there is nowhere to put the exclusion, so it can only be 404. Rather than invent a third answer, this copies `film_detail` (R56) verbatim: a logged-in viewer who has blocked the author gets 404, anonymity hides nothing because blocking is per-viewer state, and the reply list is filtered by the same set. Tombstones are served by neither arm.
+
+**The link's affordance is the timestamp — a placeholder, not a decision.** R84 parked the visual question (whole row vs timestamp vs title), so this took Mastodon's own permalink convention rather than inventing one. One CSS detail drove the markup: `<a class="muted">` would have killed the link colour, because `.muted`'s class selector beats the bare `a` element rule, leaving a link that looks like plain text. So the anchor sits *inside* the muted span and keeps `--accent`. The parked design pass (R73) owns changing this; nothing here should be read as the affordance having been chosen.
+
+**The R84 guard was proven by mutation, per R79.** The test asserts two facts about the *same* row — `entry.interactive is False` and the link is present — so it can only pass if the two axes are genuinely independent. To confirm it actually bites: the template was flipped to `{% if entry.interactive %}`, the images rebuilt, and `test_remote_mirror_row_links_to_the_post_page_though_it_is_not_interactive` failed while everything else stayed green. That is precisely the bug R84 names — a mirror losing its *page* when only its *control* was meant to be withheld. Template reverted and rebuilt before the gate was run.
+
+**A vacuous pass caught on the way, and worth the general rule.** The first cut of the five feed tests read `/` with no superuser in place, so R12's setup-wizard redirect answered every request with an empty 302. The three "link is present" tests failed loudly, which is the harmless direction; the two "**no** link is present" tests would have passed no matter what the template did. Fixed with an `admin` fixture and a `_home()` helper that asserts 200 before handing back the body, plus a positive assertion that the row itself rendered ("to their Watchlist", "2 other films") before asserting the absence of a link inside it. The rule generalises past this file: **an absence assertion is only worth what the rendering of the page is worth — prove the page rendered first.**
+
+**Gate** (all three images rebuilt, fresh `docker compose run --rm web`): `ruff check` — *All checks passed!*; `ruff format --check` — *91 files already formatted*; `makemigrations --check` — *No changes detected*; pytest **910 passed + 5 skipped in 422.96s**. Seventeen new tests, all in `reeltalk/tests/test_status_page.py`. **One pre-existing test changed state, by design:** `test_status_detail_404_for_browsers_deleted_and_mirrors` → `test_status_detail_ap_arm_404s_for_deleted_and_mirrors`. Its "browsers get no JSON (there is no human-facing status page in v0.1)" line asserted the exact thing decision 3 reversed; the AP assertions it carried are unchanged and it gained a positive 200 for the local AP arm. **Baseline reconciliation, so nobody chases it:** the tree at HEAD collects **898**, not the 892 recorded in increment 1, and `git diff 9b78651 HEAD -- reeltalk/tests` is empty — so that recorded figure was one low, the same class of slip already corrected once there. The delta this increment introduces is exactly **+17**, counted repo-wide against HEAD (673 → 690 test functions).
+
+**Verified live on `reeltalk.minnix.dev` over real HTTPS** after `up -d web` on the rebuilt image (deployed image `a4299fc3418c`):
+
+```
+HTML arm, anonymous    200 text/html — author link /user/minnix/, 2.5/5 (width:50%),
+                       /film/1096/, "Replies (0)" + "No replies yet"
+AP arm                 200 application/activity+json
+                       id=https://reeltalk.minnix.dev/status/1/  type=Note
+authed home            200 — watched row status_id=1  -> links ['/status/1/']
+                       watchlist row status_id=None -> no link
+unknown id / id=0      404 on both arms
+anon home + LAN HTTP   200 / 200
+```
+
+The mirror case cannot be shown with the instance's own data, so it was probed with a temporary remote status and a temporary viewer (this instance's data is disposable), then deleted — `cleanup: False False`, no probe rows left. Over the real host: the HTML arm returned **200 and served the mirrored content**, the AP arm returned **404**, and the feed row carried `interactive=False` **with the link present** — the R84 split holding against live data rather than only in a test. The mirror landed as a flat `kind=status` row, matching increment 1's finding that a remote user has no shelves until federation gives them one.
+
+**What increment 3 should know.** This page is the destination. A like control belongs both on the post page and on the feed row, both keyed on the same `status_id`, and both gated by `interactive` — which is the *correct* gate for a control, in exactly the place R84 says it is the wrong gate for a link. Click the like on a **folded** row specifically, as increment 1 advised; the post page adds a second vantage point for confirming the object it points at is the review and not the shelf event. Two deliberate absences here: **no delete control** on the post page (the author's Delete still lives only on the film page — controls are increment 3's surface, and bolting one on early would pre-empt how they are supposed to look), and **no "mirrored from" indicator** — with no controls on the page at all there is nothing yet that would confuse a reader about a mirror's provenance, and inventing the badge is design work parked at R73.
 
 ## 3. Host facts (this box)
 
