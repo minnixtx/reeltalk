@@ -7,7 +7,7 @@
 
 ## 1. Current state
 
-> **Next feature:** **likes, comments and per-post pages.** Increment 1 (feed row identity) is **done 2026-09-22** (`9b78651`). **Next is increment 2 — the per-post page.** All six owner decisions are settled as **R83**, so no increment after this needs a decision from the owner before it starts. Read §2A before starting that work.
+> **Next feature:** **likes, comments and per-post pages.** Increment 1 (feed row identity) is **done 2026-09-22** (`9b78651`). **Next is increment 2 — the per-post page, plus linking the feed rows into it**; its scope is settled as **R84**, so it can start without further decisions. All six feature-level decisions are settled as **R83**. Read §2A before starting that work.
 
 | Area | State |
 |---|---|
@@ -1352,7 +1352,7 @@ The six questions as originally posed, kept for the reasoning behind each answer
 Each is sized for one session and ends at a committed, deployed, verified checkpoint.
 
 1. ✅ **Give feed rows an identity.** *(done 2026-09-22, `9b78651` — recorded below.)* Add `status`/`status_id` to `FeedEntry`; settle decision 1 (the fold); make shelf-only rows explicitly non-interactive. **No user-visible feature** — it is the unblocking prerequisite, and everything after assumes it.
-2. **The per-post page.** Fill in the HTML arm of `status_detail`'s existing negotiation branch per decision 3. Block-aware rendering (see gotcha 4). Renders the status in full plus its reply list — empty at first, and that is fine. This is the destination every later increment attaches to.
+2. **The per-post page, plus linking the feed rows into it.** *(scope settled by the owner 2026-09-22 as **R84**.)* Fill in the HTML arm of `status_detail`'s existing negotiation branch per decision 3. Block-aware rendering (see gotcha 4). Renders the status in full plus its reply list — empty at first, and that is fine. This is the destination every later increment attaches to. **Also in scope:** feed rows link through to the post page, gated on `entry.status_id is not None` — **not** on `entry.interactive` (R84).
 3. **Likes, local only.** `Like` model with **day-one AP identity discipline (R41/R42)** even though nothing federates yet — `origin_id` on create, unique constraint on `(user, status)`, so increment 5 doesn't need to re-shape the table. `POST /status/<id>/like/` toggle. AJAX with no reload, following the one existing precedent (`base.html:8` csrf meta + `search.js:144` fetch → `JsonResponse`). Counts on feed rows and the post page.
 4. **Comments, local only.** Finally gives `reply_parent` a writer. Reply form, thread rendering with an explicit depth policy, `film_id` inheritance (see gotcha 2), soft-delete orphan handling (gotcha 3), block filtering.
 5. **Federation, outbound.** Emit `Like` and `Undo(Like)`; extend `handle_undo` past the Follow-only check; emit threaded `Create(Note)` carrying `inReplyTo`. **Ids need a uuid fragment** or a re-like dedups as a redelivery (see `objects.py:update_activity`).
@@ -1540,3 +1540,18 @@ New owner decisions for the rewrite are recorded here, numbered R1, R2, … The 
   **Carried into increments 5–6: a remote user has no shelves until federation gives them one.** `User.save()` calls `Shelf.create_default_shelves` only when `self.local` (`social/models.py:143–145`, itself pinned by `test_shelf.py::test_remote_user_gets_no_default_shelves`); a mirror's shelves arrive only via an inbound `ShelfEvent` through `_ensure_default_shelf` (`activitypub/statuses.py:265`). So the folded remote shape exists **only when the home instance also announced the Watched shelf** — a remote review with no shelf event lands as a flat `kind="status"` row instead. Remote threads will be flat considerably more often than folded, and increment 5–6 reasoning built on the folded case would be reasoning about the minority. This surfaced as a `Shelf.DoesNotExist` in the first cut of the remote-fold test; the test now builds that state through the real federation helper rather than hand-rolling a `Shelf` lookup, per R79.
 
   **Baseline correction, so nobody chases a phantom regression.** The 8b record gives the suite as 883 passed + 5 skipped; the tree at `6b8dbbc` collects **884**. This increment adds exactly 8 tests, counted repo-wide against HEAD, and lands at **892 passed + 5 skipped in 381.11s**. Nothing failed and no existing test changed state — the earlier figure was simply one low.
+
+- **R84 — Navigability and interactivity are different questions; a feed row links on `status_id`, never on `interactive` (owner decision 2026-09-22, scopes increment 2).** The owner settled increment 2's open scope question — it does include linking feed rows to the post page — and in doing so caught a collapse in how the increment-1 brief had framed it. `FeedEntry` now answers two independent questions, and conflating them produces a specific, silent bug:
+
+  | Question | Test | Controls what |
+  | --- | --- | --- |
+  | Is there a post behind this row? | `entry.status_id is not None` | Whether the row **links** to `/status/<id>/` |
+  | Can this instance act on it? | `status_id is not None and not remote` | Whether a **like/reply control** appears |
+
+  **The bug the distinction prevents:** gating the link on `entry.interactive` would make every remote mirror unclickable, because increment 1 deliberately marks mirrors non-interactive until federation support lands. That is not a minor cosmetic loss — it directly undoes decision 3, where the HTML arm of `status_detail` was made to serve mirrors *precisely so that remote posts have a resolvable page here at all*. The thing withheld from a mirror is the **control**, not the **page**. A remote review should read as a link you can open and not like; the brief as first written would have made it neither.
+
+  **The two sets line up cleanly, which is why the distinction is safe rather than fussy.** Every row with a `status_id` points at a real `Status` that the HTML arm will serve regardless of locality, so `status_id is not None` is exactly the set of openable rows. The rows without one — bare `watched`/`added` shelf events and R37 bulk aggregates — have no post to open, so they stay plain text for the same structural reason they stay non-interactive. There is no row that is linkable-but-absent or openable-but-hidden.
+
+  **`interactive` keeps its original meaning and stays exactly as implemented.** It was always "may I put a control here," never "may I open this" — no rename, no change to the property, and the increment-1 tests stand. What changes is only which flag each template reads. Worth stating explicitly because the name invites the wrong read: `interactive` is the *narrower* predicate of the two, so anything that wants the broader one must not borrow it.
+
+  **Also settled:** the link's **visual affordance** — whole row vs timestamp permalink vs title, and how a linked row should look different from a plain one — is **not** in increment 2. That is design work, which stays parked at R73. Increment 2 makes the row navigate; it does not restyle the feed.
