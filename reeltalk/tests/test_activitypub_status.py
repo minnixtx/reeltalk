@@ -1127,7 +1127,10 @@ def test_status_detail_serves_note_document_to_ap_clients(client):
 
 
 @pytest.mark.django_db
-def test_status_detail_404_for_browsers_deleted_and_mirrors(client):
+def test_status_detail_ap_arm_404s_for_deleted_and_mirrors(client):
+    # R83 decision 3 keeps the AP arm local-only: we never mint identity for
+    # another instance's object. The browser arm now serves mirrors too —
+    # that is test_status_page.py's job, not this one.
     alice = User.objects.create_user(localname="alice", password="p")
     film = Film.objects.create(title="Arrival", year=2016)
     status = Status.objects.create(
@@ -1137,8 +1140,7 @@ def test_status_detail_404_for_browsers_deleted_and_mirrors(client):
         rating=Decimal("4.5"),
     )
     ap = {"HTTP_ACCEPT": "application/activity+json"}
-    # Browsers get no JSON (there is no human-facing status page in v0.1).
-    assert client.get(f"/status/{status.pk}/").status_code == 404
+    assert client.get(f"/status/{status.pk}/", **ap).status_code == 200
     # A tombstone is not served…
     status.delete()
     assert client.get(f"/status/{status.pk}/", **ap).status_code == 404

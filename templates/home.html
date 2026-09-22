@@ -23,7 +23,8 @@
                 {% endif %}
                 <span class="review-author">{{ entry.user.localname }}</span>
                 {% if entry.rating %}<span title="{{ entry.rating|floatformat:'-1' }} / 5">{{ entry.rating|stars }}</span>{% endif %}
-                <span class="muted">{{ entry.date|date:"Y-m-d" }}</span>
+                {# R84: the row links on status_id, never on interactive — a remote mirror gets the page, not a control. #}
+                <span class="muted">{% if entry.status_id is not None %}<a href="{% url 'status' entry.status_id %}" title="Open this post">{{ entry.date|date:"Y-m-d" }}</a>{% else %}{{ entry.date|date:"Y-m-d" }}{% endif %}</span>
               </div>
               {% if entry.film %}
                 <div class="feed-item">

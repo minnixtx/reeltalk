@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% load static film_tags %}
+
+{% block title %}{{ status.user.localname }}{% if status.film %} on {{ status.film.title }}{% endif %}{% endblock %}
+
+{% block content %}
+{# The post page (R83 decision 3): one status in full, then its replies. #}
+{# A mirror renders here exactly like a local post — same row, no controls. #}
+<article class="status-post">
+  <div class="review-head">
+    {% if status.user.avatar %}
+      <img class="avatar avatar-row" src="{{ status.user.avatar.url }}" alt="">
+    {% else %}
+      <span class="avatar avatar-row avatar-placeholder" aria-hidden="true"></span>
+    {% endif %}
+    <a class="review-author" href="{% url 'user-profile' status.user.localname %}">{{ status.user.localname }}</a>
+    {% if status.rating %}<span class="rating" title="{{ status.rating|floatformat:'-1' }} / 5">{{ status.rating|stars }}</span>{% endif %}
+    <span class="muted">{{ status.published_date|date:"Y-m-d" }}</span>
+  </div>
+  {% if status.film %}
+    <div class="feed-item">
+      {% if status.film.poster %}
+        <img class="thumb" src="{{ status.film.poster.url }}" alt="">
+      {% else %}
+        <span class="thumb thumb-placeholder"></span>
+      {% endif %}
+      <p class="feed-film"><a href="{% url 'film' status.film.id %}">{{ status.film.title }}{% if status.film.year %} ({{ status.film.year }}){% endif %}</a></p>
+    </div>
+  {% endif %}
+  {% if status.content %}<div class="review-body">{{ status.content|safe }}</div>{% endif %}
+</article>
+
+<section class="status-replies">
+  <h2>Replies ({{ replies|length }})</h2>
+  {% if replies %}
+    <ul class="review-list">
+      {% for reply in replies %}
+        <li class="review">
+          <div class="review-head">
+            {% if reply.user.avatar %}
+              <img class="avatar avatar-row" src="{{ reply.user.avatar.url }}" alt="">
+            {% else %}
+              <span class="avatar avatar-row avatar-placeholder" aria-hidden="true"></span>
+            {% endif %}
+            <a class="review-author" href="{% url 'user-profile' reply.user.localname %}">{{ reply.user.localname }}</a>
+            <span class="muted">{{ reply.published_date|date:"Y-m-d" }}</span>
+          </div>
+          {% if reply.content %}<div class="review-body">{{ reply.content|safe }}</div>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">No replies yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

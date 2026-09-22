@@ -100,19 +100,55 @@ def film_detail(request, film_id):
 
 
 def status_detail(request, status_id):
-    """A status's wire URL (R41, deferred to M4 increment 6).
+    """A post: the human page, or its Note wire document (R83 decision 3).
 
-    ActivityPub clients get the **Note** document at its id — the fetch
-    endpoint for objects that ride inline elsewhere. Only local statuses are
-    served: a remote mirror's canonical id is its home instance's URL, not
-    this row's, and there is no human-facing status page in v0.1 (M5), so
-    other clients get 404. Deleted statuses are tombstones — not served.
+    One URL, two arms, negotiated the same way as the actor and film
+    endpoints (R40). ActivityPub clients get the **Note** document at its
+    id, and only for **local** statuses — a mirror's canonical id is its
+    home instance's URL, and we never mint identity for another instance's
+    object (R41/R42). Browsers get the human page for local statuses
+    *and* mirrors: that is the whole point of reusing this URL, and it is
+    what makes a federated review in the home feed openable here at all —
+    before this increment a remote post had no resolvable page on this
+    instance for anybody.
+
+    The human page is publicly readable, anonymously (decision 6, as film
+    pages are under R56). The block rule matches ``film_detail`` exactly:
+    a logged-in viewer who has blocked the author gets 404 rather than a
+    lesser view, and anonymity hides nothing because blocking is
+    per-viewer state. Replies are filtered by the same rule. Deleted
+    statuses are tombstones and are served by neither arm.
     """
-    status = get_object_or_404(Status, id=status_id, local=True, deleted=False)
-    if not accepts_activitypub(request):
-        return HttpResponse(status=404)
-    return JsonResponse(
-        note_document(status, request), content_type="application/activity+json"
+    status = get_object_or_404(Status, id=status_id, deleted=False)
+    if accepts_activitypub(request):
+        if not status.local:
+            raise Http404
+        return JsonResponse(
+            note_document(status, request),
+            content_type="application/activity+json",
+        )
+    blocked_ids = (
+        set(request.user.blocks.values_list("id", flat=True))
+        if request.user.is_authenticated
+        else set()
+    )
+    if status.user_id in blocked_ids:
+        raise Http404
+    # Nothing writes ``reply_parent`` until increment 4, so this list is
+    # empty on every post today. The rendering is here so the page is the
+    # destination later increments attach to, not a page that must be
+    # restructured when replies exist.
+    replies = (
+        Status.objects.filter(reply_parent=status, deleted=False)
+        .select_related("user", "film")
+        .order_by("published_date")
+    )
+    if blocked_ids:
+        replies = replies.exclude(user_id__in=blocked_ids)
+    return render(
+        request,
+        "core/status/detail.html",
+        {"status": status, "replies": replies},
     )
 
 
