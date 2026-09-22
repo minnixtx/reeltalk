@@ -7,6 +7,8 @@
 
 ## 1. Current state
 
+> **Next feature:** the forward plan for **likes, comments and per-post pages** is in **§2A** — six increments, each sized for one session, with the six owner decisions that must be settled before any of it is built. Read §2A before starting that work.
+
 | Area | State |
 |---|---|
 | M0 — functional spec, license audit, dev environment | ✅ Done 2026-09-05, verified (stack healthy, site on :3030, pytest green, ruff green) |
@@ -1300,6 +1302,57 @@ Owner spotted it on the live page: the profile rendered the literal text `{# R82
 **Verified live after deploy.** `openRegistration = False`; anonymous home 200 with **0** `invite-box` and **0** `R82`; `reeltalk.css` and `js/invite.js` both 200; plain-HTTP LAN `http://192.168.1.138:3030/` still 200. All four containers healthy on the rebuilt images.
 
 **Gate** (all services rebuilt, fresh `docker compose run --rm web`): `ruff check` — *All checks passed!*; `ruff format --check` — *90 files already formatted*; `makemigrations --check` — *No changes detected*; pytest **883 passed + 5 skipped in 398.02s** — baseline 882 + the 1 new guard, no pre-existing test changed state.
+
+## 2A. Forward plan — feed interactions: likes, comments, per-post pages
+
+**Forward-looking, not a record.** Written 2026-09-21, before any of it was built, so that each session can be pointed at one increment instead of re-deriving the shape of the feature. Owner request: *"letting users like and comment on other users' reviews from their feed, as well as clicking on a post in the feed and having it open in its own page similar to how it works in Mastodon so that all comments and replies are visible."*
+
+### The finding that sets the scope
+
+**Remote posts are already in the local feed.** `Status.feed_for` (`core/models.py:498`) has **no `local=True` filter**, and `feed_member_ids` includes remote mirrors the user follows. So a federated review shows up on the home feed today. **This is therefore not a single-instance feature** — every interaction we add locally has a federation counterpart, or we ship a visible asymmetry (likeable local posts, dead remote ones). That single fact roughly doubles the work and is why federation gets its own two increments at the end rather than being folded in.
+
+### What exists, precisely
+
+| Thing | State |
+| --- | --- |
+| The post model | `Status` (`core/models.py:354`), `status_type` ∈ `comment` / `review` / `review_rating` (R17). **No `Review`, `Post` or `Comment` class exists.** |
+| Threading column | **`Status.reply_parent` exists** (`:410`, `PROTECT`, `related_name="replies"`) and is serialised outbound as `inReplyTo` (`objects.py:134`). **Nothing in the codebase ever writes it.** A dead column with a live wire field. |
+| Likes | **Nothing at all.** No model, field, view, URL, template, serializer or handler. Only trace is intent: `PLAN.md:91` lists *"Like (favorite) on statuses"*. |
+| Per-post page | `/status/<int:status_id>/` exists but is the **ActivityPub wire URL only** — `HttpResponse(status=404)` for non-AP clients, and filtered `local=True` (`core/views.py:102`). Its own docstring: *"there is no human-facing status page in v0.1."* |
+| Feed rows | `feed_entries(user)` (`core/models.py:547`) returns a **Python list of `FeedEntry` dataclasses, not a queryset** — and `FeedEntry` (`:525`) carries **no status id**. A like/reply button rendered on a feed row has nothing to point at. |
+| Inbox | `HANDLERS` = Follow, Undo, Create, Update, Delete (`inbox.py:29`). **`handle_undo` returns unless the inner type is exactly `"Follow"`** (`follow.py:70`) — `Undo(Like)` is silently ignored. No `Accept`/`Reject` is ever emitted, despite `PLAN.md:91`. |
+| Inbound threading | **Dropped.** `_mirror_status` (`activitypub/statuses.py`) never reads `inReplyTo`; remote replies land as flat mirrors. |
+
+### Decisions the owner must make — do not decide these solo (D17)
+
+A Mastodon-style per-post page appears **nowhere** in `PLAN.md`: neither planned nor deferred. `PLAN.md §7` rule 1 makes that a decision to make *with the owner*. Six are load-bearing:
+
+1. **The R35 fold vs "like this review."** A review by a user of a film they watched is *folded into* the "watched" `FeedEntry` (`core/models.py:634–641`), which then wears the review's rating and prose. So "like this review from the feed" is ambiguous — the row is a shelf event. Either keep the fold and attach the like to the underlying `Status` anyway, un-fold reviews into their own rows, or make shelf events non-likeable and only interact with real statuses.
+2. **Do replies appear as top-level feed entries?** Mastodon shows them but commonly hides them. Recommendation: **no** — replies live on the post page only. This keeps the feed from exploding and matches "click the post to read the thread."
+3. **Permalink URL shape.** `/status/<id>/` is already the AP id URL (`objects.py:65 note_url`). Recommendation: **use the same URL and content-negotiate** — that is exactly what Mastodon does, and the negotiation branch is already wired; only its HTML arm is a stub 404. The clean split: the **AP branch keeps `local=True`** (we must never mint identity for another instance's object), the **HTML branch serves both local and mirrors** (which also fixes "remote posts have no resolvable page here at all"). Alternative is a separate `/p/<id>/`, which avoids the collision but is less canonical.
+4. **Like semantics.** Single binary like vs multiple reaction types. Recommendation: binary.
+5. **Interim behaviour on remote posts,** before the federation increments land: hide the like/reply controls on mirrors (recommended — an honest absence) vs show controls that no-op (a lie).
+6. **Is the HTML post page public?** The AP branch must stay anonymous (same reasoning as `film_detail`, D15/R40, owner-confirmed 2026-09-21). Whether the human page is public like film pages (R56) or members-only like search (R80) is genuinely open.
+
+### Increments
+
+Each is sized for one session and ends at a committed, deployed, verified checkpoint.
+
+1. **Give feed rows an identity.** Add `status`/`status_id` to `FeedEntry`; settle decision 1 (the fold); make shelf-only rows explicitly non-interactive. **No user-visible feature** — it is the unblocking prerequisite, and everything after assumes it.
+2. **The per-post page.** Fill in the HTML arm of `status_detail`'s existing negotiation branch per decision 3. Block-aware rendering (see gotcha 4). Renders the status in full plus its reply list — empty at first, and that is fine. This is the destination every later increment attaches to.
+3. **Likes, local only.** `Like` model with **day-one AP identity discipline (R41/R42)** even though nothing federates yet — `origin_id` on create, unique constraint on `(user, status)`, so increment 5 doesn't need to re-shape the table. `POST /status/<id>/like/` toggle. AJAX with no reload, following the one existing precedent (`base.html:8` csrf meta + `search.js:144` fetch → `JsonResponse`). Counts on feed rows and the post page.
+4. **Comments, local only.** Finally gives `reply_parent` a writer. Reply form, thread rendering with an explicit depth policy, `film_id` inheritance (see gotcha 2), soft-delete orphan handling (gotcha 3), block filtering.
+5. **Federation, outbound.** Emit `Like` and `Undo(Like)`; extend `handle_undo` past the Follow-only check; emit threaded `Create(Note)` carrying `inReplyTo`. **Ids need a uuid fragment** or a re-like dedups as a redelivery (see `objects.py:update_activity`).
+6. **Federation, inbound.** `Like` handler **keyed on the verified sender, never `activity["actor"]`** (every existing handler obeys this); read `inReplyTo` on ingest so remote threads stop flattening; decide the policy for a like targeting a note we don't have (fetch vs ignore).
+
+### Two constraints to design around, not discover late
+
+- **No feed pagination exists.** `feed_entries` materialises everything in Python and `index` renders all of it. The owner already crashed a browser with a 1,378-row watchlist (`social/views.py:525`). Whether comments multiply feed rows depends on decision 2 — if replies do appear, pagination becomes part of increment 4, not a later cleanup.
+- **Broadcast is synchronous** — one blocking POST per remote follower, in-request, failures silently dropped (`broadcast.py:_deliver_to_followers`). A like on a post with many remote followers makes the request slow. **Django-Q2 is already available and used** for the TMDB backfill, so queued delivery is a live option the current pattern deliberately avoided.
+
+### Out of scope here
+
+Notifications (`PLAN.md:58`, `§5`) — "you got a like / someone replied" needs the whole unbuilt `Notification` model, page and count badge. This feature will want it, but it is a separate piece of work, not a tail on these six.
 
 ## 3. Host facts (this box)
 
