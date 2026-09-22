@@ -573,6 +573,45 @@ ul.errorlist {
   margin-left: auto;
 }
 
+/* Like control (feed interactions increment 3). Deliberately the same small
+   inline control as the header's log-out and the search row's watchlist
+   button — the bare `button` rule is the big lit red one, which would swamp
+   a row head. The liked state takes the accent red the hover already uses,
+   so "liked" reads as the lit colour rather than a new design. */
+.like-btn {
+  margin-top: 0;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.9rem;
+  background: none;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.like-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  filter: none;
+  box-shadow: none;
+}
+
+.like-btn[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.like-btn:disabled {
+  color: var(--muted);
+  cursor: default;
+  border-color: var(--border);
+  filter: none;
+  box-shadow: none;
+}
+
+.like-btn .like-count {
+  margin-left: 0.35rem;
+}
+
 /* Shelve/edit controls under the film header. */
 .film-actions {
   display: flex;
@@ -1471,9 +1510,13 @@ button,
 /* Ghost controls (Block / Follow / one-click Add to watchlist) share the
    `button` element but are not lit red, so they keep the metadata face and their
    own sentence case, weight, tracking and leading rather than inheriting the
-   marquee label above. */
+   marquee label above. The like control joins this list because it is not inside a
+   `form.inline` either — a bare `<button>` otherwise picks up the Bebas caps
+   marquee label, which reads wrong beside the Delete and Block controls it sits
+   next to. */
 form.inline button,
-.search-row .watchlist-btn {
+.search-row .watchlist-btn,
+.like-btn {
   font-family: var(--ui);
   font-weight: 600;
   line-height: 1.55;

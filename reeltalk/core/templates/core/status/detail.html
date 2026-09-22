@@ -16,6 +16,17 @@
     <a class="review-author" href="{% url 'user-profile' status.user.localname %}">{{ status.user.localname }}</a>
     {% if status.rating %}<span class="rating" title="{{ status.rating|floatformat:'-1' }} / 5">{{ status.rating|stars }}</span>{% endif %}
     <span class="muted">{{ status.published_date|date:"Y-m-d" }}</span>
+    {# The control needs a local status and a member who can act on it. A #}
+    {# mirror shows the count without the button — the same honest absence #}
+    {# a feed row gets from FeedEntry.interactive (R83 decision 5). #}
+    {% if user.is_authenticated and status.local %}
+      <button type="button" class="like-btn" data-url="{% url 'status-like' status.id %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}">
+        <span class="like-label">{% if liked_by_viewer %}Liked{% else %}Like{% endif %}</span>
+        <span class="like-count">{{ like_count }}</span>
+      </button>
+    {% elif like_count %}
+      <span class="like-count muted">{{ like_count }} like{{ like_count|pluralize }}</span>
+    {% endif %}
   </div>
   {% if status.film %}
     <div class="feed-item">
@@ -53,4 +64,7 @@
     <p class="muted">No replies yet.</p>
   {% endif %}
 </section>
+{% if user.is_authenticated and status.local %}
+<script src="{% static 'js/likes.js' %}" defer></script>
+{% endif %}
 {% endblock %}

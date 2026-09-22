@@ -25,6 +25,13 @@
                 {% if entry.rating %}<span title="{{ entry.rating|floatformat:'-1' }} / 5">{{ entry.rating|stars }}</span>{% endif %}
                 {# R84: the row links on status_id, never on interactive — a remote mirror gets the page, not a control. #}
                 <span class="muted">{% if entry.status_id is not None %}<a href="{% url 'status' entry.status_id %}" title="Open this post">{{ entry.date|date:"Y-m-d" }}</a>{% else %}{{ entry.date|date:"Y-m-d" }}{% endif %}</span>
+                {# The control takes the *narrower* flag (R84): a mirror row gets the page above and no like here. #}
+                {% if entry.interactive %}
+                  <button type="button" class="like-btn" data-url="{% url 'status-like' entry.status_id %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}">
+                    <span class="like-label">{% if entry.liked_by_viewer %}Liked{% else %}Like{% endif %}</span>
+                    <span class="like-count">{{ entry.like_count }}</span>
+                  </button>
+                {% endif %}
               </div>
               {% if entry.film %}
                 <div class="feed-item">
@@ -45,6 +52,7 @@
         <p class="muted">Nothing here yet — add a film to your watchlist or mark one watched.</p>
       {% endif %}
     </section>
+    <script src="{% static 'js/likes.js' %}" defer></script>
   {% else %}
     {# Anonymous visitors keep the landing copy where the feed would be. #}
     <section class="landing">

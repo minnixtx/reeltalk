@@ -31,6 +31,13 @@ urlpatterns = [
         views.delete_review,
         name="status-delete",
     ),
+    # Like / unlike (feed interactions increment 3, R83 decision 4): the
+    # same URL toggles, and answers JSON for the AJAX control.
+    path(
+        "status/<int:status_id>/like/",
+        views.like_status,
+        name="status-like",
+    ),
     path("film/<int:film_id>/edit/", views.film_edit, name="film-edit"),
     path("film/<int:film_id>/shelve/", views.shelve, name="film-shelve"),
     path("film/<int:film_id>/unshelve/", views.unshelve, name="film-unshelve"),

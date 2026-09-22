@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Film, MergedFilm, Shelf, ShelfFilm, Status
+from .models import Film, Like, MergedFilm, Shelf, ShelfFilm, Status
 
 
 @admin.register(Film)
@@ -40,4 +40,11 @@ class StatusAdmin(admin.ModelAdmin):
     ]
     list_filter = ["status_type", "deleted"]
     search_fields = ["user__localname", "film__title"]
+    date_hierarchy = "published_date"
+
+
+@admin.register(Like)
+class LikeAdmin(admin.ModelAdmin):
+    list_display = ["id", "user", "status", "published_date"]
+    search_fields = ["user__localname", "status__user__localname"]
     date_hierarchy = "published_date"

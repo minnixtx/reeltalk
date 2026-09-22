@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.db.models import Count, Max, Q
 from django.utils import timezone
 from django.utils.text import slugify
@@ -499,6 +499,114 @@ class Status(models.Model):
         ).select_related("user", "film")
 
 
+class Like(models.Model):
+    """A user's like of a status — strictly binary (R83 decision 4).
+
+    One row per (user, status) is the whole model of the feature: one
+    Like/Favourite state per user per Status, no reaction types and no
+    denormalised count column. The state therefore maps straight onto the
+    ActivityPub ``Like`` activity and increment 5 invents no wire type.
+    The pair is also the natural inbound dedup key — a redelivered remote
+    ``Like`` lands on the same pair, so the constraint that enforces the
+    binary rule is the same thing that stops a duplicate from
+    double-counting.
+
+    Day-one AP identity discipline (R41/R42) although nothing federates
+    yet: a like written by a local user mints ``origin_id`` = its own pk,
+    exactly as ``Status.save`` does, so the outbound ``Like`` has a stable
+    identity to be built from and the table is not re-shaped in increment
+    5. Unliking deletes the row, so re-liking mints a new pk and a new
+    ``origin_id`` — which is what keeps a re-like from looking like a
+    redelivery of the first one.
+    """
+
+    user = models.ForeignKey(
+        "social.User", on_delete=models.CASCADE, related_name="likes"
+    )
+    status = models.ForeignKey(Status, on_delete=models.CASCADE, related_name="likes")
+    published_date = models.DateTimeField(default=timezone.now, db_index=True)
+    # ActivityPub origin identity (R41): a local like's origin is its own pk.
+    origin_id = models.PositiveBigIntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-published_date"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "status"], name="unique_like_per_user_per_status"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user.localname} likes {self.status}"
+
+    def save(self, *args, **kwargs):
+        creating = self.pk is None
+        super().save(*args, **kwargs)
+        if creating and self.user.local and not self.origin_id:
+            # Day-one origin identity (R41), same shape as Status.save: the
+            # pk is the origin id, written after the insert needs it.
+            Like.objects.filter(pk=self.pk).update(origin_id=self.pk)
+            self.origin_id = self.pk
+
+
+def toggle_like(user, status: Status) -> bool:
+    """Like ``status`` for ``user``, or unlike it if already liked.
+
+    Delete-first: the row's existence is the state (decision 4), so
+    removing it is the whole "off" transition and there is nothing to
+    update in place. The create side is guarded against a double-click —
+    if a concurrent request won the race, the unique constraint fires and
+    we report the state that was asked for rather than failing the
+    request. The inner ``atomic`` is a savepoint, so catching the error
+    leaves the rest of the request usable.
+    """
+    if Like.objects.filter(user=user, status=status).delete()[0]:
+        return False
+    try:
+        with transaction.atomic():
+            Like.objects.create(user=user, status=status)
+    except IntegrityError:
+        pass
+    return True
+
+
+def like_counts(status_ids: list[int]) -> dict[int, int]:
+    """How many likes each of ``status_ids`` carries, in one grouped query.
+
+    ``feed_entries`` returns a Python list rather than a queryset, so a
+    per-row count would be one query per row on every home page. One
+    ``GROUP BY`` answers them all and each row looks its own up by id.
+
+    The counts are viewer-independent, following the home-rail rule in
+    ``index``: a blocked user's like still counts toward the tally; only
+    the lists hide their rows.
+    """
+    if not status_ids:
+        return {}
+    rows = (
+        Like.objects.filter(status_id__in=status_ids)
+        .values("status_id")
+        .annotate(n=Count("id"))
+    )
+    return {row["status_id"]: row["n"] for row in rows}
+
+
+def liked_ids(user, status_ids: list[int]) -> set[int]:
+    """Which of ``status_ids`` ``user`` likes, in one query.
+
+    The toggle needs the viewer's own state so a reloaded page shows the
+    control as it actually stands — a button labelled "Like" that would
+    actually unlike is the same class of lie as a control that no-ops.
+    """
+    if not user.is_authenticated or not status_ids:
+        return set()
+    return set(
+        Like.objects.filter(user=user, status_id__in=status_ids).values_list(
+            "status_id", flat=True
+        )
+    )
+
+
 # R37: consecutive shelf events by the same user on the same shelf closer
 # together than this gap are one bulk operation and render as a single feed
 # entry. A file import lands in one transaction — the owner's 1,378-row
@@ -535,6 +643,12 @@ class FeedEntry:
     ``Create``, so the controls are hidden rather than shown and left to
     no-op. When the federation increments land, dropping ``not self.remote``
     from the property below is the whole change.
+
+    ``like_count`` is how many likes the row's status carries and
+    ``liked_by_viewer`` whether the user whose feed this is likes it — the
+    control needs both, since a button labelled "Like" that would actually
+    unlike is the same lie as a control that no-ops. ``feed_entries``
+    fills them with two batched queries rather than one per row.
     """
 
     kind: str
@@ -548,6 +662,8 @@ class FeedEntry:
     other_count: int = 0
     status_id: int | None = None
     remote: bool = False
+    like_count: int = 0
+    liked_by_viewer: bool = False
 
     @property
     def interactive(self) -> bool:
@@ -683,6 +799,17 @@ def feed_entries(user) -> list[FeedEntry]:
                 remote=not status.local,
             )
         )
+
+    # Like state for every row that can carry a control, batched: one
+    # grouped count plus one membership query, whatever the feed's size.
+    # Rows without a status have nothing to like and keep the defaults.
+    status_ids = [entry.status_id for entry in entries if entry.status_id is not None]
+    counts = like_counts(status_ids)
+    liked = liked_ids(user, status_ids)
+    for entry in entries:
+        if entry.status_id is not None:
+            entry.like_count = counts.get(entry.status_id, 0)
+            entry.liked_by_viewer = entry.status_id in liked
 
     # Stable sort: shelf events keep their ordering among equal timestamps.
     entries.sort(key=lambda entry: entry.date, reverse=True)

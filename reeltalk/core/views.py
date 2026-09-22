@@ -40,6 +40,7 @@ from .models import (
     mark_watched,
     resolve_film_id,
     shelve_to_watchlist,
+    toggle_like,
     unshelve_from_watchlist,
 )
 from .tmdb import TmdbError, is_configured, search_films
@@ -148,8 +149,40 @@ def status_detail(request, status_id):
     return render(
         request,
         "core/status/detail.html",
-        {"status": status, "replies": replies},
+        {
+            "status": status,
+            "replies": replies,
+            # The like control's state (increment 3). Mirrors carry no
+            # control — see ``FeedEntry.interactive`` for the same gate on
+            # a feed row — but the count is shown for them too, because a
+            # like count is a fact about the post rather than an offer.
+            "like_count": status.likes.count(),
+            "liked_by_viewer": request.user.is_authenticated
+            and status.likes.filter(user=request.user).exists(),
+        },
     )
+
+
+@login_required
+@require_POST
+def like_status(request, status_id):
+    """Toggle the viewer's like on a status (increment 3, R83 decision 4).
+
+    AJAX endpoint returning JSON — no reload, no messages framework. The
+    response carries the new count as well as the caller's own state, so
+    one round trip updates both the button and the tally beside it.
+
+    The lookup is scoped to ``local=True``: the control is hidden on a
+    remote mirror (decision 5), and the endpoint refuses one too, so a
+    hand-made request cannot write a like this instance has no way to
+    deliver. That is the same honest absence the template renders, not a
+    second policy — and like the template's gate it is temporary: when
+    increment 5 makes remote likes deliverable, the ``local=True`` here is
+    what comes out.
+    """
+    status = get_object_or_404(Status, id=status_id, local=True, deleted=False)
+    liked = toggle_like(request.user, status)
+    return JsonResponse({"liked": liked, "count": status.likes.count()})
 
 
 @login_required
