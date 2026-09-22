@@ -493,9 +493,19 @@ class Status(models.Model):
         feed is built on this by ``feed_entries``: shelf events are derived
         from the members' ShelfFilm rows, and a user's review of a watched
         film rides on its "watched" entry instead of appearing twice (R35).
+
+        **Replies are excluded** (R83 decision 2). A status with a
+        ``reply_parent`` is a turn in someone else's conversation, not a
+        top-level feed entry — the thread lives on the post page. This is
+        also what keeps comments from multiplying feed rows, which is the
+        condition §2A made feed pagination depend on: with replies out of
+        the timeline, one reply adds no row and pagination stays out of
+        this increment. The replies still exist as thread objects under
+        ``reply_parent``, exactly so that selective timeline visibility
+        can become a later knob instead of a schema change.
         """
         return cls.objects.filter(
-            user_id__in=user.feed_member_ids(), deleted=False
+            user_id__in=user.feed_member_ids(), deleted=False, reply_parent__isnull=True
         ).select_related("user", "film")
 
 
@@ -607,6 +617,123 @@ def liked_ids(user, status_ids: list[int]) -> set[int]:
     )
 
 
+def add_reply(user, parent: Status, *, content: str, raw_content: str) -> Status:
+    """Reply to ``parent`` (feed interactions increment 4, R83 decision 2).
+
+    The first writer ``Status.reply_parent`` ever had. A reply is a
+    ``comment`` status threaded by that self-FK rather than a row in a
+    separate comment table, so a conversation is made of the same objects
+    as everything else: increment 5 can serialise ``inReplyTo`` from it
+    without a new wire type, and increment 6 can read a remote one back in.
+
+    ``film`` is **inherited from the parent**, not left unset.
+    ``Status.film`` is nullable, so a reply that did not set it would land
+    with no film and drop out of every film-anchored surface — the film's
+    own page set, its author's "all films" tab, the export — while looking
+    perfectly fine on its own post page. Inheriting is what keeps a
+    conversation about a film attached to that film. It also means the
+    reply inherits the parent's anchoring obligation: ``Status.save``
+    refuses a typed status with no film, so replying to something with
+    nothing to inherit raises there instead of writing an unanchored row.
+
+    Replying on a film the user has already reviewed cannot trip D5's
+    ``unique_review_per_user_per_film``: that partial index covers only
+    ``review``/``review_rating`` rows, and a reply is a ``comment``.
+
+    The reply mints its own ``origin_id`` because it is a local status —
+    ``Status.save`` does it — so increment 5's threaded ``Create(Note)``
+    has an identity to be built from (R41/R42).
+    """
+    return Status.objects.create(
+        user=user,
+        film_id=parent.film_id,
+        status_type=Status.Type.COMMENT,
+        content=content,
+        raw_content=raw_content,
+        reply_parent=parent,
+    )
+
+
+def reply_counts(status_ids: list[int]) -> dict[int, int]:
+    """How many live replies each of ``status_ids`` carries, in one query.
+
+    The same batching reason as ``like_counts``: ``feed_entries`` returns a
+    Python list, so a per-row count would be one query per row on every
+    home page.
+
+    Deleted replies are excluded — a tombstone is not content. The count is
+    viewer-independent, following the home-rail rule R85 states for likes:
+    a blocked user's reply still counts toward the number, because the
+    number is a fact about the post and only the *offer* to reply is
+    withheld from a mirror. (The post page's own thread count is a
+    different number and does filter blocked replies — that page hides the
+    rows rather than the tally.)
+    """
+    if not status_ids:
+        return {}
+    rows = (
+        Status.objects.filter(reply_parent_id__in=status_ids, deleted=False)
+        .values("reply_parent_id")
+        .annotate(n=Count("id"))
+    )
+    return {row["reply_parent_id"]: row["n"] for row in rows}
+
+
+# Upper bound on how many levels of a thread the post page walks. A bound on
+# the work, not on the model — see ``conversation``.
+REPLY_THREAD_MAX_DEPTH = 12
+
+
+def conversation(root: Status, *, max_depth: int = REPLY_THREAD_MAX_DEPTH):
+    """Every live reply under ``root``, in conversation order.
+
+    Returns ``(reply, parent)`` pairs breadth-first: the root's replies
+    oldest-first, then their replies, and so on. Carrying the parent with
+    each reply is what lets the thread name who a reply answers without a
+    query per row.
+
+    The depth policy, written down rather than implied:
+
+    * **Unbounded in the data.** ``reply_parent`` points at the exact
+      status that was replied to, which is what keeps increment 5's
+      ``inReplyTo`` faithful. The v0.1 composer only ever replies to the
+      status you are reading, so a locally composed thread is one level
+      deep; the multi-level walk matters for remote threads, which arrive
+      at whatever depth the other instance has (increment 6).
+    * **Flat in the render.** One list under the root, no visual nesting,
+      each non-direct reply labelled with who it answers. A deep thread
+      therefore costs no recursive template and stays readable.
+    * **Capped in the walk.** ``max_depth`` levels, one query per level, so
+      a pathological chain cannot make the page unbounded. Replies below
+      the cap are not shown; the cap bounds the work, not the model.
+    * **Tombstones are walked through, not rendered.** A deleted reply is
+      not shown, but the live replies underneath it still are — otherwise
+      deleting one reply would silently take everything said below it down
+      with it.
+    """
+    pairs: list[tuple[Status, Status]] = []
+    frontier: dict[int, Status] = {root.pk: root}
+    seen: set[int] = {root.pk}
+    for _ in range(max_depth):
+        if not frontier:
+            break
+        children = (
+            Status.objects.filter(reply_parent_id__in=list(frontier))
+            .select_related("user", "film")
+            .order_by("published_date", "id")
+        )
+        nxt: dict[int, Status] = {}
+        for child in children:
+            if child.pk in seen:
+                continue
+            seen.add(child.pk)
+            if not child.deleted:
+                pairs.append((child, frontier[child.reply_parent_id]))
+            nxt[child.pk] = child
+        frontier = nxt
+    return pairs
+
+
 # R37: consecutive shelf events by the same user on the same shelf closer
 # together than this gap are one bulk operation and render as a single feed
 # entry. A file import lands in one transaction — the owner's 1,378-row
@@ -649,6 +776,13 @@ class FeedEntry:
     control needs both, since a button labelled "Like" that would actually
     unlike is the same lie as a control that no-ops. ``feed_entries``
     fills them with two batched queries rather than one per row.
+
+    ``reply_count`` is how many live replies the row's status carries.
+    There is no reply control on a feed row — the thread is on the post
+    page and the row already links to it — but the number itself shows,
+    and it shows on a remote mirror too: R85's split again, a count is a
+    fact about the post and only the offer to act on it is gated on
+    locality.
     """
 
     kind: str
@@ -664,6 +798,7 @@ class FeedEntry:
     remote: bool = False
     like_count: int = 0
     liked_by_viewer: bool = False
+    reply_count: int = 0
 
     @property
     def interactive(self) -> bool:
@@ -698,8 +833,15 @@ def feed_entries(user) -> list[FeedEntry]:
     aggregated films are absorbed into the entry (ratings stay visible on
     the film and user-films pages). A watched entry carries that user's D5
     review rating + text, so the review is not a second row; everything else
-    ``Status.feed_for`` returns (comments, reviews without a Watched row)
-    appears as its own entry.
+    ``Status.feed_for`` returns (a top-level comment, a review without a
+    Watched row) appears as its own entry.
+
+    Replies add no row at all: ``feed_for`` excludes any status with a
+    ``reply_parent`` (R83 decision 2), so a comment on someone else's post
+    never reaches this function. §2A made feed pagination depend on whether
+    comments multiply feed rows; decision 2 answered no, and this filter is
+    what makes that answer true in the query rather than a hope about the
+    template.
 
     Every entry that stands for a ``Status`` — a standalone one, or a folded
     ``"watched"`` row — gets its ``status_id`` and ``remote`` filled in
@@ -806,10 +948,14 @@ def feed_entries(user) -> list[FeedEntry]:
     status_ids = [entry.status_id for entry in entries if entry.status_id is not None]
     counts = like_counts(status_ids)
     liked = liked_ids(user, status_ids)
+    # And the reply tally, batched the same way. It renders on mirrors as
+    # well as local rows — the number is not an offer (R85).
+    replies = reply_counts(status_ids)
     for entry in entries:
         if entry.status_id is not None:
             entry.like_count = counts.get(entry.status_id, 0)
             entry.liked_by_viewer = entry.status_id in liked
+            entry.reply_count = replies.get(entry.status_id, 0)
 
     # Stable sort: shelf events keep their ordering among equal timestamps.
     entries.sort(key=lambda entry: entry.date, reverse=True)

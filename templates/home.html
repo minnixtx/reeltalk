@@ -14,7 +14,16 @@
       {% if feed %}
         <ul class="review-list">
           {% for entry in feed %}
-            <li class="review">
+            {% comment %}
+            data-status marks which post this row speaks for (R83), so a test
+            can assert inside one row instead of against the page — which
+            also carries every other member's row and can pass an absence
+            check vacuously. This is a comment BLOCK rather than the hash
+            form because a hash comment has to close on the line it opens:
+            a multi-line one is not a comment at all and renders as page
+            text. Caught by test_a_row_with_no_replies_shows_no_count.
+            {% endcomment %}
+            <li class="review" data-status="{{ entry.status_id|default:'none' }}">
               <div class="review-head">
                 {% if entry.user.avatar %}
                   <img class="avatar avatar-row" src="{{ entry.user.avatar.url }}" alt="">
@@ -31,6 +40,18 @@
                     <span class="like-label">{% if entry.liked_by_viewer %}Liked{% else %}Like{% endif %}</span>
                     <span class="like-count">{{ entry.like_count }}</span>
                   </button>
+                {% endif %}
+                {% comment %}
+                The reply count, on every row that has a post behind it —
+                mirrors included. The number is a fact about the post; the
+                offer is the composer, which lives on the post page this
+                row's timestamp already opens (R85). There is deliberately
+                no reply control on a feed row. The two-form pluralize is
+                not decoration: bare `pluralize` appends an "s" and would
+                render "2 replys".
+                {% endcomment %}
+                {% if entry.status_id is not None and entry.reply_count %}
+                  <span class="reply-count muted">{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:"y,ies" }}</span>
                 {% endif %}
               </div>
               {% if entry.film %}

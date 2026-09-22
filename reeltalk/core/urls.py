@@ -38,6 +38,14 @@ urlpatterns = [
         views.like_status,
         name="status-like",
     ),
+    # Reply to a post (feed interactions increment 4, R83 decision 2): the
+    # first writer for Status.reply_parent. Answers JSON carrying the
+    # server-rendered reply row so the thread grows without a reload.
+    path(
+        "status/<int:status_id>/reply/",
+        views.reply_to_status,
+        name="status-reply",
+    ),
     path("film/<int:film_id>/edit/", views.film_edit, name="film-edit"),
     path("film/<int:film_id>/shelve/", views.shelve, name="film-shelve"),
     path("film/<int:film_id>/unshelve/", views.unshelve, name="film-unshelve"),

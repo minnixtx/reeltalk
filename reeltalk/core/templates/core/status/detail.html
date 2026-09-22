@@ -39,32 +39,58 @@
     </div>
   {% endif %}
   {% if status.content %}<div class="review-body">{{ status.content|safe }}</div>{% endif %}
+  {% comment %}
+  The orphan line (increment 4). A soft-deleted post 404s on its own URL,
+  so this page is the only place a reply to it can be read — and a reply
+  that reads as addressed to nothing is the silent-vanish failure wearing
+  a different face. The row survives because delete() leaves a tombstone
+  and reply_parent is PROTECT.
+  {% endcomment %}
+  {% if parent_deleted %}
+    <p class="muted reply-parent-deleted">This replies to a post that has been deleted.</p>
+  {% endif %}
 </article>
 
 <section class="status-replies">
-  <h2>Replies ({{ replies|length }})</h2>
-  {% if replies %}
-    <ul class="review-list">
-      {% for reply in replies %}
-        <li class="review">
-          <div class="review-head">
-            {% if reply.user.avatar %}
-              <img class="avatar avatar-row" src="{{ reply.user.avatar.url }}" alt="">
-            {% else %}
-              <span class="avatar avatar-row avatar-placeholder" aria-hidden="true"></span>
-            {% endif %}
-            <a class="review-author" href="{% url 'user-profile' reply.user.localname %}">{{ reply.user.localname }}</a>
-            <span class="muted">{{ reply.published_date|date:"Y-m-d" }}</span>
-          </div>
-          {% if reply.content %}<div class="review-body">{{ reply.content|safe }}</div>{% endif %}
-        </li>
-      {% endfor %}
-    </ul>
-  {% else %}
-    <p class="muted">No replies yet.</p>
+  {% comment %}
+  The heading is the thread's total, and comments.js rewrites it after a
+  reply lands. Kept as text on the h2 rather than a nested span so the
+  page carries the literal "Replies (N)" that a screen reader and the
+  tests both read. It counts what is rendered here, so it is the
+  block-filtered number — not the viewer-independent tally a feed row
+  shows (R85).
+  {% endcomment %}
+  <h2 id="reply-count">Replies ({{ replies|length }})</h2>
+  {% comment %}
+  Always rendered, empty or not: comments.js appends into this list, and a
+  target that only exists once there are replies would make the first one
+  the awkward case.
+  {% endcomment %}
+  <ul class="review-list thread-list">
+    {% for reply, reply_to in replies %}
+      {% include "core/status/_reply.html" %}
+    {% endfor %}
+  </ul>
+  {% if not replies %}
+    <p class="muted no-replies">No replies yet.</p>
   {% endif %}
 </section>
 {% if user.is_authenticated and status.local %}
-<script src="{% static 'js/likes.js' %}" defer></script>
+  {% comment %}
+  The composer (increment 4). It answers the post you are reading, so a
+  composed reply is a direct reply to this status — answering one
+  specific turn in the thread is not part of v0.1's surface. A mirror
+  gets no composer because this instance cannot yet deliver a threaded
+  Create (R83 decision 5), and the route refuses one too (R85), so the
+  absence is the same absence on both sides.
+  {% endcomment %}
+  <form class="reply-form" method="post" action="{% url 'status-reply' status.id %}">
+    {% csrf_token %}
+    <label for="id_reply_content">Reply to {{ status.user.localname }}</label>
+    <textarea name="content" id="id_reply_content" rows="3" placeholder="Say something about this post…"></textarea>
+    <button type="submit">Reply</button>
+  </form>
+  <script src="{% static 'js/likes.js' %}" defer></script>
+  <script src="{% static 'js/comments.js' %}" defer></script>
 {% endif %}
 {% endblock %}

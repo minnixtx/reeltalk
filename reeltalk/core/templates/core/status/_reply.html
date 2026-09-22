@@ -1,0 +1,27 @@
+{% comment %}
+One reply row (feed interactions increment 4).
+
+A partial rather than inline markup because two callers render it: the post
+page's thread loop, and ``reply_to_status``, which hands this same render
+back as a JSON string for comments.js to insert. One template means the
+row the client appends cannot drift from the row the page renders — the
+client inserts what the server rendered instead of rebuilding it.
+
+``reply`` is the reply Status; ``reply_to`` is who it answers, already
+resolved to display text by the view: "" for a direct reply to the post,
+"a hidden reply" or "a deleted reply" when naming the author would name
+something this viewer is not shown.
+{% endcomment %}
+<li class="review reply">
+  <div class="review-head">
+    {% if reply.user.avatar %}
+      <img class="avatar avatar-row" src="{{ reply.user.avatar.url }}" alt="">
+    {% else %}
+      <span class="avatar avatar-row avatar-placeholder" aria-hidden="true"></span>
+    {% endif %}
+    <a class="review-author" href="{% url 'user-profile' reply.user.localname %}">{{ reply.user.localname }}</a>
+    {% if reply_to %}<span class="reply-to muted">replying to {{ reply_to }}</span>{% endif %}
+    <span class="muted">{{ reply.published_date|date:"Y-m-d" }}</span>
+  </div>
+  {% if reply.content %}<div class="review-body">{{ reply.content|safe }}</div>{% endif %}
+</li>

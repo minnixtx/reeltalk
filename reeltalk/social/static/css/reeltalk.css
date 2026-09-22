@@ -689,7 +689,18 @@ ul.errorlist {
   font-size: 2rem;
 }
 
-.modal-dialog textarea {
+/* The reply composer (feed interactions increment 4). Deliberately no new
+   look: the textarea takes the identical field treatment the review modal
+   gives its own — a bare `<textarea>` on this dark theme otherwise renders
+   as a browser-default white box, which is the same class of trap as the
+   caps face on a bare `<button>`. Nothing here is invisible in the diff and
+   only a browser catches it. */
+.reply-form {
+  margin-top: 1.25rem;
+}
+
+.modal-dialog textarea,
+.reply-form textarea {
   width: 100%;
   padding: 0.45rem 0.6rem;
   font: inherit;
@@ -702,6 +713,19 @@ ul.errorlist {
 
 .modal-dialog button {
   margin-top: 1rem;
+}
+
+.reply-form button {
+  margin-top: 0.75rem;
+}
+
+/* "replying to @x" on a flat thread row, and the orphan line on a reply
+   whose parent is a tombstone. Both are metadata, so both take the muted
+   metadata face at the row's own size rather than the body size. */
+.reply-to,
+.reply-parent-deleted {
+  font-family: var(--ui);
+  font-size: 0.85rem;
 }
 
 .required {
@@ -1513,10 +1537,13 @@ button,
    marquee label above. The like control joins this list because it is not inside a
    `form.inline` either — a bare `<button>` otherwise picks up the Bebas caps
    marquee label, which reads wrong beside the Delete and Block controls it sits
-   next to. */
+   next to. The reply composer's submit joins for the same reason: it is a bare
+   `<button>` in a form that is not `form.inline`, and a caps marquee label on a
+   reply box would read as a lit CTA rather than a small inline control. */
 form.inline button,
 .search-row .watchlist-btn,
-.like-btn {
+.like-btn,
+.reply-form button {
   font-family: var(--ui);
   font-weight: 600;
   line-height: 1.55;

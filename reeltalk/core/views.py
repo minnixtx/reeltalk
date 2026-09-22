@@ -10,6 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
@@ -35,6 +36,8 @@ from .models import (
     Shelf,
     ShelfFilm,
     Status,
+    add_reply,
+    conversation,
     genre_from_slug,
     live_reviews,
     mark_watched,
@@ -100,6 +103,42 @@ def film_detail(request, film_id):
     return render(request, "core/film/detail.html", data)
 
 
+def _reply_to_label(parent, root, blocked_ids) -> str:
+    """Who a thread row reads as answering — ``""`` for a direct reply.
+
+    A flat thread still has to say who each turn is addressed to. When the
+    row we would name is itself hidden from this viewer we say that instead
+    of naming it: printing a blocked author's handle on a page whose whole
+    block rule is that they are not here would leak the one thing blocking
+    is meant to hide, and naming a deleted reply would point at a row the
+    reader cannot see.
+    """
+    if parent.pk == root.pk:
+        return ""
+    if parent.user_id in blocked_ids:
+        return "a hidden reply"
+    if parent.deleted:
+        return "a deleted reply"
+    return parent.user.localname
+
+
+def _thread_rows(root, blocked_ids) -> list[tuple[Status, str]]:
+    """The thread as the post page renders it: live, flat, labelled.
+
+    ``(reply, reply_to)`` pairs in conversation order. Blocking is applied
+    here rather than inside ``conversation`` so the read-side rule stays in
+    the view with every other read-side block rule (R56), and so a blocked
+    author's reply does not take its live replies down with it — the walk
+    already goes through hidden rows, and dropping a node here only drops
+    that node.
+    """
+    return [
+        (reply, _reply_to_label(parent, root, blocked_ids))
+        for reply, parent in conversation(root)
+        if reply.user_id not in blocked_ids
+    ]
+
+
 def status_detail(request, status_id):
     """A post: the human page, or its Note wire document (R83 decision 3).
 
@@ -120,7 +159,9 @@ def status_detail(request, status_id):
     per-viewer state. Replies are filtered by the same rule. Deleted
     statuses are tombstones and are served by neither arm.
     """
-    status = get_object_or_404(Status, id=status_id, deleted=False)
+    status = get_object_or_404(
+        Status.objects.select_related("reply_parent"), id=status_id, deleted=False
+    )
     if accepts_activitypub(request):
         if not status.local:
             raise Http404
@@ -135,23 +176,26 @@ def status_detail(request, status_id):
     )
     if status.user_id in blocked_ids:
         raise Http404
-    # Nothing writes ``reply_parent`` until increment 4, so this list is
-    # empty on every post today. The rendering is here so the page is the
-    # destination later increments attach to, not a page that must be
-    # restructured when replies exist.
-    replies = (
-        Status.objects.filter(reply_parent=status, deleted=False)
-        .select_related("user", "film")
-        .order_by("published_date")
-    )
-    if blocked_ids:
-        replies = replies.exclude(user_id__in=blocked_ids)
+    # The thread: every live reply under this post, flat and in conversation
+    # order. The depth policy is written out on ``conversation``; the short
+    # form is that the data keeps its real nesting (so inReplyTo stays
+    # honest) and the page refuses to render it as indentation.
+    replies = _thread_rows(status, blocked_ids)
     return render(
         request,
         "core/status/detail.html",
         {
             "status": status,
             "replies": replies,
+            # A reply whose parent is a tombstone says so out loud. The
+            # deleted post itself 404s, so this page is the only place the
+            # orphaned reply can be read — and a reply that reads as
+            # addressed to nothing is the silent-vanish failure in another
+            # form. ``reply_parent`` is PROTECT, so the row is still here
+            # precisely because soft-delete kept it.
+            "parent_deleted": bool(
+                status.reply_parent_id and status.reply_parent.deleted
+            ),
             # The like control's state (increment 3). Mirrors carry no
             # control — see ``FeedEntry.interactive`` for the same gate on
             # a feed row — but the count is shown for them too, because a
@@ -160,6 +204,65 @@ def status_detail(request, status_id):
             "liked_by_viewer": request.user.is_authenticated
             and status.likes.filter(user=request.user).exists(),
         },
+    )
+
+
+@login_required
+@require_POST
+def reply_to_status(request, status_id):
+    """Reply to a post (feed interactions increment 4, R83 decision 2).
+
+    The first writer ``Status.reply_parent`` ever had. AJAX, shaped like
+    ``like_status``: csrf from the base.html meta tag, one round trip, no
+    reload. The answer carries the new row rendered by the **same Django
+    partial the page itself loops over**, so there is one source of truth
+    for a reply row's markup — the client inserts what the server rendered
+    rather than rebuilding it in JS and drifting from the template.
+
+    The lookup is scoped ``local=True`` for the reason R85 gives: the page
+    withholds the composer from a mirror, so the route refuses one too.
+    Without that, a hand-made request would write a reply this instance has
+    no way to deliver, and the honest absence in the markup becomes a lie
+    the database keeps. When increment 5 makes remote interactions
+    deliverable, this and the template's gate come out together.
+
+    No federation broadcast happens here on purpose. A threaded
+    ``Create(Note)`` carrying ``inReplyTo`` is increment 5's work; putting
+    one on the wire now would mean sending a reference down a path that has
+    not been built for it.
+    """
+    parent = get_object_or_404(Status, id=status_id, local=True, deleted=False)
+    raw_content = request.POST.get("content", "")
+    if not raw_content.strip():
+        return JsonResponse({"error": "A reply needs some text."}, status=400)
+    try:
+        reply = add_reply(
+            request.user,
+            parent,
+            content=render_markdown(raw_content),
+            raw_content=raw_content,
+        )
+    except ValueError as exc:
+        # ``Status.save`` refuses a typed status with no film, which is what
+        # a reply to a film-less post would be. Nothing in v0.1 can create
+        # such a local post, so this is the boundary answer rather than a
+        # second policy — and a 400 rather than a stack trace either way.
+        return JsonResponse({"error": str(exc)}, status=400)
+    blocked_ids = set(request.user.blocks.values_list("id", flat=True))
+    return JsonResponse(
+        {
+            "html": render_to_string(
+                # The composer always answers the post you are reading, so
+                # a composed reply is a direct reply and carries no
+                # "replying to" label.
+                "core/status/_reply.html",
+                {"reply": reply, "reply_to": ""},
+                request,
+            ),
+            # The number the heading has to show after this row lands —
+            # counted the same way the page counts it, not guessed here.
+            "count": len(_thread_rows(parent, blocked_ids)),
+        }
     )
 
 
