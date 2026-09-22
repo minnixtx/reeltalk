@@ -7,7 +7,7 @@
 
 ## 1. Current state
 
-> **Next feature:** **likes, comments and per-post pages.** Increment 1 (feed row identity, `9b78651`), increment 2 (the per-post page, plus linking the feed rows into it, `a93947b`) and increment 3 (likes, local only, `375360c`) are **done 2026-09-22**. **Next is increment 4 — comments, local only**, the first writer for `Status.reply_parent`; its shape is settled by R83 decisions 1 and 2 and it needs no new owner decision. All six feature-level decisions are settled as **R83**. Read §2A before starting that work.
+> **Next feature:** **likes, comments and per-post pages.** Increments 1–4 are **done 2026-09-22** — feed row identity (`9b78651`), the per-post page plus the feed→post link (`a93947b`), likes local only (`375360c`) and comments local only (`69fa3a4`). **Next is increment 5 — federation outbound**: emit `Like` / `Undo(Like)`, extend `handle_undo` past its Follow-only check, and emit a threaded `Create(Note)` carrying `inReplyTo`. All six feature-level decisions are settled as **R83**, increment 2's link/control split as **R84**, the count/control principle as **R85**, and increment 4's three shape choices as **R86** — no new owner decision is needed to start increment 5. Read §2A, then increment 4's record below: it states what increment 5 has to take out as well as what it has to add.
 
 | Area | State |
 |---|---|
@@ -1354,7 +1354,7 @@ Each is sized for one session and ends at a committed, deployed, verified checkp
 1. ✅ **Give feed rows an identity.** *(done 2026-09-22, `9b78651` — recorded below.)* Add `status`/`status_id` to `FeedEntry`; settle decision 1 (the fold); make shelf-only rows explicitly non-interactive. **No user-visible feature** — it is the unblocking prerequisite, and everything after assumes it.
 2. ✅ **The per-post page, plus linking the feed rows into it.** *(done 2026-09-22, `a93947b` — recorded below.)* Fill in the HTML arm of `status_detail`'s existing negotiation branch per decision 3. Block-aware rendering (see gotcha 4). Renders the status in full plus its reply list — empty at first, and that is fine. This is the destination every later increment attaches to. **Also in scope:** feed rows link through to the post page, gated on `entry.status_id is not None` — **not** on `entry.interactive` (R84).
 3. ✅ **Likes, local only.** *(done 2026-09-22, `375360c` — recorded below.)* `Like` model with **day-one AP identity discipline (R41/R42)** even though nothing federates yet — `origin_id` on create, unique constraint on `(user, status)`, so increment 5 doesn't need to re-shape the table. `POST /status/<id>/like/` toggle. AJAX with no reload, following the one existing precedent (`base.html:8` csrf meta + `search.js:144` fetch → `JsonResponse`). Counts on feed rows and the post page.
-4. **Comments, local only.** Finally gives `reply_parent` a writer. Reply form, thread rendering with an explicit depth policy, `film_id` inheritance (see gotcha 2), soft-delete orphan handling (gotcha 3), block filtering.
+4. ✅ **Comments, local only.** *(done 2026-09-22, `69fa3a4` — recorded below.)* Finally gives `reply_parent` a writer. Reply form, thread rendering with an explicit depth policy, `film_id` inheritance (see gotcha 2), soft-delete orphan handling (gotcha 3), block filtering.
 5. **Federation, outbound.** Emit `Like` and `Undo(Like)`; extend `handle_undo` past the Follow-only check; emit threaded `Create(Note)` carrying `inReplyTo`. **Ids need a uuid fragment** or a re-like dedups as a redelivery (see `objects.py:update_activity`).
 6. **Federation, inbound.** `Like` handler **keyed on the verified sender, never `activity["actor"]`** (every existing handler obeys this); read `inReplyTo` on ingest so remote threads stop flattening; decide the policy for a like targeting a note we don't have (fetch vs ignore).
 
@@ -1478,6 +1478,84 @@ LAN plain HTTP               200
 **The owner clicked it in a real browser** on the folded *Alien from L.A.* row and it went 0 → 1, which is the DOM repaint the HTTP path cannot prove. Live state after: `like id=13, minnix → status 1, origin_id=13`, left in place as the owner's own data. (A real browser run was not available to the session itself — the browser-use skill needs the `node-repl` MCP server, which is not configured here and adding it means a Qwen restart.)
 
 **What increment 4 should know.** The control pattern is now fixed: a small ghost-control `<button>` with `data-url`, a `likes.js`-shaped file per control family, csrf from the meta tag, locked while in flight, and **repaint only on a real answer** — a failed request leaves the state shown rather than guessing. The gate for a comment control on a mirror row is the same `interactive` flag, and the same `local=True` scope belongs in its endpoint; both come out together in increment 5, not one without the other. The count-on-the-mirror decision (R85) applies to the comment count too: show the number, withhold the button. And the reply list on the post page is already rendering — empty — waiting for `reply_parent`'s first writer.
+
+### Feed interactions increment 4 — comments, local only (executed 2026-09-22, commit `69fa3a4`)
+
+Gives `Status.reply_parent` its first writer. Three shape questions came up that R83 had not anticipated — where the composer lives, how submitting behaves, and how deep the thread renders — and the owner settled all three (R86) before the code was written.
+
+**What landed.** `add_reply` (`core/models.py`), `POST /status/<id>/reply/`, `conversation()` + `reply_counts()`, a `core/status/_reply.html` partial, `comments.js`, the composer on the post page, the reply count on the feed row, and 40 tests in `test_comments.py`. No migration: `reply_parent` already existed, dead, since `0004`.
+
+**A reply is a `comment` Status threaded by the self-FK, not a row in a comment table** (decision 2). That is what keeps a conversation made of the same objects as everything else on the wire: increment 5 serialises `inReplyTo` straight out of `reply_parent` without inventing a wire type, and increment 6 reads a remote one back into the same shape. It also keeps selective timeline visibility a later knob rather than a schema change.
+
+**The film is inherited, and the reason is a specific silent failure.** `Status.film` is nullable, so a reply that left it unset would land with no film and drop out of every film-anchored surface — the film's own page set, its author's "all films" tab, the export — while looking perfectly fine on its own post page. Inheriting is what keeps a conversation about a film attached to that film. It also hands the reply the parent's anchoring obligation: `Status.save` refuses a typed status with no film, so replying to something with nothing to inherit raises there rather than writing an unanchored row. Replying on a film the user has already reviewed cannot trip D5's `unique_review_per_user_per_film` — that partial index covers only `review`/`review_rating`, and a reply is a `comment`.
+
+**Decision 2 had to become a query, not a layout choice.** `feed_for` now filters `reply_parent__isnull=True`. §2A made feed pagination depend on whether comments multiply feed rows; the answer was no, and this filter is what makes that answer true in the database rather than a hope about the template. A comment on someone else's post never reaches `feed_entries` at all, so pagination stayed out of this increment on the strength of the query rather than of the design.
+
+**The depth policy, written out on `conversation` rather than implied by the markup:**
+
+| | |
+| --- | --- |
+| In the data | **Unbounded.** `reply_parent` points at the exact turn answered, which is what keeps increment 5's `inReplyTo` faithful. |
+| In the composer | **One level.** The composer answers the post you are reading, so a locally composed thread is one reply deep. |
+| In the render | **Flat.** One list under the root, each non-direct reply labelled with who it answers — no recursive template, no indentation. |
+| In the walk | **Capped** at `REPLY_THREAD_MAX_DEPTH = 12`, one query per level. A bound on the work, not on the model. |
+| Tombstones | **Walked through, not rendered.** A deleted reply is not shown, but its live replies still are. |
+
+That last row is the difference between an honest tombstone and a destructive one: rendering the walk only through live nodes would mean deleting one mid-thread reply silently buries everything said underneath it.
+
+**The orphan rule, and why it lands on the reply's own page.** A soft-deleted post 404s on its own URL, so the reply to it has exactly one home — its own page — and a reply that reads as addressed to nothing is the vanish-silent failure wearing a different face. `status_detail` passes `parent_deleted` and the page says *"This replies to a post that has been deleted."* The row survives precisely because `delete()` leaves a tombstone and `reply_parent` is `PROTECT`.
+
+**One source of truth for a reply row.** The endpoint answers with the new row rendered by `core/status/_reply.html` — the *same* partial the page's own thread loop includes — so `comments.js` inserts server-rendered markup instead of rebuilding it in JS. The alternative, a JS-side template, is a second copy that drifts from the first the moment either changes.
+
+**R85 applied on both sides, again.** The composer is hidden on a mirror and the route is scoped `local=True`, so a hand-made request cannot write a reply this instance has no way to deliver. The reply *count* shows on a mirror row and to an anonymous reader, because the number is a fact about the post and only the offer to act on it is gated on locality.
+
+**No federation broadcast, deliberately.** A threaded `Create(Note)` carrying `inReplyTo` is increment 5's work; putting one on the wire now would mean sending a reference down a path that has not been built for it.
+
+**Three bugs caught on the way, all worth keeping.**
+
+1. **A multi-line `{# … #}` comment is not a comment in Django and renders as page text.** The hash form must close on the line it opens; my four- and six-line comments were being *printed* into the feed and the post page. Four tests caught it by failing an absence assertion — which is the good direction, since the failure names the page rather than the template. All converted to `{% comment %}` blocks. Worth knowing this repo has no guard against it: the existing hash comments are all single-line, so the trap only bites whoever writes a long one next.
+2. **`pluralize` renders "2 replys".** Bare `pluralize` appends an `s`; it does not know about `y → ies`. Now `repl{{ n|pluralize:"y,ies" }}`.
+3. **The walk costs depth + 1 queries, not depth.** The extra one is the probe that discovers the thread has ended, and it is inherent — there is no way to know the bottom without asking. The code stands; the test was rewritten to prove batching the strong way instead: **84 replies across 3 levels costs 4 queries**, so the count is clearly a function of depth and not of rows.
+
+**Gate** (all three images rebuilt, fresh `docker compose run --rm web`): `ruff check` — *All checks passed!*; `ruff format --check` — *93 files already formatted*; `makemigrations --check` — *No changes detected*; pytest **989 passed + 5 skipped in 517.63s**. Baseline reconciled: 946 + 40 new test functions + 3 `test_clean_room` file instances (`comments.js`, `_reply.html`, `test_comments.py`) = 989. No pre-existing test changed state.
+
+**Verified live on `reeltalk.minnix.dev` over real HTTPS** (deployed image `2d074b9e0bfe`), as a temporary member following minnix, sending the headers `comments.js` sends:
+
+```
+login 302 · home 200 · "Log out" present
+POST /status/1/reply/   200 application/json
+  {"html": "<li class=\"review reply\">… cprobe2 …", "count": 1}
+  row: pk=12 type=comment parent=1 film=1096 local=True origin_id=12
+  parent type=review film=1096 → inherited match: True
+page after "Replies (1)" · markdown <strong>folded</strong> · folded feed row "1 reply"
+anon /status/1/  200, sees "Replies (1)" and the reply, composer absent (0)
+blank content 400 {"error": "A reply needs some text."} · no CSRF 403 · GET 405
+mirror page 200 no composer · mirror reply POST 404
+mirror feed row: "1 reply", no like-btn, no reply-form — local row on the same page has the control
+orphan: delete via the real delete route → parent 404, reply page 200 with
+        "This replies to a post that has been deleted." and its content intact
+anon home 200 · LAN HTTP 200 · cert CN=*.minnix.dev notAfter Nov 1 2026
+```
+
+**The folded row is the object that got the reply** — `parent=1`, `type=review`, `film=1096` inherited from it. Same check increment 3 ran against the like, run against the thread this time.
+
+**A real browser was available this session** (headless Chromium on the host against the deployed stylesheet, per the R82 probe discipline — probe page written to disk, and the run asserts the stylesheet actually applied via the body background before trusting any number). Both traps that are invisible in a diff came back clean, and the AJAX contract was exercised end to end with a stand-in transport:
+
+```
+bare <button>        uppercase, Bebas Neue          ← the marquee face the trap warns about
+.reply-form button   none, Oswald                   ← ghost rule applies
+.reply-form textarea rgb(13,11,9) / border rgb(90,67,44), Archivo
+plain <textarea>     rgb(255,255,255), monospace   ← what the composer would have been
+comments.js: POST to the form's action, csrf from the meta tag, locked during flight,
+  re-enabled after, <li> appended, heading "Replies (3)", empty-state line removed,
+  textarea cleared
+```
+
+The textarea needed a second probe run to prove: `form.reset()` restores the *authored* default, so the first probe — which put text inside the `<textarea>` tags — reported it as not clearing. With the real markup (empty default, text typed in) it clears. The probe was wrong, not the code, and the distinction is only visible if you model the real markup.
+
+**Cleanup.** Probe members, their review, the mirror and every reply deleted afterwards in dependency order — `reply_parent` is `PROTECT`, so children go first and a `Status.objects.filter(user=…).delete()` on a parent with replies raises `ProtectedError`. Instance left exactly as found: 1 status (minnix's review), 1 user, 1,378 films, 0 statuses with a parent. Probe password and cookie jars removed from `/tmp`.
+
+**What increment 5 should know.** Two things come *out*, not just in: `not self.remote` from `FeedEntry.interactive` **and** `local=True` from both the like and the reply lookups — four places, and they must move together, because a button with no route behind it and a route behind no button are the same bug wearing different clothes (R85). The composer only ever writes depth-1 replies under the post being read, so the multi-level walk exists for increment 6's inbound threads, which can arrive at any depth the other instance has. `reply_parent` is `PROTECT` and the delete path is soft, so nothing in the app can hard-delete a parent with replies — but anything that bulk-removes statuses has to order children first. And the reply row is a partial now, so increment 6's inbound replies render through the same template with no new markup.
 
 ## 3. Host facts (this box)
 
@@ -1640,3 +1718,13 @@ New owner decisions for the rewrite are recorded here, numbered R1, R2, … The 
   **(3) The like route is deliberately *not* gated on blocks.** The tempting addition was a block check beside `local=True`, and it was left out on purpose. The `index` rule already settled the shape — *counts stay the same for every viewer; a blocked user's review still counts toward a film's tally, only the lists hide them* — and a blocker cannot reach the control anyway: the feed drops the row and the post page 404s. A blocker hand-crafting a like against a page they have made themselves unable to see is acting on their own client, not on anyone else's. **Not writing a rule is a decision too, and gets recorded as one** — the alternative was a second block semantic invented for the write path that the read path does not have, which is how a per-viewer read-side feature quietly turns into a write-side one.
 
   **Why this generalises past likes.** Increment 4 builds the comment control and will face the identical three questions, and the answers are already set: hide the button on a mirror *and* scope the comment route to `local=True`; show the reply count regardless of who can post; do not invent a block rule for the write path. And when increment 5 makes remote interactions deliverable, **both halves of the like gate come out together** — `not self.remote` from the property *and* `local=True` from the lookup. Removing one without the other reproduces exactly the asymmetry this decision exists to prevent: a button with no route behind it, or a route behind no button.
+
+- **R86 — Comments: submit by AJAX with the server rendering the row, render the thread flat under the root, put only a count on the feed row (owner decisions 2026-09-22, code `69fa3a4`).** Three shape questions arose that R83 had not anticipated, and the owner settled all three before code was written. They are recorded together because each one closes off a direction that would otherwise be assumed later.
+
+  **(1) Submit by AJAX; the server returns the new row already rendered.** The composer `preventDefault()`s, POSTs, and inserts the fragment `reply_to_status` hands back — no reload, no lost draft, no scroll jump. The decisive detail is *what* the endpoint returns: not `{id, count}` for the client to assemble, but the `core/status/_reply.html` partial rendered server-side — the **same** partial the page's own thread loop includes. A JS-side template would be a second copy of the row, free to drift from the first the moment either changes; this way the client inserts what the server rendered and cannot disagree with it. **What this closes off:** a client-side rendering layer, and with it any future need to keep a JS view model in sync with the Django templates. Rendering stays in one place.
+
+  **(2) Flat conversation under the root, with the depth policy written on the walk rather than implied by the markup.** Data depth is **unbounded** — `reply_parent` points at the exact turn answered, which is what keeps increment 5's `inReplyTo` wire-faithful; collapsing replies to root-level pointers would make our wire representation lie about what was answered. The composer writes **one level** (it answers the post you are reading). Rendering is **flat**: one list under the root, each non-direct reply labelled "replying to \<who\>", no recursion and no indentation. The walk is **capped** at `REPLY_THREAD_MAX_DEPTH = 12`, one query per level — a bound on the work, not on the model. **Tombstones are walked through, not rendered:** a deleted reply is not shown, but its live replies still are. That last clause is the difference between an honest tombstone and a destructive one; rendering only through live nodes would mean deleting one mid-thread reply silently buries everything said beneath it. **What this closes off:** nested/indented thread rendering, Twitter- or Reddit-style. That is design work parked at R73 and must not be smuggled in as an implementation detail.
+
+  **(3) The feed row carries a reply count and nothing else.** No inline composer, no expand affordance, no thread preview — the count sits on the row and the thread lives on the post page. This keeps the feed one row per post (R83 decision 2 made real as `feed_for`'s `reply_parent__isnull=True` filter rather than a template convention), keeps row height stable, and keeps comments off the feed's query cost: `reply_counts()` batches every visible row into one grouped query. **What this closes off:** inline reply-on-feed, which would multiply feed rows, break the stable-height property, and re-open the pagination question decision 2 had already answered "no" to.
+
+  **Why these generalise past comments.** All three are the instinct R84 and R85 encode — keep each question answered in exactly one place, and let the server own what the server knows. For increment 5: the flat render means a threaded `Create(Note)` we emit needs no presentation change, and the unbounded data depth means increment 6's inbound threads can arrive at any depth the remote instance has and render through the same partial with no new markup. And R85's gate rule still stands, now with **four** places to change at once rather than two: `not self.remote` out of `FeedEntry.interactive`, **and** `local=True` out of both the like lookup and the reply lookup. They move together or not at all.
