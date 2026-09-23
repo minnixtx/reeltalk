@@ -71,6 +71,33 @@ def absolute_uri(request, path: str) -> str:
     return f"{request.scheme}://{request.get_host()}{path}"
 
 
+def reference_url(value) -> str | None:
+    """The URL a wire reference field carries, in whichever shape it arrived.
+
+    ActivityPub link properties have no single shape: the spec allows a bare
+    IRI string, an embedded object with an ``id``, and any of those inside an
+    array. In practice Mastodon sends a bare string for ``object`` and
+    ``inReplyTo``, and a ReelTalk peer sends whatever it built. Every
+    inbound resolver needs the same unwrap, so it lives here once rather
+    than as a private helper in each handler module.
+
+    For a list the first usable entry wins — a multi-valued reference is
+    rare enough that no handler here acts on more than one, and picking
+    consistently beats picking differently per call site.
+    """
+    if isinstance(value, str):
+        return value or None
+    if isinstance(value, dict):
+        nested = value.get("id")
+        return nested if isinstance(nested, str) and nested else None
+    if isinstance(value, list):
+        for item in value:
+            nested = reference_url(item)
+            if nested:
+                return nested
+    return None
+
+
 def accepts_activitypub(request) -> bool:
     """True when the Accept header names an ActivityPub media type.
 

@@ -289,5 +289,16 @@ LOGGING = {
             "level": env.str("DELIVERY_LOG_LEVEL", default="INFO"),
             "propagate": False,
         },
+        # The inbound mirror of the delivery line: one record per activity the
+        # inbox accepts, naming its type, its verified sender and the outcome
+        # it decided. Same reason as above — before this the inbox discarded
+        # its own outcome the way delivery used to discard the response
+        # status, so an activity we deliberately ignored looked exactly like
+        # one that never arrived.
+        "reeltalk.activitypub.inbox": {
+            "handlers": ["console"],
+            "level": env.str("INBOX_LOG_LEVEL", default="INFO"),
+            "propagate": False,
+        },
     },
 }

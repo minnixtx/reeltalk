@@ -33,8 +33,14 @@ WHITELISTED_FILES = {
 TOP_LEVEL_SKIP_DIRS = {"images", "static"}
 
 # Skipped anywhere they appear: VCS, caches, third-party code, local state.
+# ``.mypy_cache`` belongs here for the same reason as the other caches, and
+# had to be named because mypy caches the *names* of what it analysed: the
+# guard's own function name (``test_no_bookwyrm_telltale_strings``) shows up
+# inside the cache DB and tripped the guard on a file that is not project
+# source at all.
 SKIP_DIRS = {
     ".git",
+    ".mypy_cache",
     ".pytest_cache",
     ".qwen",
     ".ruff_cache",

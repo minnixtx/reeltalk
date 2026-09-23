@@ -61,6 +61,7 @@ from reeltalk.core.models import (
     resolve_film_id,
 )
 
+from .identity import reference_url
 from .mirrors import fetch_image_bytes, image_storage_name
 
 logger = logging.getLogger(__name__)
@@ -380,13 +381,33 @@ def _mirror_status(sender, note: dict, request):
     unresolvable film reference raises :class:`RemoteObjectError` (the
     activity rolls back and stays retryable). ``attributedTo`` on the wire is
     ignored — the row belongs to the verified sender.
+
+    ``inReplyTo`` is read on ingest (increment 6), so a remote conversation
+    arrives as a thread instead of a pile of top-level notes. The parent is
+    resolved among rows we already have — the same no-fetch posture the
+    ``Like`` handler keeps — which means a reply whose parent has not reached
+    us lands flat. That is exactly what every remote note did before this
+    field was read at all, so an unresolved parent is never worse than the
+    status quo, and a resolved one is strictly better.
     """
     home_url = note.get("id")
     if not isinstance(home_url, str) or not home_url:
         # Without an id there is no origin identity to key on — ignore.
         return None
+    parent = resolve_status_reference(reference_url(note.get("inReplyTo")), request)
     film_ref = note.get("film")
-    film = _film_for_reference(film_ref, request) if film_ref else None
+    if film_ref:
+        film = _film_for_reference(film_ref, request)
+    elif parent is not None:
+        # A reply inherits the film of the turn it answers, exactly as
+        # ``add_reply`` does for a locally composed one. It is what keeps a
+        # remote conversation attached to the film it is about instead of
+        # dropping off every film-anchored surface while looking perfectly
+        # fine on its own post page — and it is what lets a threaded remote
+        # review have the anchor ``Status.save`` demands.
+        film = parent.film
+    else:
+        film = None
     rating_raw = note.get("rating")
     content = note.get("content") or ""
     if rating_raw is not None:
@@ -425,6 +446,7 @@ def _mirror_status(sender, note: dict, request):
         rating=Decimal(str(rating_raw)) if rating_raw is not None else None,
         published_date=_parse_time(note.get("publishedTime")) or timezone.now(),
         edited_date=_parse_time(note.get("editedTime")),
+        reply_parent=parent,
         local=False,
         remote_url=home_url,
         remote_id=_remote_id_from_url(home_url),

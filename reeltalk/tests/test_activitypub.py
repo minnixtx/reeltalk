@@ -663,11 +663,19 @@ def test_the_delivery_info_line_reaches_the_console_not_lastresort():
     assert any(isinstance(h, logging.StreamHandler) for h in configured.handlers)
 
 
-def test_raising_the_delivery_logger_does_not_turn_on_info_everywhere():
-    # The other direction: this is one narrowed logger, not project-wide INFO.
-    assert not logging.getLogger("reeltalk.activitypub.inbox").isEnabledFor(
+def test_raising_the_federation_loggers_does_not_turn_on_info_everywhere():
+    # The other direction: these are named loggers, not project-wide INFO.
+    # The raised set is exactly delivery + inbox — the two directions where
+    # one line per event is the whole record we keep. Everything else,
+    # including the federation modules that log only when something is
+    # wrong, stays at the root's WARNING.
+    assert logging.getLogger("reeltalk.activitypub.delivery").isEnabledFor(logging.INFO)
+    assert logging.getLogger("reeltalk.activitypub.inbox").isEnabledFor(logging.INFO)
+    assert not logging.getLogger("reeltalk.activitypub.statuses").isEnabledFor(
         logging.INFO
     )
+    assert not logging.getLogger("reeltalk.core.models").isEnabledFor(logging.INFO)
+    assert not logging.getLogger("reeltalk").isEnabledFor(logging.INFO)
 
 
 def _b58decode(text: str) -> bytes:

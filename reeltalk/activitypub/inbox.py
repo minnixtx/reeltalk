@@ -12,26 +12,43 @@ crash or create content here): acknowledge with 202, create nothing, never
 raise on an unfamiliar shape.
 """
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
 from django.db import transaction
 
-from .follow import handle_follow, handle_undo
+from .follow import handle_accept, handle_follow, handle_reject, handle_undo
+from .interactions import handle_like
 from .models import DeliveredActivity
 from .statuses import handle_create, handle_delete, handle_update
+
+logger = logging.getLogger(__name__)
 
 # Activity types this instance acts on, mapped to their handlers (each takes
 # the parsed activity dict, the verified sender, and the request, and applies
 # its effects). Increment 5 registers Follow + Undo; increment 6 adds
 # Create/Update/Delete. Everything not in the registry — including types we
 # will never support — is ignored gracefully.
-HANDLERS: dict[str, Callable[[dict, Any, Any], None]] = {
+#
+# A handler may return a short human-readable detail describing what it
+# actually did. The pipeline logs it, so every inbound decision is visible
+# from one place with its reason — a handler that quietly decided to drop
+# something is the inbound twin of a delivery call that never read the
+# response it got back (R88).
+HANDLERS: dict[str, Callable[[dict, Any, Any], "str | None"]] = {
     "Follow": handle_follow,
     "Undo": handle_undo,
     "Create": handle_create,
     "Update": handle_update,
     "Delete": handle_delete,
+    # Increment 6: the inbound half of the interactions increment 5 put on
+    # the wire, and the two answers to a Follow we sent. Accept is listed
+    # even though it changes nothing so that "we were accepted" is a decided
+    # outcome here rather than a miss in the ignore path.
+    "Like": handle_like,
+    "Accept": handle_accept,
+    "Reject": handle_reject,
 }
 
 
@@ -49,9 +66,28 @@ def process_inbound_activity(activity: Any, sender, request) -> str:
     (or ignored) without a record. The dedup row and the handler run in one
     transaction: a handler failure rolls the record back too, so the sender's
     retry is not blocked by its own failed delivery.
+
+    The outcome is logged for every activity, with whatever detail the handler
+    returned. The four-milestone blindness on the outbound side was
+    ``deliver_activity`` discarding the response it got back (R88); this is
+    the same trap read from the inside — until now the inbox decided
+    handled/ignored/duplicate and told no one, so an activity we deliberately
+    dropped was indistinguishable from one that never arrived.
     """
+    outcome, detail = _apply_inbound_activity(activity, sender, request)
+    logger.info(
+        "Inbound %s from %s -> %s%s",
+        activity.get("type") if isinstance(activity, dict) else "?",
+        getattr(sender, "localname", "?"),
+        outcome,
+        f" — {detail}" if detail else "",
+    )
+    return outcome
+
+
+def _apply_inbound_activity(activity: Any, sender, request) -> tuple[str, str | None]:
     if not isinstance(activity, dict):
-        return "ignored"
+        return "ignored", None
     activity_id = activity.get("id")
     with transaction.atomic():
         if isinstance(activity_id, str) and activity_id:
@@ -59,12 +95,11 @@ def process_inbound_activity(activity: Any, sender, request) -> str:
                 activity_id=activity_id
             )
             if not created:
-                return "duplicate"
+                return "duplicate", None
         activity_type = activity.get("type")
         handler = (
             HANDLERS.get(activity_type) if isinstance(activity_type, str) else None
         )
         if handler is None:
-            return "ignored"
-        handler(activity, sender, request)
-    return "handled"
+            return "ignored", f"unhandled type {activity_type!r}"
+        return "handled", handler(activity, sender, request)

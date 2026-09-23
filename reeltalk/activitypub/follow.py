@@ -19,6 +19,12 @@ relationship is recorded in the M2M and delivered as a signed Follow /
 Undo(Follow) to the followed user's home inbox (R39 signatures via
 ``delivery``).
 
+**The answers to our own Follow** (increment 6) — ``Accept`` and ``Reject``
+arrive back at our inbox answering a Follow *we* sent. ``Accept`` changes
+nothing, because we never hold a pending state; it is registered so the
+outcome is recorded rather than swallowed by the generic ignore path.
+``Reject`` undoes the local follow — see :func:`handle_reject`.
+
 The follow M2M (``User.follows``, ``related_name="followers"``) is the single
 source of truth: ``follower.follows.add(followed)`` puts ``followed`` in
 ``follower``'s following and ``follower`` in ``followed``'s followers. The
@@ -33,24 +39,9 @@ from reeltalk.core.models import Like
 from reeltalk.social.models import User
 
 from .delivery import deliver_activity, inbox_for
-from .identity import absolute_uri, actor_path
+from .identity import absolute_uri, actor_path, reference_url
 from .mirrors import ensure_mirror, resolve_known_actor
 from .statuses import resolve_status_reference
-
-
-def _actor_url(value) -> str | None:
-    """The URL an activity field carries — a bare string or ``{"id": ...}``.
-
-    Shape-based, not actor-specific: the object of a Follow is an actor and
-    the object of a Like is a Note, and both arrive in one of these two
-    shapes.
-    """
-    if isinstance(value, str):
-        return value or None
-    if isinstance(value, dict):
-        return value.get("id") or None
-    return None
-
 
 # --- Inbound handlers (registered in inbox.HANDLERS) ------------------------
 
@@ -108,7 +99,7 @@ def handle_follow(activity, sender, request):
     with no reason, which is the exact failure this handler exists to close —
     the refusal is the useful half of the answer.
     """
-    followed_url = _actor_url(activity.get("object"))
+    followed_url = reference_url(activity.get("object"))
     if not followed_url:
         return
     followed = resolve_known_actor(followed_url, request)
@@ -145,7 +136,7 @@ def handle_undo(activity, sender, request):
     inner = activity.get("object")
     if not isinstance(inner, dict):
         return
-    target_url = _actor_url(inner.get("object"))
+    target_url = reference_url(inner.get("object"))
     if not target_url:
         return
     inner_type = inner.get("type")
@@ -159,6 +150,76 @@ def handle_undo(activity, sender, request):
             # Deleting zero rows is the correct answer to an Undo of a like
             # we never recorded, so this stays idempotent without a check.
             Like.objects.filter(user=sender, status=status).delete()
+
+
+def _answered_follow(activity, sender, request):
+    """The local user whose follow of ``sender`` an Accept/Reject answers.
+
+    The answer wraps the Follow it answers, and that wrapper carries two
+    identities of which only one is proven. The inner ``actor`` names who
+    asked, and is resolved only among local users of this host; the
+    followed side is taken from the **verified sender**, never from the
+    inner ``object``. That is the same split Mastodon's own reject handler
+    makes — ``account_from_uri(@object['actor'])`` for the local side,
+    ``@account`` for the remote — and it is the safe one: a peer wanting to
+    break a follow between two other parties would have to sign the
+    refusal as itself.
+
+    Returns the local requester, or ``None`` when the activity answers no
+    follow this instance actually holds.
+    """
+    inner = activity.get("object")
+    if not isinstance(inner, dict) or inner.get("type") != "Follow":
+        return None
+    requester = resolve_known_actor(reference_url(inner.get("actor")), request)
+    if requester is None or not requester.local:
+        return None
+    if not requester.follows.filter(pk=sender.pk).exists():
+        return None
+    return requester
+
+
+def handle_accept(activity, sender, request) -> str | None:
+    """An Accept answers a Follow we sent. Nothing changes — and registering
+    that fact is the whole point.
+
+    The follow is recorded when the member clicks Follow and delivered in
+    the same request, so there is no pending state here to promote: the
+    relationship is already live locally. Registering the type anyway is
+    the decision — with no handler an accepted follow lands in the same
+    generic ignore path as a misspelled type, and the one piece of good
+    news a peer ever sends us would be discarded exactly like noise.
+
+    The returned detail names whose follow was accepted, which is the part
+    the pipeline's own line cannot know: an Accept we could not attribute
+    and an Accept that confirmed a real relationship both arrive as a
+    handled ``Accept`` otherwise.
+    """
+    requester = _answered_follow(activity, sender, request)
+    if requester is None:
+        return "no matching local follow to confirm"
+    return f"{requester.localname}'s follow of {sender.localname} accepted"
+
+
+def handle_reject(activity, sender, request) -> str | None:
+    """A Reject answers a Follow we sent: undo the local follow.
+
+    Left alone, the local row outlives a refusal the remote has already
+    stated explicitly — the member's following list would keep showing an
+    account whose instance has said no, and every later broadcast would go
+    on POSTing to an inbox that has told us it will not take it. Removing
+    the M2M row is the whole undo, the same row ``unfollow_user`` removes.
+
+    No ``Undo(Follow)`` goes back. Their instance has just told us the
+    relationship does not exist; a follow-cancellation would be a message
+    about a thing already settled, sent as the user whose request was
+    refused.
+    """
+    requester = _answered_follow(activity, sender, request)
+    if requester is None:
+        return "no matching local follow to undo"
+    requester.follows.remove(sender)
+    return f"{requester.localname}'s follow of {sender.localname} refused — removed"
 
 
 # --- Outbound (a local user follows / unfollows a remote user) --------------
