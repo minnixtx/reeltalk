@@ -7,11 +7,14 @@ Four contracts, in the order they bite:
   create (R41) so increment 5 can build an outbound ``Like`` without
   re-shaping the table. Unliking deletes the row, so a re-like mints a
   *new* identity rather than looking like a redelivery of the old one.
-* **The toggle endpoint** answers JSON and refuses what the UI withholds:
-  a remote mirror 404s here exactly as it shows no button on the page, so
-  a hand-made request cannot write a like this instance cannot deliver.
+* **The toggle endpoint** answers JSON, and its locality gate moved with
+  the UI's. Written against a mirror it used to 404 — the control was
+  withheld and the delivery did not exist (R83 decision 5, R85). Increment
+  5 built the delivery and opened both halves together, so a mirror now
+  takes the like and sends it.
 * **The control gates on ``interactive``** — the narrow flag R84 warns
-  about. A mirror row keeps its link to the post page and gets no control.
+  about. A mirror row keeps its link to the post page either way; what
+  increment 5 changed is that it now also carries the control.
 * **Counts are batched.** ``feed_entries`` returns a Python list, so a
   per-row count would be one query per row on every home page; the tests
   pin that the query count does not grow with the feed.
@@ -23,9 +26,11 @@ nothing.
 """
 
 import json
+import re
 from unittest import mock
 
 import pytest
+import responses
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.db import IntegrityError, connection
@@ -333,15 +338,20 @@ def test_like_endpoint_reports_the_total_not_just_the_callers_state(alice, bob, 
     assert body == {"liked": True, "count": 2}
 
 
+@responses.activate
 @pytest.mark.django_db
-def test_like_endpoint_404s_for_a_remote_mirror(dune):
-    # Decision 5 enforced server-side as well as in the template: the
-    # control is hidden on a mirror, and the route refuses one too, so a
-    # hand-made request cannot write a like this instance cannot deliver.
+def test_like_endpoint_accepts_a_remote_mirror(dune):
+    # Flipped by increment 5. This route 404'd on a mirror because the
+    # control was withheld and there was no way to deliver one (R83 decision
+    # 5, R85). Both halves came out together: the like is written locally
+    # and sent to the post's author. The delivery itself is asserted in
+    # test_federation_interactions.py — the catch-all here only keeps the
+    # test from making a real network call.
+    responses.add(responses.POST, re.compile(r"https://remote\.example/.*"))
     _, mirror = _mirror(dune)
     User.objects.create_user(localname="dave", password="s3cretpass")
-    assert _login("dave").post(f"/status/{mirror.pk}/like/").status_code == 404
-    assert Like.objects.count() == 0
+    assert _login("dave").post(f"/status/{mirror.pk}/like/").status_code == 200
+    assert Like.objects.count() == 1
 
 
 @pytest.mark.django_db
@@ -420,17 +430,23 @@ def test_bulk_aggregate_row_has_no_like_control(alice, admin):
 
 
 @pytest.mark.django_db
-def test_remote_mirror_row_has_no_control_but_keeps_its_link(alice, dune, admin):
-    # The R84 split, with the control now actually existing: the mirror
-    # loses the button and keeps the page.
+def test_remote_mirror_row_keeps_its_link_and_now_carries_its_control(
+    alice, dune, admin
+):
+    # The R84 split survives the gate opening. The link was always keyed on
+    # status_id and never changed; the *control* was the only thing withheld
+    # from a mirror, and increment 5 lifted that because the delivery now
+    # exists. Both axes still hold independently — which is the point: had
+    # the link been gated on `interactive`, opening the control gate would
+    # have silently unlinked every mirror.
     carol, mirror = _mirror(dune)
     alice.follows.add(carol)
     entry = next(e for e in feed_entries(alice) if e.user == carol)
-    assert entry.interactive is False
+    assert entry.interactive is True
     body = _home(_login("alice"))
     assert "Their review of Dune." in body
     assert f'href="/status/{mirror.pk}/"' in body
-    assert "like-btn" not in body
+    assert f'data-url="/status/{mirror.pk}/like/"' in body
 
 
 # --- The post page -----------------------------------------------------------
@@ -456,12 +472,15 @@ def test_post_page_shows_a_liked_state_for_a_user_who_liked_it(alice, dune):
 
 
 @pytest.mark.django_db
-def test_post_page_shows_no_control_for_a_remote_mirror(dune):
+def test_post_page_shows_the_control_for_a_remote_mirror(dune):
+    # Flipped by increment 5: a mirror's post is now actionable, so the
+    # page offers the button. The count-without-button shape stays for the
+    # anonymous reader, who has no account to like with.
     _, mirror = _mirror(dune)
     User.objects.create_user(localname="dave", password="s3cretpass")
     body = _login("dave").get(f"/status/{mirror.pk}/").content.decode()
-    assert "Their review of Dune." in body  # the page still renders…
-    assert "like-btn" not in body  # …with no control
+    assert "Their review of Dune." in body
+    assert f'data-url="/status/{mirror.pk}/like/"' in body
 
 
 @pytest.mark.django_db

@@ -8,9 +8,11 @@ pipeline has already resolved and verified the sender from the signature's
 keyid, so the handlers record the relationship in the follow M2M *from the
 verified sender* — never from the activity's self-declared ``actor`` (which an
 attacker could forge). A Follow adds the sender to the followed user's
-followers; an Undo whose object is a Follow removes it. An Undo of any other
-type, or an unresolvable object, is ignored gracefully (§3.6: unsupported
-shapes create nothing and never raise).
+followers; an Undo whose object is a Follow removes it. An Undo whose object
+is a Like removes the sender's like of the status it names (feed
+interactions increment 5); an Undo of any other type, or an unresolvable
+object, is ignored gracefully (§3.6: unsupported shapes create nothing and
+never raise).
 
 **Outbound** — one of our users follows or unfollows a remote user. The
 relationship is recorded in the M2M and delivered as a signed Follow /
@@ -27,15 +29,22 @@ local user's feed (increment 6 supplies those statuses).
 
 import uuid
 
+from reeltalk.core.models import Like
 from reeltalk.social.models import User
 
 from .delivery import deliver_activity, inbox_for
 from .identity import absolute_uri, actor_path
 from .mirrors import ensure_mirror, resolve_known_actor
+from .statuses import resolve_status_reference
 
 
 def _actor_url(value) -> str | None:
-    """The actor URL an activity field carries — a bare string or ``{"id": ...}``."""
+    """The URL an activity field carries — a bare string or ``{"id": ...}``.
+
+    Shape-based, not actor-specific: the object of a Follow is an actor and
+    the object of a Like is a Note, and both arrive in one of these two
+    shapes.
+    """
     if isinstance(value, str):
         return value or None
     if isinstance(value, dict):
@@ -64,23 +73,41 @@ def handle_follow(activity, sender, request):
 
 
 def handle_undo(activity, sender, request):
-    """An Undo: act only when it undoes a Follow; ignore everything else.
+    """An Undo: act when it undoes a Follow or a Like; ignore everything else.
 
-    The object of an Undo(Follow) is the original Follow activity — a dict
-    whose ``type`` is ``Follow`` and whose own ``object`` names the followed
-    user. Any other shape (an Undo of a Create, a malformed object, ...) is
-    not ours to act on and is ignored gracefully.
+    The object of an Undo is the activity being undone — a dict whose
+    ``type`` says what is being taken back and whose own ``object`` names the
+    thing it was aimed at. Two types are ours to act on:
+
+    * ``Follow`` — drop the follow M2M between the verified sender and the
+      user named inside it.
+    * ``Like`` (feed interactions increment 5) — drop the sender's like of
+      the status named inside it. The status is resolved among rows this
+      instance already has, never fetched.
+
+    Anything else (an Undo of a Create, a malformed object, an unresolvable
+    target) is not ours to act on and is ignored gracefully. The like is
+    found by ``(sender, status)`` — the unique pair R83 decision 4 put on
+    the table — not by resolving the inner ``Like``'s id, so an Undo
+    arrives correctly even though we never stored the activity it refers to.
     """
     inner = activity.get("object")
-    if not isinstance(inner, dict) or inner.get("type") != "Follow":
+    if not isinstance(inner, dict):
         return
-    followed_url = _actor_url(inner.get("object"))
-    if not followed_url:
+    target_url = _actor_url(inner.get("object"))
+    if not target_url:
         return
-    followed = resolve_known_actor(followed_url, request)
-    if followed is None:
-        return
-    sender.follows.remove(followed)
+    inner_type = inner.get("type")
+    if inner_type == "Follow":
+        followed = resolve_known_actor(target_url, request)
+        if followed is not None:
+            sender.follows.remove(followed)
+    elif inner_type == "Like":
+        status = resolve_status_reference(target_url, request)
+        if status is not None:
+            # Deleting zero rows is the correct answer to an Undo of a like
+            # we never recorded, so this stays idempotent without a check.
+            Like.objects.filter(user=sender, status=status).delete()
 
 
 # --- Outbound (a local user follows / unfollows a remote user) --------------

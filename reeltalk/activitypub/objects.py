@@ -4,10 +4,11 @@ Serializers for the objects ReelTalk exchanges: the custom **Film** type (D15
 — a clean break from book-era wire types), **Note** (statuses: reviews,
 ratings, comments), and **ShelfEvent** (a user putting a film on — or taking
 it off — one of the D1 shelves; increment 6). Plus the activities that carry
-them: ``Create`` / ``Update`` / ``Delete``. Built fresh against the
-ActivityPub / ActivityStreams specs (R7); federation targets are ReelTalk
-instances and current Mastodon (R39), so no legacy server's extensions are
-needed.
+them: ``Create`` / ``Update`` / ``Delete``, and the interaction pair
+``Like`` / ``Undo(Like)`` (feed interactions increment 5). Built fresh
+against the ActivityPub / ActivityStreams specs (R7); federation targets are
+ReelTalk instances and current Mastodon (R39), so no legacy server's
+extensions are needed.
 
 Object ids use the day-one origin identity fields: a locally created object's
 wire id is its ``origin_id`` (backfilled to the row's pk — see migration
@@ -65,6 +66,23 @@ def film_url(request, film) -> str:
 
 def note_url(request, status) -> str:
     return absolute_uri(request, f"/status/{note_local_id(status)}/")
+
+
+def note_reference(request, status) -> str:
+    """The wire URL that identifies ``status`` **to another instance**.
+
+    The same rule ``film_url`` applies to films (R42): a mirror's identity is
+    its home-instance URL as received, so a reference to one must carry that
+    URL and not a copy of it minted here. ``note_url`` alone cannot do this —
+    it builds ``/status/<origin_id or pk>/`` on our own host, which for a
+    mirror is a URL that says "ours" about something that is not ours.
+
+    This is the reference to use for anything pointing *at* a status from
+    outside it: a ``Like``'s object, an ``inReplyTo``. ``note_url`` stays
+    correct for a local status's own ``id``, which is only ever served for a
+    status we authored (the AP arm of ``status_detail`` 404s a mirror).
+    """
+    return status.remote_url or note_url(request, status)
 
 
 def film_document(film, request) -> dict:
@@ -132,7 +150,12 @@ def note_document(status, request) -> dict:
     if status.film_id is not None:
         doc["film"] = film_url(request, status.film)
     if status.reply_parent_id is not None:
-        doc["inReplyTo"] = note_url(request, status.reply_parent)
+        # The parent's *home* URL, not ours (``note_reference``). A local
+        # reply to a mirrored post is the case that matters: the turn being
+        # answered lives on another instance, and pointing at a URL we minted
+        # for it would make the thread unresolvable there — and claim our own
+        # identity for their object (R42).
+        doc["inReplyTo"] = note_reference(request, status.reply_parent)
     return doc
 
 
@@ -183,6 +206,51 @@ def delete_activity(status, user, request) -> dict:
         "type": "Delete",
         "actor": absolute_uri(request, actor_path(user.localname)),
         "object": note_document(status, request),
+    }
+
+
+def like_activity(liker, target, request, *, undo: bool) -> dict:
+    """A ``Like`` activity, or the ``Undo(Like)`` wrapping one.
+
+    The object is the target's wire URL as a **reference**, not an inline
+    Note (``note_reference``): a like says something about someone else's
+    post, and the only thing the receiver needs is which post. The actor is
+    the liker, who is also the signer — so the receiving instance attributes
+    the like to the verified sender, the same posture every inbound handler
+    takes (never a self-declared ``actor``).
+
+    Both ids carry a uuid fragment, per the rule ``update_activity`` states:
+    an event-shaped activity must not collide with an earlier one of the same
+    kind, or the receiver drops it as a redelivery. A like is exactly the
+    case that looks safe and is not — like, unlike, re-like is a normal thing
+    a member does, and each of those must arrive. Keying the id on the
+    (liker, target) pair would make the re-like identical to the first like
+    and silently lose it. Keying it on the ``Like`` row's own ``origin_id``
+    would work today only because unliking deletes the row, so the re-like
+    gets a fresh pk; that is a property of the delete path, not of the
+    activity, and the id should not depend on it. A uuid makes the event
+    identity unconditional.
+
+    The inner ``Like`` inside the ``Undo`` is built fresh, so it does not
+    carry the id of the ``Like`` we sent earlier. That is deliberate and
+    matches how ``Undo(Follow)`` already works here: the receiver finds the
+    like by (actor, target) — the unique ``(user, status)`` pair R83
+    decision 4 put on the table *is* that key — not by resolving an id.
+    """
+    actor = absolute_uri(request, actor_path(liker.localname))
+    like = {
+        "id": f"{actor}#like-{uuid.uuid4().hex}",
+        "type": "Like",
+        "actor": actor,
+        "object": note_reference(request, target),
+    }
+    if not undo:
+        return like
+    return {
+        "id": f"{actor}#undo-like-{uuid.uuid4().hex}",
+        "type": "Undo",
+        "actor": actor,
+        "object": like,
     }
 
 

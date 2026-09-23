@@ -585,9 +585,11 @@ def test_feed_entry_standalone_status_carries_its_id(db):
 
 
 @pytest.mark.django_db
-def test_feed_entry_remote_mirror_is_not_interactive(db):
-    # R83 decision 5: a mirror carries its identity but no interactions
-    # until Like / threaded Create can actually federate.
+def test_feed_entry_remote_mirror_is_interactive(db):
+    # Flipped by increment 5. R83 decision 5 withheld interactions from a
+    # mirror only while this instance could not deliver them; the Like and
+    # the threaded Create now federate, so the locality clause is out of
+    # the property and a mirror row is interactive like a local one.
     alice = User.objects.create_user(localname="alice", password="s3cretpass")
     carol = _remote_user()
     alice.follows.add(carol)
@@ -605,13 +607,14 @@ def test_feed_entry_remote_mirror_is_not_interactive(db):
     assert entry.kind == "status"
     assert entry.status_id == mirror.id
     assert entry.remote is True
-    assert entry.interactive is False
+    assert entry.interactive is True
 
 
 @pytest.mark.django_db
-def test_feed_entry_remote_review_folded_into_watched_is_not_interactive(db):
-    # The fold reaches mirrors too. The row does carry the mirror's id — it's
-    # the locality flag, not a missing id, that makes the row inert.
+def test_feed_entry_remote_review_folded_into_watched_is_interactive(db):
+    # The fold reaches mirrors too, and the folded remote row is now
+    # interactive exactly like a folded local one — the review underneath it
+    # is the social object either way.
     #
     # A remote user has no shelves until a federated ShelfEvent creates one
     # (R15), so this state only exists when the home instance also announced
@@ -638,7 +641,7 @@ def test_feed_entry_remote_review_folded_into_watched_is_not_interactive(db):
     assert entry.status_id == mirror.id
     assert entry.content == "<p>Their review.</p>"
     assert entry.remote is True
-    assert entry.interactive is False
+    assert entry.interactive is True
 
 
 @pytest.mark.django_db

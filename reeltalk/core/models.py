@@ -765,11 +765,14 @@ class FeedEntry:
 
     ``remote`` marks a row whose status is another instance's mirror.
     ``interactive`` is the one flag a template reads, so no template has to
-    reach for the database to find out. Mirrors are non-interactive for now
-    (R83 decision 5): this instance cannot yet deliver ``Like`` or a threaded
-    ``Create``, so the controls are hidden rather than shown and left to
-    no-op. When the federation increments land, dropping ``not self.remote``
-    from the property below is the whole change.
+    reach for the database to find out. It used to carry R83 decision 5's
+    temporary hide-on-mirrors (``status_id is not None and not self.remote``)
+    because this instance could not deliver a ``Like`` or a threaded
+    ``Create``. Increment 5 built that delivery, so the clause is gone — the
+    record of why it went is that decision, not a stored ``False`` that would
+    have had to be hunted down row by row. ``remote`` stays: it is still a
+    fact about the row, and the "mirrored from" indicator that wants it is
+    design work parked at R73.
 
     ``like_count`` is how many likes the row's status carries and
     ``liked_by_viewer`` whether the user whose feed this is likes it — the
@@ -802,8 +805,17 @@ class FeedEntry:
 
     @property
     def interactive(self) -> bool:
-        """Whether this row can carry a like or a reply (R83)."""
-        return self.status_id is not None and not self.remote
+        """Whether this row can carry a like or a reply (R83, R85).
+
+        Still the *narrow* predicate R84 describes — "may I put a control
+        here", never "may I open this" — and still derived rather than
+        stored. What changed in increment 5 is that it no longer excludes
+        mirrors: this instance can now deliver a ``Like`` and a threaded
+        ``Create`` to another instance, so withholding the control from a
+        remote post would be the opposite of the honest absence R83 decision
+        5 was asking for.
+        """
+        return self.status_id is not None
 
 
 def _group_has_written_review(user_id: int, film_ids: list[int]) -> bool:

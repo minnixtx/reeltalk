@@ -5,7 +5,8 @@
 
 {% block content %}
 {# The post page (R83 decision 3): one status in full, then its replies. #}
-{# A mirror renders here exactly like a local post — same row, no controls. #}
+{# A mirror renders here like any other post, and since increment 5 it is #}
+{# interactive too — the Like and the threaded Create both reach its home. #}
 <article class="status-post">
   <div class="review-head">
     {% if status.user.avatar %}
@@ -16,10 +17,15 @@
     <a class="review-author" href="{% url 'user-profile' status.user.localname %}">{{ status.user.localname }}</a>
     {% if status.rating %}<span class="rating" title="{{ status.rating|floatformat:'-1' }} / 5">{{ status.rating|stars }}</span>{% endif %}
     <span class="muted">{{ status.published_date|date:"Y-m-d" }}</span>
-    {# The control needs a local status and a member who can act on it. A #}
-    {# mirror shows the count without the button — the same honest absence #}
-    {# a feed row gets from FeedEntry.interactive (R83 decision 5). #}
-    {% if user.is_authenticated and status.local %}
+    {% comment %}
+    Any member gets the control, on a local post or on a mirror of another
+    instance's. Increment 5 made a like on a remote post deliverable, so
+    withholding it there would now be the opposite of the honest absence
+    R83 decision 5 asked for. An anonymous reader still gets the count with
+    no button: the number is a fact about the post, the offer needs an
+    account (R85).
+    {% endcomment %}
+    {% if user.is_authenticated %}
       <button type="button" class="like-btn" data-url="{% url 'status-like' status.id %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}">
         <span class="like-label">{% if liked_by_viewer %}Liked{% else %}Like{% endif %}</span>
         <span class="like-count">{{ like_count }}</span>
@@ -75,14 +81,21 @@
     <p class="muted no-replies">No replies yet.</p>
   {% endif %}
 </section>
-{% if user.is_authenticated and status.local %}
+{% if user.is_authenticated and status.film %}
   {% comment %}
   The composer (increment 4). It answers the post you are reading, so a
-  composed reply is a direct reply to this status — answering one
-  specific turn in the thread is not part of v0.1's surface. A mirror
-  gets no composer because this instance cannot yet deliver a threaded
-  Create (R83 decision 5), and the route refuses one too (R85), so the
-  absence is the same absence on both sides.
+  composed reply is a direct reply to this status — answering one specific
+  turn in the thread is not part of v0.1's surface. A mirror gets one now:
+  increment 5 delivers the threaded Create, and note_reference makes its
+  inReplyTo the parent's home URL rather than a copy of it minted here.
+
+  The gate is status.film, not locality, because a reply inherits the film
+  it is talking about and Status.save refuses a typed status with none. A
+  mirrored note that arrived with no film reference is exactly such a row,
+  and the route 400s on it — so the offer is withheld on precisely the
+  pages where the write cannot land, rather than offered and refused
+  (R85: the route refuses what the page withholds, and only what it
+  withholds).
   {% endcomment %}
   <form class="reply-form" method="post" action="{% url 'status-reply' status.id %}">
     {% csrf_token %}
@@ -90,6 +103,14 @@
     <textarea name="content" id="id_reply_content" rows="3" placeholder="Say something about this post…"></textarea>
     <button type="submit">Reply</button>
   </form>
+{% endif %}
+{% if user.is_authenticated %}
+  {% comment %}
+  Deliberately outside the composer's gate: the like control renders in the
+  row head on pages that carry no composer — a mirrored note with no film
+  behind it — so the script driving that control cannot live behind that
+  condition without leaving the button inert.
+  {% endcomment %}
   <script src="{% static 'js/likes.js' %}" defer></script>
   <script src="{% static 'js/comments.js' %}" defer></script>
 {% endif %}

@@ -15,6 +15,8 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from reeltalk.activitypub.broadcast import (
+    broadcast_like,
+    broadcast_reply,
     broadcast_shelf_event,
     broadcast_status_create,
     broadcast_status_delete,
@@ -219,19 +221,22 @@ def reply_to_status(request, status_id):
     for a reply row's markup — the client inserts what the server rendered
     rather than rebuilding it in JS and drifting from the template.
 
-    The lookup is scoped ``local=True`` for the reason R85 gives: the page
-    withholds the composer from a mirror, so the route refuses one too.
-    Without that, a hand-made request would write a reply this instance has
-    no way to deliver, and the honest absence in the markup becomes a lie
-    the database keeps. When increment 5 makes remote interactions
-    deliverable, this and the template's gate come out together.
+    The lookup is no longer scoped to ``local=True``. R85's rule is that the
+    route refuses exactly what the page withholds, and increment 5 put a
+    threaded ``Create`` on the wire, so the page now offers the composer on
+    a mirror too — which means the route has to accept one. The four halves
+    of that gate (this lookup, the like lookup, ``FeedEntry.interactive``,
+    and the post page's control gate) move together; opening some and not
+    others is the button-with-no-route / route-behind-no-button bug R85
+    exists to prevent.
 
-    No federation broadcast happens here on purpose. A threaded
-    ``Create(Note)`` carrying ``inReplyTo`` is increment 5's work; putting
-    one on the wire now would mean sending a reference down a path that has
-    not been built for it.
+    A reply to a mirror is a local ``comment`` whose ``reply_parent`` is
+    another instance's row. That is deliberate and it is why
+    ``objects.note_reference`` exists: the ``inReplyTo`` we emit carries the
+    parent's *home* URL, so the instance that owns that turn sees its own
+    post being answered rather than a URL of ours.
     """
-    parent = get_object_or_404(Status, id=status_id, local=True, deleted=False)
+    parent = get_object_or_404(Status, id=status_id, deleted=False)
     raw_content = request.POST.get("content", "")
     if not raw_content.strip():
         return JsonResponse({"error": "A reply needs some text."}, status=400)
@@ -244,10 +249,18 @@ def reply_to_status(request, status_id):
         )
     except ValueError as exc:
         # ``Status.save`` refuses a typed status with no film, which is what
-        # a reply to a film-less post would be. Nothing in v0.1 can create
-        # such a local post, so this is the boundary answer rather than a
-        # second policy — and a 400 rather than a stack trace either way.
+        # a reply to a film-less post would be. v0.1 cannot create such a
+        # *local* post, but a remote one arrives whenever a Mastodon note
+        # with no film reference is mirrored — so opening the gate is what
+        # made this path reachable, and the composer is withheld on exactly
+        # those pages (``detail.html`` gates on ``status.film``) to keep the
+        # offer and the refusal agreeing. A 400 rather than a stack trace
+        # either way.
         return JsonResponse({"error": str(exc)}, status=400)
+    # Federation broadcast (increment 5): the threaded Create to the post's
+    # author and the replier's remote followers. A dead recipient drops its
+    # send — this request must not fail because of one unreachable instance.
+    broadcast_reply(request, reply)
     blocked_ids = set(request.user.blocks.values_list("id", flat=True))
     return JsonResponse(
         {
@@ -275,16 +288,21 @@ def like_status(request, status_id):
     response carries the new count as well as the caller's own state, so
     one round trip updates both the button and the tally beside it.
 
-    The lookup is scoped to ``local=True``: the control is hidden on a
-    remote mirror (decision 5), and the endpoint refuses one too, so a
-    hand-made request cannot write a like this instance has no way to
-    deliver. That is the same honest absence the template renders, not a
-    second policy — and like the template's gate it is temporary: when
-    increment 5 makes remote likes deliverable, the ``local=True`` here is
-    what comes out.
+    The lookup is no longer scoped to ``local=True``. Increment 5 made a
+    like on another instance's post deliverable, so the control now shows on
+    a mirror and the route accepts one — the same reason it used to refuse
+    was the reason to withhold the button, and both halves came out together
+    (R85). Liking a mirror writes a local ``Like`` row against *our* mirror
+    of their post and sends the ``Like`` to their author; unliking deletes
+    the row and sends the ``Undo``.
     """
-    status = get_object_or_404(Status, id=status_id, local=True, deleted=False)
+    status = get_object_or_404(Status, id=status_id, deleted=False)
     liked = toggle_like(request.user, status)
+    # Federation broadcast (increment 5): the Like / Undo(Like) to the
+    # post's author, and nothing at all when that author is local. A dead
+    # recipient drops its send — this request must not fail because of one
+    # unreachable instance.
+    broadcast_like(request, status, request.user, liked=liked)
     return JsonResponse({"liked": liked, "count": status.likes.count()})
 
 

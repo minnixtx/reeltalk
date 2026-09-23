@@ -307,6 +307,45 @@ def _apply_shelf_event(sender, event: dict, request, *, added: bool) -> None:
         ShelfFilm.objects.filter(shelf=shelf, film=film).delete()
 
 
+# --- Note references --------------------------------------------------------
+
+_STATUS_PATH_RE = re.compile(r"^/status/(\d+)/?$")
+
+
+def resolve_status_reference(ref, request) -> "Status | None":
+    """Resolve a Note reference (a wire URL) to a Status we already have.
+
+    The inverse of ``objects.note_reference``. A URL on this instance
+    resolves to the local row by its origin identity — ``origin_id`` first,
+    then the pk, which is exactly the ``origin_id or pk`` rule the URL was
+    built from — and any other URL resolves to the mirror we hold of it by
+    ``remote_url``.
+
+    **No fetch.** An object we do not already have stays unknown and returns
+    ``None``, so processing an activity cannot be made to pull arbitrary
+    remote documents by naming them (the same posture as
+    ``mirrors.resolve_known_actor``, and unlike ``_film_for_reference``,
+    which does fetch because a review cannot be mirrored without its film).
+    What a caller does with ``None`` is the graceful-ignore answer of §3.6.
+    """
+    if not isinstance(ref, str) or not ref:
+        return None
+    base = ref.split("#", 1)[0]
+    if not base:
+        return None
+    parsed = urlparse(base)
+    if parsed.netloc.lower() == request.get_host().lower():
+        match = _STATUS_PATH_RE.match(parsed.path)
+        if not match:
+            return None
+        wanted = int(match.group(1))
+        return (
+            Status.objects.filter(origin_id=wanted).first()
+            or Status.objects.filter(pk=wanted).first()
+        )
+    return Status.objects.filter(local=False, remote_url=base).first()
+
+
 # --- Status mirrors ----------------------------------------------------------
 
 

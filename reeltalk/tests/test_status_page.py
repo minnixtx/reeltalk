@@ -270,12 +270,18 @@ def test_standalone_comment_row_links_to_its_post_page(alice, dune, admin):
 
 
 @pytest.mark.django_db
-def test_remote_mirror_row_links_to_the_post_page_though_it_is_not_interactive(
+def test_remote_mirror_row_links_to_the_post_page_and_is_interactive_too(
     alice, dune, admin
 ):
-    # The R84 guard. Gating the link on ``interactive`` would make every
-    # mirror unclickable and undo decision 3, because decision 5 withholds
-    # the *control* from a mirror — not the *page*.
+    # The R84 guard, as it stands after increment 5. This test was written
+    # to prove the link and the control are separate axes, and it could only
+    # bite while the two disagreed — a mirror linked but was not
+    # interactive. Increment 5 made them agree for every row, so gating the
+    # link on ``interactive`` would no longer be a bug the template could
+    # commit. What the test pins now is the increment-5 contract itself: a
+    # mirror keeps its page *and* gains its control, and the two call sites
+    # in home.html are still written against different flags so a future
+    # policy that re-splits them has somewhere to go.
     carol = _remote_user()
     alice.follows.add(carol)
     mirror = Status.objects.create(
@@ -288,7 +294,7 @@ def test_remote_mirror_row_links_to_the_post_page_though_it_is_not_interactive(
         remote_url="https://remote.example/status/77",
     )
     entry = next(e for e in feed_entries(alice) if e.user == carol)
-    assert entry.interactive is False
+    assert entry.interactive is True
     assert entry.status_id == mirror.pk
     body = _home(_login("alice"))
     assert "Their review." in body

@@ -12,10 +12,13 @@ in the order they bite:
   status with a parent, which is what makes "comments don't multiply feed
   rows" true in the query rather than a hope about the template, and keeps
   pagination out of this increment.
-* **The route refuses what the page withholds** (R85). The composer is
-  hidden on a remote mirror and ``/status/<id>/reply/`` 404s on one too,
-  so a hand-made request cannot write a reply this instance cannot
-  deliver.
+* **The route agrees with the page** (R85). Written against a mirror the
+  route used to 404 because the composer was withheld and no threaded
+  ``Create`` existed; increment 5 built the delivery and opened both
+  halves together. What still holds is the rule rather than its old
+  direction — the route refuses exactly what the page withholds, which
+  today means the one post that cannot accept a reply at all: a post with
+  no film to inherit.
 * **The thread is flat, labelled and bounded.** Depth lives in the data so
   ``inReplyTo`` stays honest; the page renders one list, the walk caps at
   ``REPLY_THREAD_MAX_DEPTH``, and tombstones are walked through rather
@@ -33,8 +36,10 @@ member's row and a page-wide "not in body" check passes vacuously.
 """
 
 import json
+import re
 
 import pytest
+import responses
 from django.contrib.auth import get_user_model
 from django.db import connection
 from django.test import Client
@@ -443,15 +448,20 @@ def test_reply_endpoint_requires_login(dune):
     assert "/login/" in response["Location"]
 
 
+@responses.activate
 @pytest.mark.django_db
-def test_reply_endpoint_refuses_a_remote_mirror(alice, dune):
-    # R85: the page hides the composer from a mirror, so the route has to
-    # refuse one too — otherwise a hand-made request writes a reply this
-    # instance has no way to deliver.
+def test_reply_endpoint_accepts_a_remote_mirror(alice, dune):
+    # Flipped by increment 5. This route refused a mirror because the page
+    # withheld the composer and there was no threaded Create to send (R83
+    # decision 5, R85). Both halves opened together: the reply is written
+    # locally against our mirror and broadcast with the parent's home URL in
+    # ``inReplyTo``. Delivery is asserted in test_federation_interactions.py;
+    # the catch-all here only keeps the test off the real network.
+    responses.add(responses.POST, re.compile(r"https://remote\.example/.*"))
     carol, mirror = _mirror(dune)
     response = _login("alice").post(f"/status/{mirror.pk}/reply/", {"content": "hi"})
-    assert response.status_code == 404
-    assert Status.objects.filter(reply_parent=mirror).count() == 0
+    assert response.status_code == 200
+    assert Status.objects.filter(reply_parent=mirror).count() == 1
 
 
 @pytest.mark.django_db
@@ -499,11 +509,14 @@ def test_the_post_page_offers_an_anonymous_reader_no_composer(alice, dune):
 
 
 @pytest.mark.django_db
-def test_the_post_page_offers_no_composer_on_a_mirror(alice, dune):
+def test_the_post_page_offers_the_composer_on_a_mirror(alice, dune):
+    # Flipped by increment 5: the threaded Create exists, so a mirror's
+    # page offers the composer and the route accepts it (R85's two halves
+    # still agree — they just agree on "yes" now).
     carol, mirror = _mirror(dune)
     body = _login("alice").get(f"/status/{mirror.pk}/").content.decode()
-    assert "Their review of Dune." in body  # the mirror page really rendered…
-    assert "reply-form" not in body  # …and really carries no composer
+    assert "Their review of Dune." in body
+    assert f'action="/status/{mirror.pk}/reply/"' in body
 
 
 # --- The thread on the page --------------------------------------------------
@@ -604,8 +617,11 @@ def test_a_feed_row_shows_its_reply_count(alice, bob, dune, admin):
 
 
 @pytest.mark.django_db
-def test_a_mirror_row_shows_its_reply_count_and_no_control(alice, dune, admin):
-    # R85 on the feed: the number is shown on a mirror, the offer is not.
+def test_a_mirror_row_shows_its_reply_count_and_now_its_controls(alice, dune, admin):
+    # Flipped by increment 5. The count was always shown on a mirror — R85
+    # says a count is a fact about the post and only the *offer* was gated
+    # on locality. The offer is open now, so a mirror row looks like every
+    # other row that has a post behind it.
     carol, mirror = _mirror(dune)
     alice.follows.add(carol)
     zoe = User.objects.create_user(localname="zoe", password="s3cretpass")
@@ -614,10 +630,10 @@ def test_a_mirror_row_shows_its_reply_count_and_no_control(alice, dune, admin):
     body = _home(_login("alice"))
     mirror_row = _row(body, mirror.pk)
     assert "1 reply" in mirror_row
+    assert f'data-url="/status/{mirror.pk}/like/"' in mirror_row
+    # The composer still lives only on the post page, never on a feed row
+    # (R86 decision 3) — that part of the absence is not a locality gate.
     assert "reply-form" not in mirror_row
-    assert "like-btn" not in mirror_row
-    # Non-vacuity: the same page carries a local row that really does have
-    # the control, so the absence above is not just a control-free page.
     assert 'class="like-btn"' in _row(body, own.pk)
 
 
