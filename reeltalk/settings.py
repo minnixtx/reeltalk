@@ -259,3 +259,35 @@ else:
 # The From address needs a bare domain — no port (R52).
 DEFAULT_FROM_EMAIL = f"{env.str('EMAIL_SENDER_NAME', default='admin')}@{DOMAIN_HOST}"
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
+
+# Logging. With no LOGGING setting every app logger falls through to
+# ``logging.lastResort``, which only emits WARNING and above — so the
+# success line for a delivered activity never reached ``docker logs`` and
+# an outbound federation delivery that worked looked identical to one that
+# was never attempted (R88).
+#
+# The root stays at WARNING rather than turning on INFO across Django; the
+# delivery logger is raised on its own because its INFO line is the only
+# record we keep that a delivery happened at all.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "line": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"},
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+            "formatter": "line",
+        },
+    },
+    "root": {"handlers": ["console"], "level": "WARNING"},
+    "loggers": {
+        "reeltalk.activitypub.delivery": {
+            "handlers": ["console"],
+            "level": env.str("DELIVERY_LOG_LEVEL", default="INFO"),
+            "propagate": False,
+        },
+    },
+}

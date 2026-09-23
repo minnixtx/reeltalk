@@ -9,17 +9,21 @@ and endpoints land in later increments.
 
 import base64
 import hashlib
+import json
+import logging
 from datetime import UTC, datetime
 from email.utils import format_datetime
 from urllib.parse import urlparse
 
 import pytest
+import requests
+import responses
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 from django.http import HttpResponse
 from django.test import RequestFactory, override_settings
 
-from reeltalk.activitypub import crypto, signatures
+from reeltalk.activitypub import crypto, delivery, signatures
 from reeltalk.proxy_trust import TrustedProxySchemeMiddleware
 
 KEY_ID = "http://example.com/user/alice/#main-key"
@@ -499,3 +503,177 @@ def test_verify_legacy_rejects_ed25519_key(keypair, rsa_keypair_pem):
 def test_parse_legacy_signature_missing_required():
     with pytest.raises(ValueError):
         signatures.parse_legacy_signature('algorithm="rsa-sha256"')
+
+
+# --- The framing fix (R88) ---------------------------------------------------
+
+
+def test_signature_header_is_inner_coded(keypair):
+    # RFC 9421 writes the Signature header as a Structured Fields dictionary
+    # of inner-coded byte strings, so the base64 rides between colons. The
+    # bare form we used to send does not parse on the receiving side at all.
+    private_pem, _public_pem = keypair
+    body = b'{"type":"Follow"}'
+    headers = signatures.sign_request(
+        "POST", "http://example.com/inbox/", private_pem, key_id=KEY_ID, body=body
+    )
+    value = headers["Signature"]
+    assert value.startswith("sig1=:") and value.endswith(":")
+    # 64 bytes is an Ed25519 signature, so the payload inside is intact.
+    assert len(base64.b64decode(value[len("sig1=:") : -1])) == 64
+
+
+def test_verify_still_accepts_the_bare_form_a_pre_fix_peer_sends(keypair):
+    # Leniency about the wrapping only. The non-vacuity half matters: a
+    # different key must still fail, so widening the accepted shape has not
+    # widened what we trust.
+    private_pem, public_pem = keypair
+    request = _signed_request(
+        "POST", "http://example.com/inbox/", private_pem, body=b'{"type":"Follow"}'
+    )
+    value = request.META["HTTP_SIGNATURE"]
+    assert value.startswith("sig1=:") and value.endswith(":")
+    request.META["HTTP_SIGNATURE"] = "sig1=" + value[len("sig1=:") : -1]
+    assert signatures.verify_request(request, public_pem) is True
+    other_private, other_public = crypto.generate_keypair()
+    assert signatures.verify_request(request, other_public) is False
+
+
+def test_public_key_multibase_rejects_a_key_we_never_sign_with(rsa_keypair_pem):
+    # Only Ed25519 gets a Multikey entry; an RSA PEM is not our signing key
+    # and must not be published as one.
+    with pytest.raises(ValueError):
+        crypto.public_key_multibase(rsa_keypair_pem[1])
+
+
+def test_public_key_multibase_is_base58btc_over_the_ed25519_multicodec(keypair):
+    _private_pem, public_pem = keypair
+    value = crypto.public_key_multibase(public_pem)
+    assert value.startswith("z")
+    # 0xED as a varint is two bytes: 0xED 0x01.
+    decoded = _b58decode(value[1:])
+    assert decoded[:2] == b"\xed\x01"
+    assert len(decoded[2:]) == 32
+
+
+# --- Outbound delivery logging (R88) -----------------------------------------
+
+DELIVERY_LOGGER = "reeltalk.activitypub.delivery"
+PEER_INBOX = "https://peer.example/inbox/"
+
+
+@responses.activate
+def test_deliver_activity_logs_a_refusal_with_its_status_and_body(caplog):
+    # The blind spot that hid four milestones of broken federation: requests
+    # only raises on a network failure, so a 500 came back as an ordinary
+    # response and every caller discarded it.
+    private_pem, _public_pem = crypto.generate_keypair()
+    responses.add(
+        responses.POST, PEER_INBOX, status=500, json={"error": "cannot parse signature"}
+    )
+    with caplog.at_level(logging.WARNING, logger=DELIVERY_LOGGER):
+        response = delivery.deliver_activity(
+            PEER_INBOX, {"type": "Follow"}, private_pem, KEY_ID
+        )
+    assert response.status_code == 500
+    assert "Follow" in caplog.text
+    assert "500" in caplog.text
+    assert "cannot parse signature" in caplog.text
+
+
+@responses.activate
+def test_deliver_activity_logs_a_success_without_a_warning(caplog):
+    private_pem, _public_pem = crypto.generate_keypair()
+    responses.add(responses.POST, PEER_INBOX, status=202)
+    with caplog.at_level(logging.INFO, logger=DELIVERY_LOGGER):
+        delivery.deliver_activity(PEER_INBOX, {"type": "Follow"}, private_pem, KEY_ID)
+    assert "Follow" in caplog.text and "202" in caplog.text
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+
+@responses.activate
+def test_deliver_activity_logs_a_network_failure_and_still_raises(caplog):
+    # The caller's contract is unchanged — it still sees the exception — but
+    # the failure is now visible whether or not the caller bothers.
+    private_pem, _public_pem = crypto.generate_keypair()
+    responses.add(
+        responses.POST,
+        PEER_INBOX,
+        body=requests.exceptions.ConnectionError("unreachable"),
+    )
+    with caplog.at_level(logging.WARNING, logger=DELIVERY_LOGGER):
+        with pytest.raises(requests.RequestException):
+            delivery.deliver_activity(
+                PEER_INBOX, {"type": "Follow"}, private_pem, KEY_ID
+            )
+    assert "Follow" in caplog.text and "unreachable" in caplog.text
+
+
+@responses.activate
+def test_every_outbound_activity_carries_the_activitystreams_context():
+    # Mastodon's ProcessActivityService opens with
+    # "return unless supported_context?(@json)" and supported_context? is an
+    # equals_or_includes? on @context for the AS context string. A document
+    # without it is discarded before any handler runs -- and the inbox still
+    # answers 202 because that is sent when the work is queued, so the
+    # payload vanishes with no signal whatsoever (R88: this killed every
+    # activity this instance had ever sent, Follow and Accept both).
+    private_pem, _public_pem = crypto.generate_keypair()
+    responses.add(responses.POST, PEER_INBOX, status=202)
+    delivery.deliver_activity(PEER_INBOX, {"type": "Follow"}, private_pem, KEY_ID)
+    sent = json.loads(responses.calls[0].request.body)
+    assert sent["@context"] == "https://www.w3.org/ns/activitystreams"
+    assert sent["type"] == "Follow"
+
+
+@responses.activate
+def test_the_context_is_inside_the_signed_bytes_not_spliced_in_afterwards():
+    # Injecting the context after signing would leave the content-digest
+    # covering a body the receiver never gets, so verification would fail on
+    # a payload that looks correct in the dict we passed in.
+    private_pem, _public_pem = crypto.generate_keypair()
+    responses.add(responses.POST, PEER_INBOX, status=202)
+    delivery.deliver_activity(PEER_INBOX, {"type": "Follow"}, private_pem, KEY_ID)
+    request = responses.calls[0].request
+    body = request.body if isinstance(request.body, bytes) else request.body.encode()
+    digest = base64.b64encode(hashlib.sha256(body).digest()).decode()
+    assert b"@context" in body
+    assert request.headers["Content-Digest"] == f"sha-256=:{digest}:"
+
+
+def test_a_caller_that_declares_its_own_context_keeps_it():
+    declared = {
+        "@context": [
+            "https://www.w3.org/ns/activitystreams",
+            "https://w3id.org/security/v1",
+        ],
+        "type": "Create",
+    }
+    assert delivery.with_context(declared) is declared
+
+
+def test_the_delivery_info_line_reaches_the_console_not_lastresort():
+    # caplog attaches its own handler, so it would pass even with no LOGGING
+    # setting at all. Asserted on the live logger instead: with no handler
+    # configured, logging.lastResort swallows everything below WARNING and
+    # a delivered activity looked exactly like one never attempted (R88).
+    configured = logging.getLogger(DELIVERY_LOGGER)
+    assert configured.isEnabledFor(logging.INFO)
+    assert configured.handlers, "delivery logger must own a handler"
+    assert any(isinstance(h, logging.StreamHandler) for h in configured.handlers)
+
+
+def test_raising_the_delivery_logger_does_not_turn_on_info_everywhere():
+    # The other direction: this is one narrowed logger, not project-wide INFO.
+    assert not logging.getLogger("reeltalk.activitypub.inbox").isEnabledFor(
+        logging.INFO
+    )
+
+
+def _b58decode(text: str) -> bytes:
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    number = 0
+    for char in text:
+        number = number * 58 + alphabet.index(char)
+    body = number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
+    return b"\x00" * (len(text) - len(text.lstrip("1"))) + body

@@ -4,15 +4,20 @@ Two wire formats exist in the field, and this module handles both:
 
 **Outgoing** requests are signed per RFC 9421 (HTTP Message Signatures)
 with Ed25519 — a ``Signature-Input`` header naming the covered components
-plus ``created``/``keyid``, and a ``Signature`` header with the base64
-signature. The signature base is one ``"component": value`` line per
-covered component (LF-terminated), ending with a final
-``"@signature-params": <inner list>`` line that carries no trailing LF
-(RFC 9421 §2.5). RFC 9421 is the only published standard in this space,
-and it is the format current Mastodon verifies (its Linzer path); the
-draft-cavage line never became an RFC, and no other legacy server's RSA
-format is supported for outgoing — federation targets are ReelTalk
-instances and current Mastodon (owner decision 2026-09-10).
+plus ``created``/``keyid``, and a ``Signature`` header carrying the
+signature as an inner-coded byte string (``sig1=:base64:``). The signature
+base is one ``"component": value`` line per covered component
+(LF-terminated), ending with a final ``"@signature-params": <inner list>``
+line that carries no trailing LF (RFC 9421 §2.5).
+
+R88 measured this against the verifier Mastodon 4.7.2 actually runs
+(``linzer`` 0.8.0): the base we build verifies byte-for-byte, but the
+header must be inner-coded — the bare ``sig1=<base64>`` we used to send
+does not parse at all, so the peer fails before it ever looks at the key.
+Mastodon reaches the key only for a key it knows is Ed25519, which is why
+the Person document also publishes the FEP-521a ``Multikey`` form
+(``identity.person_document``); its legacy ``publicKey``/``publicKeyPem``
+path pins every key it reads to RSA.
 
 **Incoming** requests may arrive either way: a ``Signature-Input`` header
 means RFC 9421 (Ed25519 keys); a bare ``Signature`` header carrying
@@ -217,6 +222,20 @@ def _rfc9421_base(
     return "\n".join(lines).encode()
 
 
+def _unwrap_inner_bytes(value: str) -> str:
+    """Strip the RFC 8941 inner-coded byte-string delimiters from a value.
+
+    A conforming RFC 9421 peer writes the signature as ``:base64:``. The bare
+    form is accepted as well so a peer that has not made the R88 framing fix
+    can still be verified — the bytes are what the signature covers, so the
+    wrapping carries nothing an attacker could exploit.
+    """
+    stripped = value.strip()
+    if len(stripped) >= 2 and stripped.startswith(":") and stripped.endswith(":"):
+        return stripped[1:-1]
+    return stripped
+
+
 def sign_request(
     method: str,
     url: str,
@@ -256,7 +275,11 @@ def sign_request(
     base = _rfc9421_base(components, values, serialization)
     signature = load_private_key(private_pem).sign(base)
     headers["Signature-Input"] = f"sig1={serialization}"
-    headers["Signature"] = "sig1=" + base64.b64encode(signature).decode()
+    # The Signature header is a Structured Fields dictionary whose members are
+    # *inner-coded* byte strings, so the base64 rides between colons
+    # (RFC 9421 §4.2). Without them the whole header fails to parse — a peer
+    # never reaches the signature at all (R88).
+    headers["Signature"] = "sig1=:" + base64.b64encode(signature).decode() + ":"
     return headers
 
 
@@ -290,7 +313,7 @@ def _verify_rfc9421(request: Any, public_key: Any) -> bool:
     for part in signature_value.split(","):
         name, _, b64 = part.strip().partition("=")
         if name in ("", label):
-            values["_b64"] = b64
+            values["_b64"] = _unwrap_inner_bytes(b64)
     if "_b64" not in values:
         return False
 

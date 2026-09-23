@@ -382,6 +382,7 @@ def test_an_unreachable_author_does_not_fail_the_like_request(alice, dune):
 def test_inbound_undo_like_removes_the_senders_like(client, remote_keypair, person_doc):
     alice = User.objects.create_user(localname="alice", password="p")
     responses.add(responses.GET, REMOTE_ACTOR, json=person_doc)
+    responses.add(responses.POST, REMOTE_INBOX, status=202)  # the Accept (R88)
     private_pem, _public_pem = remote_keypair
 
     # Establish the mirror through the real first-contact path, then the
@@ -431,6 +432,7 @@ def test_inbound_undo_like_uses_the_verified_sender_not_the_declared_actor(
     alice = User.objects.create_user(localname="alice", password="p")
     bob = User.objects.create_user(localname="bob", password="p")
     responses.add(responses.GET, REMOTE_ACTOR, json=person_doc)
+    responses.add(responses.POST, REMOTE_INBOX, status=202)  # the Accept (R88)
     private_pem, _public_pem = remote_keypair
     status = _review(alice, Film.objects.create(title="D"))
     Like.objects.create(user=bob, status=status)
@@ -473,6 +475,7 @@ def test_inbound_undo_like_leaves_another_users_like_alone(
 ):
     alice = User.objects.create_user(localname="alice", password="p")
     responses.add(responses.GET, REMOTE_ACTOR, json=person_doc)
+    responses.add(responses.POST, REMOTE_INBOX, status=202)  # the Accept (R88)
     private_pem, _public_pem = remote_keypair
     follow = {
         "id": "https://remote.example/activity/l3a",

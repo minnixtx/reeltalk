@@ -57,3 +57,40 @@ def load_public_key(pem: str) -> ed25519.Ed25519PublicKey | rsa.RSAPublicKey:
     if not isinstance(key, (ed25519.Ed25519PublicKey, rsa.RSAPublicKey)):
         raise ValueError("Unsupported public key type")
     return key
+
+
+# FEP-521a key encoding (R88). A PEM says how the bytes are wrapped, not what
+# algorithm they are, so a peer that has to pick a verifier from the published
+# document needs the multicodec tag carried alongside the key.
+_BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+# Multicodec for ed25519-pub is 0xED written as a varint, which is two bytes.
+ED25519_PUB_MULTICODEC = b"\xed\x01"
+
+
+def _base58_encode(data: bytes) -> str:
+    """Base58 (Bitcoin alphabet) with leading-zero bytes as leading '1's."""
+    number = int.from_bytes(data, "big")
+    digits: list[str] = []
+    while number > 0:
+        number, remainder = divmod(number, 58)
+        digits.append(_BASE58_ALPHABET[remainder])
+    leading_zeroes = len(data) - len(data.lstrip(b"\x00"))
+    return _BASE58_ALPHABET[0] * leading_zeroes + "".join(reversed(digits))
+
+
+def public_key_multibase(pem: str) -> str:
+    """The FEP-521a ``Multikey`` encoding of an Ed25519 public key PEM.
+
+    ``z`` (base58btc) over ``multicodec || raw32``. Peers that must learn the
+    key's algorithm from the published document read the tag here; Mastodon
+    4.7.2's ``Multibase.decode_key_to_pem`` turns this back into the same PEM
+    we publish, tagged ``ed25519``.
+    """
+    key = serialization.load_pem_public_key(pem.encode())
+    if not isinstance(key, ed25519.Ed25519PublicKey):
+        raise ValueError("Only Ed25519 keys have a Multikey encoding")
+    raw = key.public_bytes(
+        encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw
+    )
+    return "z" + _base58_encode(ED25519_PUB_MULTICODEC + raw)

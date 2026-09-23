@@ -84,6 +84,45 @@ def _make_mirror() -> User:
     return User(localname="carol@remote.example", local=False, actor_url=REMOTE_ACTOR)
 
 
+def _as_django_request(prepared):
+    """Re-express an outgoing prepared request as a Django request.
+
+    Lets the signature we put on the wire be checked with the same
+    ``verify_request`` a peer would use, so an answer is tested as something
+    a recipient can actually verify rather than as a POST that was made.
+    """
+    parsed = urlparse(prepared.url)
+    defaults = {"HTTP_HOST": parsed.netloc}
+    for name, value in prepared.headers.items():
+        if name.lower() == "content-type":
+            continue
+        defaults["HTTP_" + name.upper().replace("-", "_")] = value
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    return RequestFactory().generic(
+        prepared.method,
+        path,
+        data=prepared.body or b"",
+        content_type=prepared.headers.get("Content-Type", "application/activity+json"),
+        # @target-uri is rebuilt from request.scheme, so the transport has to
+        # match the URL we signed or verification fails on the scheme alone.
+        secure=parsed.scheme == "https",
+        **defaults,
+    )
+
+
+def _stub_answer_inbox(status: int = 202) -> None:
+    """Give our Accept(Follow) somewhere to go.
+
+    A processed Follow now sends an answer (R88), so a test that only cares
+    about the follow state still needs the sender's inbox registered or the
+    delivery raises. Tests that assert on the answer itself register their
+    own and inspect the request instead of using this.
+    """
+    responses.add(responses.POST, REMOTE_INBOX, status=status)
+
+
 # --- Inbound (a remote user follows / unfollows one of ours) -----------------
 
 
@@ -92,6 +131,7 @@ def _make_mirror() -> User:
 def test_inbound_follow_records_m2m_from_sender(client, remote_keypair, person_doc):
     alice = User.objects.create_user(localname="alice", password="p")
     responses.add(responses.GET, REMOTE_ACTOR, json=person_doc)
+    _stub_answer_inbox()
     private_pem, _public_pem = remote_keypair
     activity = {
         "id": "https://remote.example/activity/f1",
@@ -123,6 +163,7 @@ def test_inbound_follow_uses_sender_not_declared_actor(
     # to the signature's verified sender, not a forged ``actor`` field.
     alice = User.objects.create_user(localname="alice", password="p")
     responses.add(responses.GET, REMOTE_ACTOR, json=person_doc)
+    _stub_answer_inbox()
     private_pem, _public_pem = remote_keypair
     activity = {
         "id": "https://remote.example/activity/f2",
@@ -150,6 +191,7 @@ def test_inbound_follow_uses_sender_not_declared_actor(
 def test_inbound_undo_follow_removes_m2m(client, remote_keypair, person_doc):
     alice = User.objects.create_user(localname="alice", password="p")
     responses.add(responses.GET, REMOTE_ACTOR, json=person_doc)
+    _stub_answer_inbox()
     private_pem, _public_pem = remote_keypair
 
     follow = {
@@ -192,6 +234,7 @@ def test_inbound_undo_of_other_type_is_ignored(client, remote_keypair, person_do
     # An Undo whose object is not a Follow must not touch the follow state.
     alice = User.objects.create_user(localname="alice", password="p")
     responses.add(responses.GET, REMOTE_ACTOR, json=person_doc)
+    _stub_answer_inbox()
     private_pem, _public_pem = remote_keypair
 
     follow = {
@@ -251,6 +294,121 @@ def test_inbound_follow_unresolvable_object_ignored(client, remote_keypair, pers
     # The sender was mirrored on first contact, but nothing follows anyone.
     mirror = User.objects.get(local=False)
     assert not mirror.follows.exists()
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_inbound_follow_is_answered_with_accept_signed_by_the_followed_user(
+    client, remote_keypair, person_doc
+):
+    # The answer is the point of R88: a remote instance parks a Follow until
+    # the target answers, so recording it locally is only half the job.
+    # Asserted against alice's published key rather than merely "a POST
+    # happened" — an Accept nobody can verify would leave the follow pending
+    # exactly as far as the follower is concerned.
+    alice = User.objects.create_user(localname="alice", password="p")
+    responses.add(responses.GET, REMOTE_ACTOR, json=person_doc)
+    responses.add(responses.POST, REMOTE_INBOX, status=202)
+    private_pem, _public_pem = remote_keypair
+    follow = {
+        "id": "https://remote.example/activity/f6",
+        "type": "Follow",
+        "actor": REMOTE_ACTOR,
+        "object": ALICE_ACTOR,
+    }
+    body = json.dumps(follow).encode()
+    response = _post_inbox(
+        client,
+        "/user/alice/inbox/",
+        body,
+        _signed_post("/user/alice/inbox/", body, private_pem),
+    )
+    assert response.status_code == 202
+
+    answers = [call for call in responses.calls if call.request.method == "POST"]
+    assert len(answers) == 1
+    sent = json.loads(answers[0].request.body)
+    assert sent["type"] == "Accept"
+    assert sent["actor"] == ALICE_ACTOR
+    # The echoed object carries the id the follower matches the answer to.
+    assert sent["object"]["id"] == follow["id"]
+    # Signed as alice — the party whose consent a Follow asks for — and the
+    # signature holds against the key she publishes.
+    answer_request = _as_django_request(answers[0].request)
+    assert signatures.extract_key_id(answer_request) == ALICE_ACTOR + "#main-key"
+    assert signatures.verify_request(answer_request, alice.public_key) is True
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_a_blocked_sender_gets_a_reject_and_no_follow_is_recorded(
+    client, remote_keypair, person_doc
+):
+    # Silently dropping a blocked sender's Follow leaves them parked in
+    # "pending" with no reason, which is the failure R88 exists to close.
+    # Asserted in both directions: the Reject went out, and the follow row
+    # was not created. The second half is what stops a Reject that also
+    # recorded the relationship from passing.
+    alice = User.objects.create_user(localname="alice", password="p")
+    private_pem, public_pem = remote_keypair
+    carol = _make_mirror()
+    # The mirror has to carry the key its requests are signed with and the
+    # inbox the first-contact path would have recorded, or the inbound
+    # signature cannot be checked and the answer has nowhere to go.
+    carol.public_key = public_pem
+    carol.inbox_url = REMOTE_INBOX
+    carol.save()
+    alice.blocks.add(carol)
+    responses.add(responses.POST, REMOTE_INBOX, status=202)
+    follow = {
+        "id": "https://remote.example/activity/f7",
+        "type": "Follow",
+        "actor": REMOTE_ACTOR,
+        "object": ALICE_ACTOR,
+    }
+    body = json.dumps(follow).encode()
+    response = _post_inbox(
+        client,
+        "/user/alice/inbox/",
+        body,
+        _signed_post("/user/alice/inbox/", body, private_pem),
+    )
+    assert response.status_code == 202
+
+    answers = [call for call in responses.calls if call.request.method == "POST"]
+    assert len(answers) == 1
+    sent = json.loads(answers[0].request.body)
+    assert sent["type"] == "Reject"
+    assert sent["actor"] == ALICE_ACTOR
+    assert sent["object"]["id"] == follow["id"]
+    assert alice.followers.filter(pk=carol.pk).count() == 0
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_a_follow_addressed_to_a_mirror_gets_no_answer(
+    client, remote_keypair, person_doc
+):
+    # We can only answer for a user we hold the private key for. A mirror is
+    # somebody else's account, so there is nothing to sign and nothing to
+    # accept on their behalf.
+    dave_actor = "https://remote.example/user/dave/"
+    User(localname="dave@remote.example", local=False, actor_url=dave_actor).save()
+    responses.add(responses.GET, REMOTE_ACTOR, json=person_doc)
+    responses.add(responses.POST, REMOTE_INBOX, status=202)
+    private_pem, _public_pem = remote_keypair
+    follow = {
+        "id": "https://remote.example/activity/f8",
+        "type": "Follow",
+        "actor": REMOTE_ACTOR,
+        "object": dave_actor,
+    }
+    body = json.dumps(follow).encode()
+    response = _post_inbox(
+        client, "/inbox/", body, _signed_post("/inbox/", body, private_pem)
+    )
+    assert response.status_code == 202
+    assert [call for call in responses.calls if call.request.method == "POST"] == []
 
 
 # --- Outbound (a local user follows / unfollows a remote user) ---------------

@@ -5,6 +5,7 @@ negotiation, webfinger, nodeinfo, and the key backfill for local users
 created before the key fields existed.
 """
 
+import base64
 from io import BytesIO
 
 import pytest
@@ -18,6 +19,49 @@ from reeltalk.activitypub.identity import person_document
 from reeltalk.social.models import SiteSettings
 
 User = get_user_model()
+
+# Independent re-implementation of the consumer's side of FEP-521a, so the
+# encoder is checked against what a peer actually reads rather than against a
+# mirror of itself. Shapes from Mastodon 4.7.2's app/lib/multibase.rb.
+_B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+_ED25519_PUB_DER_HEADER = bytes.fromhex("302a300506032b6570032100")
+_MULTICODEC_NAMES = {0xED: "ed25519-pub", 0x1205: "rsa-pub", 0x1210: "mldsa-44-pub"}
+
+
+def _b58decode(text: str) -> bytes:
+    number = 0
+    for char in text:
+        number = number * 58 + _B58.index(char)
+    body = number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
+    return b"\x00" * (len(text) - len(text.lstrip("1"))) + body
+
+
+def _decode_multicodec(value: str) -> tuple[str, bytes]:
+    """(name, key bytes) from a ``z``-prefixed multibase Multikey value."""
+    assert value[0] == "z", "expected base58btc multibase"
+    data = _b58decode(value[1:])
+    code = shift = length = 0
+    for byte in data:
+        code |= (byte & 0x7F) << shift
+        shift += 7
+        length += 1
+        if not byte & 0x80:
+            break
+    else:
+        raise AssertionError("unterminated multicodec varint")
+    return _MULTICODEC_NAMES.get(code, f"unknown({code})"), data[length:]
+
+
+def _pem_to_der(pem: str) -> bytes:
+    lines = [line.strip() for line in pem.splitlines()]
+    body = [
+        line
+        for line in lines
+        if line
+        and not line.startswith("-----BEGIN")
+        and not line.startswith("-----END")
+    ]
+    return base64.b64decode("".join(body))
 
 
 def _tiny_jpeg() -> bytes:
@@ -38,6 +82,9 @@ def test_person_document_shape():
     assert doc["@context"] == [
         "https://www.w3.org/ns/activitystreams",
         "https://w3id.org/security/v1",
+        # Defines Multikey/assertionMethod so a strict JSON-LD processor
+        # keeps the typed key instead of dropping it (R88).
+        "https://www.w3.org/ns/cid/v1",
     ]
     assert doc["id"] == actor
     assert doc["type"] == "Person"
@@ -56,9 +103,47 @@ def test_person_document_shape():
         "owner": actor,
         "publicKeyPem": user.public_key,
     }
+    # The typed form of the same key (R88). A PEM cannot name its own
+    # algorithm, and Mastodon's legacy publicKey ingest pins whatever it
+    # reads there to RSA — so without this entry it verifies our Ed25519
+    # signatures with an RSA key and fails.
+    assert doc["assertionMethod"] == [
+        {
+            "id": actor + "#main-key",
+            "type": "Multikey",
+            "controller": actor,
+            "publicKeyMultibase": crypto.public_key_multibase(user.public_key),
+        }
+    ]
     # Empty optional fields are omitted, not null.
     assert "summary" not in doc
     assert "image" not in doc
+
+
+@pytest.mark.django_db
+def test_the_typed_key_names_the_same_key_the_legacy_entry_publishes():
+    # The two entries must agree on *which* key the keyid names, because
+    # Mastodon dedupes by URI and would otherwise hold two different keys
+    # under one name. Decoding the multibase must give back the very key we
+    # publish — not merely something of the right shape.
+    user = User.objects.create_user(localname="alice", password="p")
+    request = RequestFactory().get("/user/alice/")
+    doc = person_document(user, request)
+    key = doc["assertionMethod"][0]
+    assert key["id"] == doc["publicKey"]["id"]
+    tag, key_bytes = _decode_multicodec(key["publicKeyMultibase"])
+    assert tag == "ed25519-pub"
+    assert _pem_to_der(user.public_key) == _ED25519_PUB_DER_HEADER + key_bytes
+
+
+@pytest.mark.django_db
+def test_the_typed_key_declares_ed25519_not_rsa():
+    # The whole point of the typed entry: a peer reading it learns Ed25519.
+    # If the multicodec tag were wrong this is where it shows.
+    user = User.objects.create_user(localname="alice", password="p")
+    request = RequestFactory().get("/user/alice/")
+    key = person_document(user, request)["assertionMethod"][0]
+    assert _decode_multicodec(key["publicKeyMultibase"])[0] == "ed25519-pub"
 
 
 def test_person_document_name_and_summary():

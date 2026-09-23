@@ -15,6 +15,8 @@ ReelTalk instances and current Mastodon, so no legacy server's extensions
 are needed (R39).
 """
 
+from .crypto import public_key_multibase
+
 # Media types that mark a request as coming from an ActivityPub client.
 AP_MEDIA_TYPES = ("application/activity+json", "application/ld+json")
 
@@ -90,12 +92,27 @@ def person_document(user, request) -> dict:
     omitted while empty. The collection URLs (inbox/outbox/followers/
     following, sharedInbox) are part of the stable shape from day one even
     though their routes land in increments 3-4.
+
+    The key is published twice, under the **same** ``#main-key`` URI,
+    because a PEM cannot say what algorithm it holds. ``publicKey`` /
+    ``publicKeyPem`` is the legacy shape every instance reads; the FEP-521a
+    ``assertionMethod`` ``Multikey`` carries the multicodec tag that tells a
+    peer the key is Ed25519. Mastodon 4.7.2 needs the second: its
+    ``publicKey`` ingest pins whatever it reads there to RSA, so without the
+    typed entry it tries to verify our Ed25519 signatures with an RSA key
+    and fails (R88). Sharing one URI is deliberate — Mastodon dedupes by URI
+    and prefers the typed entry, so the two never disagree about which key a
+    keyid names.
     """
     actor = absolute_uri(request, actor_path(user.localname))
+    key_id = f"{actor}#main-key"
     doc = {
         "@context": [
             "https://www.w3.org/ns/activitystreams",
             "https://w3id.org/security/v1",
+            # Defines Multikey / assertionMethod / publicKeyMultibase so a
+            # strict JSON-LD processor does not drop the typed key.
+            "https://www.w3.org/ns/cid/v1",
         ],
         "id": actor,
         "type": "Person",
@@ -108,11 +125,24 @@ def person_document(user, request) -> dict:
         "following": absolute_uri(request, following_path(user.localname)),
         "endpoints": {"sharedInbox": absolute_uri(request, shared_inbox_path())},
         "publicKey": {
-            "id": f"{actor}#main-key",
+            "id": key_id,
             "owner": actor,
             "publicKeyPem": user.public_key,
         },
     }
+    # A local user always carries a key from User.save, so the empty case is
+    # an unsaved or half-written row rather than something to fail the
+    # document over. The typed entry is only publishable when there is a key
+    # to encode.
+    if user.public_key:
+        doc["assertionMethod"] = [
+            {
+                "id": key_id,
+                "type": "Multikey",
+                "controller": actor,
+                "publicKeyMultibase": public_key_multibase(user.public_key),
+            }
+        ]
     if user.summary:
         doc["summary"] = user.summary
     if user.avatar:

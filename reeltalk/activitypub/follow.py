@@ -55,11 +55,58 @@ def _actor_url(value) -> str | None:
 # --- Inbound handlers (registered in inbox.HANDLERS) ------------------------
 
 
+def _answer_follow(
+    sender, followed, request, followed_activity: dict, *, accepted: bool
+) -> None:
+    """Answer a remote Follow so their side stops holding it pending.
+
+    A remote instance does not consider a Follow settled until the target
+    answers it — Mastodon parks the request in a pending state until then —
+    so a Follow we merely record locally leaves the follower waiting forever
+    and our own posts never reach their timeline (R88).
+
+    The answer is signed by the **local user being followed**, not by the
+    instance at large: that user is the party whose consent a Follow asks
+    for, and a mirror has no private key to sign with anyway. It goes to the
+    follower's own home inbox.
+
+    The ``object`` echoes the Follow activity as it arrived rather than a
+    reconstruction, because the follower matches this answer to the request
+    it is holding by that activity's id.
+
+    A delivery failure is deliberately left to propagate. It runs inside the
+    inbox transaction, so the follow record and the dedup row roll back
+    together and the sender's retry re-processes the activity. Swallowing
+    the failure here would be worse: the dedup row would survive, the retry
+    would read as a duplicate, and the answer would never be attempted again.
+    """
+    if not followed.local or not followed.private_key:
+        return
+    acceptor = absolute_uri(request, actor_path(followed.localname))
+    activity_type = "Accept" if accepted else "Reject"
+    deliver_activity(
+        inbox_for(sender),
+        {
+            "id": f"{acceptor}#{activity_type.lower()}-{uuid.uuid4().hex}",
+            "type": activity_type,
+            "actor": acceptor,
+            "object": followed_activity,
+        },
+        followed.private_key,
+        f"{acceptor}#main-key",
+    )
+
+
 def handle_follow(activity, sender, request):
-    """A remote user follows one of ours: record ``sender follows <object>``.
+    """A remote user follows one of ours: record it, and answer the request.
 
     ``sender`` is the verified signer (the follower); the object is the user
     being followed, resolved among users this instance already knows.
+
+    A sender the local user has blocked gets a ``Reject`` and no
+    relationship. Silently dropping it would leave them parked in "pending"
+    with no reason, which is the exact failure this handler exists to close —
+    the refusal is the useful half of the answer.
     """
     followed_url = _actor_url(activity.get("object"))
     if not followed_url:
@@ -69,7 +116,11 @@ def handle_follow(activity, sender, request):
         # An actor we do not know — ignore gracefully (no fetch as a side
         # effect of processing the activity).
         return
+    if followed.blocks.filter(pk=sender.pk).exists():
+        _answer_follow(sender, followed, request, activity, accepted=False)
+        return
     sender.follows.add(followed)
+    _answer_follow(sender, followed, request, activity, accepted=True)
 
 
 def handle_undo(activity, sender, request):

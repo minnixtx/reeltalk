@@ -303,11 +303,14 @@ def test_resolve_sender_unreachable_remote_returns_none():
 # --- process_inbound_activity (dedup + dispatch) -----------------------------
 
 
+@responses.activate
 @pytest.mark.django_db
 def test_process_records_delivered_activity():
     # A handled activity (Follow) is recorded for dedup. The follow semantics
     # themselves are covered in test_activitypub_follow.py; here the point is
-    # that dispatch runs a registered handler and leaves a dedup row.
+    # that dispatch runs a registered handler and leaves a dedup row. The POST
+    # stub is the Accept(Follow) the handler now sends back (R88).
+    responses.add(responses.POST, REMOTE_ACTOR.rstrip("/") + "/inbox", status=202)
     User.objects.create_user(localname="alice", password="p")
     sender = User(localname="carol@remote.example", local=False, actor_url=REMOTE_ACTOR)
     sender.save()
@@ -323,8 +326,10 @@ def test_process_records_delivered_activity():
     assert DeliveredActivity.objects.count() == 1
 
 
+@responses.activate
 @pytest.mark.django_db
 def test_process_duplicate_is_not_reprocessed():
+    responses.add(responses.POST, REMOTE_ACTOR.rstrip("/") + "/inbox", status=202)
     User.objects.create_user(localname="alice", password="p")
     sender = User(localname="carol@remote.example", local=False, actor_url=REMOTE_ACTOR)
     sender.save()
