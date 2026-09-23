@@ -7,7 +7,9 @@
 
 ## 1. Current state
 
-> **Next feature:** **likes, comments and per-post pages.** Increments 1–4 are **done 2026-09-22** — feed row identity (`9b78651`), the per-post page plus the feed→post link (`a93947b`), likes local only (`375360c`) and comments local only (`69fa3a4`). **Next is increment 5 — federation outbound**: emit `Like` / `Undo(Like)`, extend `handle_undo` past its Follow-only check, and emit a threaded `Create(Note)` carrying `inReplyTo`. All six feature-level decisions are settled as **R83**, increment 2's link/control split as **R84**, the count/control principle as **R85**, and increment 4's three shape choices as **R86** — no new owner decision is needed to start increment 5. Read §2A, then increment 4's record below: it states what increment 5 has to take out as well as what it has to add.
+> **⚠ Federation with real Mastodon is broken (found 2026-09-22, see the section at the end of §2A).** Our outgoing RFC 9421 signature gets a **500** from Mastodon 4.7.2 — the framing is not parsed at all — and we never emit `Accept(Follow)`. R39's "current Mastodon verifies this" premise is **disproven**; M4's "verified live" exit bar used a *simulated* Mastodon. Nothing federation-with-Mastodon works until this is fixed. **Next decision number is R88.**
+>
+> **Next feature:** **likes, comments and per-post pages.** Increments 1–5 are **done 2026-09-22** — feed row identity (`9b78651`), the per-post page plus the feed→post link (`a93947b`), likes local only (`375360c`), comments local only (`69fa3a4`) and **federation outbound** (like/unlike and threaded replies now reach other instances). **Next is increment 6 — federation inbound**: a `Like` handler **keyed on the verified sender, never `activity["actor"]`**, reading `inReplyTo` on ingest so remote threads stop flattening, and settling the policy for a like that targets a note we do not have. All six feature-level decisions are settled as **R83**, increment 2's link/control split as **R84**, the count/control principle as **R85**, increment 4's three shape choices as **R86**, and increment 5's four wire/audience choices as **R87**. Read §2A, then increment 5's record below: it states what increment 6 has to take out as well as what it has to add.
 
 | Area | State |
 |---|---|
@@ -1355,7 +1357,7 @@ Each is sized for one session and ends at a committed, deployed, verified checkp
 2. ✅ **The per-post page, plus linking the feed rows into it.** *(done 2026-09-22, `a93947b` — recorded below.)* Fill in the HTML arm of `status_detail`'s existing negotiation branch per decision 3. Block-aware rendering (see gotcha 4). Renders the status in full plus its reply list — empty at first, and that is fine. This is the destination every later increment attaches to. **Also in scope:** feed rows link through to the post page, gated on `entry.status_id is not None` — **not** on `entry.interactive` (R84).
 3. ✅ **Likes, local only.** *(done 2026-09-22, `375360c` — recorded below.)* `Like` model with **day-one AP identity discipline (R41/R42)** even though nothing federates yet — `origin_id` on create, unique constraint on `(user, status)`, so increment 5 doesn't need to re-shape the table. `POST /status/<id>/like/` toggle. AJAX with no reload, following the one existing precedent (`base.html:8` csrf meta + `search.js:144` fetch → `JsonResponse`). Counts on feed rows and the post page.
 4. ✅ **Comments, local only.** *(done 2026-09-22, `69fa3a4` — recorded below.)* Finally gives `reply_parent` a writer. Reply form, thread rendering with an explicit depth policy, `film_id` inheritance (see gotcha 2), soft-delete orphan handling (gotcha 3), block filtering.
-5. **Federation, outbound.** Emit `Like` and `Undo(Like)`; extend `handle_undo` past the Follow-only check; emit threaded `Create(Note)` carrying `inReplyTo`. **Ids need a uuid fragment** or a re-like dedups as a redelivery (see `objects.py:update_activity`).
+5. ✅ **Federation, outbound.** *(done 2026-09-22 — recorded below.)* Emit `Like` and `Undo(Like)`; extend `handle_undo` past the Follow-only check; emit threaded `Create(Note)` carrying `inReplyTo`. **Ids need a uuid fragment** or a re-like dedups as a redelivery (see `objects.py:update_activity`). **Also in scope:** the gate comes out of four places at once (R85), and a reference to another instance's post must carry its **home** URL, not one minted here (R87).
 6. **Federation, inbound.** `Like` handler **keyed on the verified sender, never `activity["actor"]`** (every existing handler obeys this); read `inReplyTo` on ingest so remote threads stop flattening; decide the policy for a like targeting a note we don't have (fetch vs ignore).
 
 ### Two constraints to design around, not discover late
@@ -1557,6 +1559,128 @@ The textarea needed a second probe run to prove: `form.reset()` restores the *au
 
 **What increment 5 should know.** Two things come *out*, not just in: `not self.remote` from `FeedEntry.interactive` **and** `local=True` from both the like and the reply lookups — four places, and they must move together, because a button with no route behind it and a route behind no button are the same bug wearing different clothes (R85). The composer only ever writes depth-1 replies under the post being read, so the multi-level walk exists for increment 6's inbound threads, which can arrive at any depth the other instance has. `reply_parent` is `PROTECT` and the delete path is soft, so nothing in the app can hard-delete a parent with replies — but anything that bulk-removes statuses has to order children first. And the reply row is a partial now, so increment 6's inbound replies render through the same template with no new markup.
 
+### Feed interactions increment 5 — federation, outbound (executed 2026-09-22)
+
+Takes the two interactions increments 3 and 4 stored and puts them on the wire, and takes the temporary hide-on-mirrors out of the four places it was written. The brief's own emphasis held: the deletion was the risky half, because every wrong way to remove one of those gates produces a button with no route or a route with no button (R85).
+
+**What landed.** `note_reference` and `like_activity` (`activitypub/objects.py`), `resolve_status_reference` (`activitypub/statuses.py`), a type-dispatching `handle_undo` (`activitypub/follow.py`), `_deliver_signed` / `broadcast_like` / `broadcast_reply` (`activitypub/broadcast.py`), the four gate removals (`core/models.py`, `core/views.py` ×2, `core/templates/core/status/detail.html`), 29 tests in a new `reeltalk/tests/test_federation_interactions.py`, and nine pre-existing tests flipped because they pinned the temporary behaviour this increment reverses. **No migration** — every column this needs has existed since `0004`/`0008`.
+
+**The bug this increment almost shipped: a reference is not the same URL as an id.** `objects.py:134` already serialised `inReplyTo`, and the brief correctly flagged it as "verify, don't assume." Verifying found the trap. `note_url` builds `/status/<origin_id or pk>/` **on our own host**, which is correct for a local status's own `id` and wrong for pointing at someone else's object: for a mirror it mints a URL that says "ours" about something that is not ours, and the home instance cannot resolve it back to the post being answered. Opening the reply gate without fixing this would have emitted a threaded `Create` whose `inReplyTo` dangled on reeltalk.minnix.dev — a broken thread and an identity claim in one field. So `note_reference(request, status)` returns `status.remote_url or note_url(...)`: the same rule `film_url` already applies to films (R42), newly named because there are now two kinds of reference and only one of them may be minted locally. `note_url` keeps its job for a local status's own `id`, which the AP arm only ever serves for statuses we authored.
+
+**Ids carry a uuid fragment, and the reason is a delete path, not an activity.** `like_activity` mints `{actor}#like-<uuid>` / `{actor}#undo-like-<uuid>` unconditionally. Keying the id on `(liker, target)` would make a re-like carry the first like's id and get dropped as a redelivery by the recipient's dedup. Keying on the `Like` row's `origin_id` *does* work here — but only because unliking deletes the row, so re-liking mints a new pk and therefore a new `origin_id`. That is a property of the delete path, not of the activity, and it breaks the moment anyone turns unlike into a flag flip; the uuid makes the id correct without depending on that.
+
+**Who receives what is not one rule (R87).** `_deliver_to_followers` used to be the only audience: the author's followers, for announcements. The two interactions differ, and getting it wrong is invisible until someone replies to a stranger:
+
+| Activity | Recipients | Why |
+| --- | --- | --- |
+| `Like` / `Undo(Like)` | the **post's author** alone | A like is addressed to them. It is not timeline content, so the liker's followers do not get it — their feeds are not the like's audience. |
+| Threaded `Create(Note)` | the replier's followers **and** the post's author, deduped by pk | The followers because it is a status they follow; the author **because they may not follow the replier** — otherwise a reply to a stranger would vanish from exactly the one person it is addressed to. |
+
+The dedup is a `pk` comparison, not a set on the queryset, because `User` is not hashable-by-value here and `any(...)` states the intent outright.
+
+**`handle_undo` now dispatches on the inner type instead of returning early.** The old guard was `if activity.get("object", {}).get("type") != "Follow": return`, which silently dropped everything else. It now reads the inner `Follow`/`Like` and routes: `Follow` removes the follow relation as before, `Like` deletes the sender's `Like` row for the resolved status. Both keyed on the **verified sender**, never `activity["actor"]` — the rule every existing handler obeys and the one increment 6 must carry into the inbound `Like` handler. `_actor_url` was already shape-based rather than actor-specific, so it needed a docstring widening rather than a change.
+
+**The fourth gate place had a hidden coupling.** The brief named three places; the template is the fourth, and it hid a trap. `detail.html` carried **both** `<script>` tags inside the composer's `status.local` gate. Splitting the composer gate without moving them would have left the like button rendered on a composer-less page with nothing driving it — present, visible, inert. The scripts now sit in their own `{% if user.is_authenticated %}` block. This is the R85 asymmetry arriving from a direction neither the brief nor the model could see: not a missing route, a missing *script*.
+
+**The composer gate moved to `status.film`, not to "always open."** A reply inherits its parent's film, and `Status.save` refuses a typed status with no film. A mirrored Mastodon note that arrived with no film reference is exactly such a row, and the reply route 400s on it. So the composer is gated on `user.is_authenticated and status.film` — the offer is withheld on precisely the pages where the write cannot land, which is R85's symmetry rather than a new restriction. The like control has no such constraint and is gated on authentication alone.
+
+**Nine pre-existing tests changed state, all by design.** Each encoded the hide-on-mirror that increment 5 reverses, and each was renamed so the name still says what it asserts: `test_like_endpoint_404s_for_a_remote_mirror` → `..._accepts_a_remote_mirror`; `test_remote_mirror_row_has_no_control_but_keeps_its_link` → `..._keeps_its_link_and_now_carries_its_control`; `test_post_page_shows_no_control_for_a_remote_mirror` → `..._shows_the_control_...`; `test_reply_endpoint_refuses_a_remote_mirror` → `..._accepts_...`; `test_the_post_page_offers_no_composer_on_a_mirror` → `..._offers_the_composer_...`; `test_a_mirror_row_shows_its_reply_count_and_no_control` → `..._and_now_its_controls` (still asserting `"reply-form" not in mirror_row` — R86 puts no composer on a feed row); `test_feed_entry_remote_mirror_is_not_interactive` → `..._is_interactive`; `test_feed_entry_remote_review_folded_into_watched_is_not_interactive` → `..._is_interactive`; `test_remote_mirror_row_links_to_the_post_page_though_it_is_not_interactive` → `..._and_is_interactive_too`. **R84's mutation guard can no longer bite**: it worked by asserting a row is non-interactive *while* linked, and increment 5 makes `interactive` and "has a link" coincide for every row, so the two axes are no longer independent. The test still asserts both facts; it just can no longer be flipped into failure by gating the link on `interactive`. The distinction R84 draws is still real and still documented — it is only unexploitable by mutation on this shape.
+
+**Gate** (all three images rebuilt, fresh `docker compose run --rm web`): `ruff check` — *All checks passed!*; `ruff format --check` — *94 files already formatted*; `makemigrations --check` — *No changes detected*; pytest **1019 passed + 5 skipped in 548.17s**. **Baseline reconciled:** 989 (increment 4) + 29 new test functions + 1 `test_clean_room` file instance (the new test file is itself parametrised over files) = **1019**. Nine pre-existing tests changed state by design, none added or removed.
+
+**Verified live on `reeltalk.minnix.dev` over real HTTPS** (deployed image `sha256:97b1fae07614`, cert `CN=*.minnix.dev notAfter Nov 1 02:26:19 2026 GMT`), as a temporary member following a temporary remote mirror whose inbox pointed at a host-side sink:
+
+```
+login 302 · home carries "Log out"          ← the member path proves it is logged in
+mirror page 200 · like-btn present · composer present · content served
+POST /status/15/like/   200 {"liked": true,  "count": 1}
+POST /status/15/like/   200 {"liked": false, "count": 0}
+POST /status/15/like/   200 {"liked": true,  "count": 1}   ← the re-like, delivered
+POST /status/15/reply/  200 · server-rendered <li class="review reply">
+feed row: like control AND link on the same mirror row
+anonymous: count visible, like-btn 0, composer 0
+LAN plain HTTP 200
+```
+
+**The wire itself, captured by a sink on the host rather than inferred from logs.** Exactly four outbound POSTs from the deployed container, and the two facts that mattered are both in their payloads:
+
+```
+Like    object = https://remote.example/status/probe-review-1   ← the HOME url
+Undo    object = Like, same target
+Like    (the re-like, delivered as its own activity)
+Create  id = https://reeltalk.minnix.dev/status/16/
+        inReplyTo = https://remote.example/status/probe-review-1  ← R42 proven live
+ids: #like-8bb77af2…  #undo-like-ba853efc…  #like-106984b4…  /outbox/#activity-16
+```
+
+All four activity ids unique, including the two `Like`s from the same member on the same post — which is the uuid-fragment rule doing its job on real bytes rather than in a test.
+
+**Inbound over real HTTPS**, a signed `Undo(Like)` posted to `https://reeltalk.minnix.dev/inbox/` → **202**, with `before: mirror's like present = True` → `after: … = False`.
+
+**A real browser was used, under the R82 discipline** — probe written to disk, and the run asserts the stylesheet applied before any computed number is trusted. The mirror page under the deployed stylesheet:
+
+```
+stylesheetApplied   True   (bodyBackground rgb(9, 8, 7) + grunge gradient)
+.like-btn           Oswald, sans-serif · textTransform none · 14.4px · rgb(224, 85, 74)
+bare <button>       (Log out) Archivo — the marquee face the trap warns about
+.reply-form button  "Reply" · Oswald · 17.6px
+likeBtnCount 1 · replyFormCount 1 · likesJsPresent True · commentsJsPresent True
+```
+
+The like control wears the ghost-control face, not the marquee face. The first probe run reported `likesJsPresent: False` and that was the **probe** being wrong, not the page: production static files are whitenoise manifest-hashed (`<script src="/static/js/likes.f0102e8c2bfd.js" defer>`), so a selector on the literal `likes.js` can never match a deployed page. Matched on the stem instead. Same class of mistake as increment 4's `form.reset()` finding — the check was wrong before the code was, and it is only visible if you look at what the environment actually serves.
+
+**Non-vacuity by mutation (R79), seven mutations, all caught:**
+
+| Mutation | Failures |
+| --- | --- |
+| `note_reference` → naive `note_url` | 8 |
+| `Like` branch in `handle_undo` disabled | 2 |
+| `Like` branch keyed on the declared `actor` instead of the verified sender | 1 |
+| `interactive` restored to include `not self.remote` | 5 |
+| `broadcast_reply` without the post's author | 3 |
+| Deterministic (non-uuid) `Like` id | 1 |
+| Script tags back inside the composer gate | 1 |
+
+**One of these was a vacuous test I wrote and had to strengthen.** The first `test_inbound_undo_like_uses_the_verified_sender_not_the_declared_actor` only asserted a forged identity was never *created*, so under the declared-actor mutation it still passed — the forged user did not exist either way. Rewritten to name a **real local user** as the declared actor and assert both directions: the sender's like is removed **and** the named actor's like survives. Under the mutation only the strengthened form fails, which is the whole point. A test that only checks the attacker is not created proves nothing about whether the victim was hit.
+
+**Cleanup.** Sink process killed and its files removed; the mirror, its reply, both probe users, the probe likes and the `DeliveredActivity` row deleted in dependency order — `reply_parent` is `PROTECT`, so children go first. Instance left exactly as found: **1 user (minnix), 1 status, 1,378 films, 0 statuses with a parent, 0 likes, 0 delivered rows** (`[before] users=3 statuses=3 likes=2 delivered=1` → `[after] users=1 statuses=1 likes=0 delivered=0 films=1378 with_parent=0`). No probe password, cookie jar, or host-side sink left on disk.
+
+**What increment 6 should know.** The verified-sender rule is now load-bearing in a handler that *deletes* rows, not only one that creates them — the mutation table above shows what happens when it is inverted, and the strengthened test is the only thing that catches it. `resolve_status_reference` deliberately does **no fetching**: it resolves a local-host URL by `origin_id` then `pk` (the inverse of the `origin_id or pk` the URL was built from) and any other URL by `remote_url`, returning `None` for unknown so the graceful-ignore path in §3.6 handles it. Increment 6's open decision is whether an inbound `Like` for a note we do not have should trigger a fetch or be dropped — that is a policy call about load and about trusting a remote id, not an implementation detail. `_mirror_status` still never reads `inReplyTo`, so remote replies keep landing flat; when that changes, the depth-1 composer assumption in increment 4's record is what makes inbound threads deeper than anything we write, and `REPLY_THREAD_MAX_DEPTH = 12` is the only bound. `DeliveredActivity` is written on the inbound path only; the outbound `_deliver_signed` does **not** record to it, so do not read the outbound table expecting the outbound set — that asymmetry is deliberate (the table is a dedup record, not a send log) and is worth revisiting if outbound retries ever get built.
+
+### Federation with real Mastodon is broken — found during increment 5 live testing (2026-09-22)
+
+Not part of increment 5 and not caused by it, but found while testing against the owner's real Mastodon (`upallnight.minnix.dev`, **Mastodon 4.7.2**), and it invalidates a recorded assumption. **This blocks every outbound delivery to Mastodon and must be fixed before any federation-with-Mastodon story can work.**
+
+**The evidence.** One signed `Follow` from `minnix` to `https://upallnight.minnix.dev/users/minnix/inbox`, through our real signing path, with the response actually read:
+
+| Variant | Result |
+| --- | --- |
+| Our current RFC 9421 shape (`Signature-Input` + `Signature`) | **500** Internal Server Error |
+| Same, plus a plain unsigned `Date` header | **500** |
+| Same, with `date` **and** `host` added as signed components | **500** |
+| **draft-cavage framing** (`keyId`/`algorithm`/`headers`/`signature`), `hs2019`, our real Ed25519 key | **401** `Verification failed for minnix@reeltalk.minnix.dev …#main-key` |
+| CONTROL: same framing, deliberately **wrong** (throwaway RSA) key | **401** — byte-identical error |
+
+Read carefully, this separates cleanly:
+
+- **Mastodon 4.7.2 cannot process our RFC 9421 framing at all.** It 500s before reaching signature verification, and adding `date`/`host` to the signed components does not change that. The format itself is the problem, not which components we cover.
+- **The draft-cavage framing *is* parsed and reaches verification.** The 401 names our actor and our keyid, so Mastodon resolved our Person, found the key, and attempted to verify. That is a completely different failure point from the 500s.
+- **The control makes the 401 honest but not informative about the key.** A wrong RSA key and our right Ed25519 key produce the identical error, so V3's 401 means "got to verification and failed", not "the key is wrong". The likely reason it failed: **our published `publicKey` block carries no `type` field** — just `id`, `owner`, `publicKeyPem` — so Mastodon cannot tell an Ed25519 key from an RSA one and defaults to RSA. (Mastodon's own key is RSA-2048.)
+
+**What this disproves.** R39 recorded that outgoing should be RFC 9421/Ed25519 because *"it is the format current Mastodon verifies (its Linzer path)"*, and M4 increment 7 recorded the exit bar as verified live including that *"a Mastodon-style third party … independently verified our outgoing signature."* That third party was **simulated** — Mastodon-shaped, not Mastodon. **Our outgoing signature has never been verified by a real Mastodon instance, and it is not.** Treat R39's Mastodon-interoperability premise as **disproven against Mastodon 4.7.2**, not merely untested.
+
+**Why it stayed invisible for four milestones:** `_deliver_follow` and `_deliver_signed` both **discard `deliver_activity`'s `Response`**. `requests` only raises on a network failure, so a 500 or 401 comes back as an ordinary response and is thrown away. The browser saw a `302` from our own view and everything looked fine. **We have never been able to tell whether any outbound delivery landed.**
+
+**Also still broken, independently:** we never emit **`Accept(Follow)`** — `handle_follow` stops at `sender.follows.add(followed)` and `HANDLERS` has no `Accept` entry. Mastodon holds a remote follow pending until the target instance answers it, so the owner's Mastodon→ReelTalk follow sits pending forever and our posts never reach their timeline. This is the gap §2A has named since M4 and never closed. Fixing the signature format does **not** fix this one; both are needed.
+
+**The three things the fix needs** (next session, own increment, next decision number is **R88**):
+
+1. **Outgoing signature format.** Either move outgoing to draft-cavage framing (what Mastodon demonstrably parses), or keep RFC 9421 and additionally publish a typed key so Mastodon can identify the algorithm — e.g. a `type` on `publicKey` (`Multikey` / `Ed25519VerificationKey2020`). **Measure before choosing**: the 401-vs-500 split says framing is the blocker; whether a typed Ed25519 key then verifies under `hs2019` is the next unknown and should be probed, not assumed — that assumption is exactly what got us here.
+2. **Emit `Accept(Follow)`** (and probably `Reject` for a blocked sender rather than silently dropping). Signed by the **local user being followed** (`followed.private_key`) — a mirror has no private key — delivered to `sender.inbox_url`. This resolves the owner's existing pending follow retroactively; no re-follow needed.
+3. **Log the response status on every outbound delivery.** Non-2xx must be visible in `docker logs`. This is the change that turns the next federation question into one query instead of four probe variants.
+
+**What increment 5 is unaffected by.** The home-URL targeting, the uuid-fragment ids, the per-interaction recipient sets, the four-place gate and the inbound `Undo(Like)` are all correct and were verified against a sink that reads what we send. The sink proved **what we put on the wire is what we intend**; it could not prove **the remote accepts it**. That second half was never tested until now.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -1728,3 +1852,15 @@ New owner decisions for the rewrite are recorded here, numbered R1, R2, … The 
   **(3) The feed row carries a reply count and nothing else.** No inline composer, no expand affordance, no thread preview — the count sits on the row and the thread lives on the post page. This keeps the feed one row per post (R83 decision 2 made real as `feed_for`'s `reply_parent__isnull=True` filter rather than a template convention), keeps row height stable, and keeps comments off the feed's query cost: `reply_counts()` batches every visible row into one grouped query. **What this closes off:** inline reply-on-feed, which would multiply feed rows, break the stable-height property, and re-open the pagination question decision 2 had already answered "no" to.
 
   **Why these generalise past comments.** All three are the instinct R84 and R85 encode — keep each question answered in exactly one place, and let the server own what the server knows. For increment 5: the flat render means a threaded `Create(Note)` we emit needs no presentation change, and the unbounded data depth means increment 6's inbound threads can arrive at any depth the remote instance has and render through the same partial with no new markup. And R85's gate rule still stands, now with **four** places to change at once rather than two: `not self.remote` out of `FeedEntry.interactive`, **and** `local=True` out of both the like lookup and the reply lookup. They move together or not at all.
+
+- **R87 — Federation outbound: who receives a like is not who receives a reply, a reference to another instance's post carries its home URL, and the composer's gate is the film rather than the locality (increment 5, 2026-09-22).** Four choices came up that R83–R86 had not settled. They are recorded together because all four are audience/identity questions wearing different clothes, and because increment 6 inherits three of them.
+
+  **(1) The recipient set is per-interaction, not per-broadcast.** Until now there was one audience — the author's followers — because everything outbound was an announcement. The interactions differ, and the difference is invisible until it is wrong: a **`Like` / `Undo(Like)` goes to the post's author alone**, because a like is addressed to them and is not timeline content — the liker's followers do not follow their likes. A **threaded `Create(Note)` goes to the replier's followers *and* the post's author**, deduped by pk — the followers because it is a status they follow, the author **because they may not follow the replier**, and a reply to a stranger that only went to the replier's followers would vanish from exactly the one person it was written for. **What this closes off:** one `_deliver_to_followers` used for every activity type. `_deliver_signed(request, actor, activity, recipients)` is now the primitive and each broadcast names its own audience; a future activity must answer "who is this addressed to" rather than inherit the announcement set.
+
+  **(2) A reference is not an id, and for a mirror it must not be minted here.** `note_url` builds `/status/<origin_id or pk>/` on **our** host. That is right for a local status's own `id` and wrong for anything pointing *at* another instance's object — for a mirror it mints a URL that says "ours" about something that is not ours, and the home instance cannot resolve it back. So `note_reference(request, status) = status.remote_url or note_url(...)`, used for `inReplyTo` and for a `Like`'s `object`; `note_url` keeps its job for a local status's own `id`, which the AP arm only ever serves for statuses we authored. This is R42's rule for films restated for notes, and it is the thing the reply gate would have broken: opening that gate without the fix emits a threaded `Create` whose `inReplyTo` points at our host for their post — a broken thread and an identity claim in one field. **What this closes off:** any future outbound reference built by string-composing our own host. If it points at something that might be a mirror, it goes through `note_reference`.
+
+  **(3) The composer's gate is `status.film`, not `status.local` and not "always open."** A reply inherits the film it is talking about and `Status.save` refuses a typed status with none, so a mirrored note that arrived with no film reference cannot be replied to at all — the route 400s. Gating the composer on locality would have been the wrong axis once mirrors became replyable: it would offer the composer on film-bearing mirrors and withhold it on nothing, while the actual refusal lives on the film. R85's symmetry — withhold the offer exactly where the write is refused, and only there — lands on `status.film`. The like control has no such constraint and is gated on authentication alone. **What this closes off:** reading the composer gate as a federation policy. It is a write-eligibility check; when increment 6 makes film-less mirrors replyable by fetching their film, this gate moves with the write rule, not with the locality rule.
+
+  **(4) R84's mutation guard is retired by success, and that is worth stating rather than quietly losing.** The guard asserted, of the *same* row, that `interactive is False` **and** the link is present — provable only because the two axes were independent while mirrors were non-interactive. Increment 5 makes `interactive` and "has a link" coincide for every row, so gating a link on `interactive` can no longer produce the bug R84 named. **The distinction R84 draws is still correct and still documented; it is simply no longer exploitable by mutation on this shape.** The test keeps asserting both facts and was renamed to say so. Anyone looking for a lost guard should read this rather than re-add one: the reason the mutation stopped biting is that the asymmetry it tested for is gone by design.
+
+  **Why these generalise past increment 5.** (1) makes every future outbound activity answer an audience question explicitly. (2) is the rule for every outbound reference from here on. (3) ties a UI gate to a write rule rather than to a flag, which is the durable form. And the fourth is a caution about mutation guards: they can be *discharged* by the change that follows, and the record has to say so or the next session hunts for a guard that has nothing left to catch.
