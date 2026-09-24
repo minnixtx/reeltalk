@@ -112,6 +112,14 @@ class User(AbstractBaseUser, PermissionsMixin):
     blocked_films = models.ManyToManyField("core.Film", blank=True)
 
     date_joined = models.DateTimeField(default=timezone.now)
+    # Unread state is one timestamp on the user rather than a boolean on every
+    # notification row (R93): "mark all read" is a single UPDATE here instead
+    # of an UPDATE whose cost and row locks grow with the unread count, and the
+    # unread set is ``created > notifications_last_read`` against the
+    # notification's composite index. A new account is marked read at signup,
+    # which is the same set as "never read" — nothing predates the account —
+    # and keeps the badge's range query free of a NULL case.
+    notifications_last_read = models.DateTimeField(default=timezone.now)
 
     objects = UserManager()
 

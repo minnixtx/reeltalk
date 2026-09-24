@@ -54,6 +54,12 @@ INSTALLED_APPS = [
     # inbox/outbox, delivery. No models of its own yet; crypto + signatures
     # land first (increment 1).
     "reeltalk.activitypub",
+    # Notifications (R97): the event ledger for follow/like/reply and the
+    # unread contract. Its own app because its producers live in all three
+    # apps above and its readers — the page and the badge — belong to none of
+    # them, so one shared home beats bolting the model onto whichever app
+    # asked first.
+    "reeltalk.notifications",
     # Task queue (M2, R4): Django-Q2's ORM cluster tables. The worker service
     # runs `qcluster` from the same image; its cluster lives in Postgres.
     "django_q",
