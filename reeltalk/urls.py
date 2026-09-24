@@ -92,6 +92,9 @@ urlpatterns = [
     # Remote-user discovery (M5 increment 2): user@domain → their profile.
     path("find/", social_views.find_user, name="find-user"),
     path("preferences/profile/", social_views.profile_edit, name="profile-edit"),
+    # Notifications (increment 3): the member's ledger page and the
+    # mark-all-read POST.
+    path("", include("reeltalk.notifications.urls")),
     # Film domain (detail now; create/edit/shelve/finish join in later pieces).
     path("", include("reeltalk.core.urls")),
     # Federation (M4): the actor URL + webfinger/nodeinfo discovery.

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Notifications — ReelTalk{% endblock %}
+
+{% block content %}
+{# The notifications page (increment 3). R95 chose no pruning, so this list #}
+{# is the whole ledger and the paginator is what keeps it renderable. #}
+<section class="notifications-feed">
+  <h1 class="pane-title">Notifications</h1>
+  <p class="pane-sub">
+    {% if unread_count %}
+      {{ unread_count }} unread notification{{ unread_count|pluralize }}, newest first.
+    {% else %}
+      Nothing new since {{ user.notifications_last_read|date:"Y-m-d" }}.
+    {% endif %}
+  </p>
+
+  {% if unread_count %}
+  {# A real action, so a real <button> in a CSRF POST form — unlike the #}
+  {# increment-4 badge, which must be an <a> because it only navigates. #}
+  <form method="post" action="{% url 'notifications-mark-read' %}" class="inline">
+    {% csrf_token %}
+    <button type="submit" class="btn">Mark all read</button>
+  </form>
+  {% endif %}
+
+  {% if notifications %}
+  <ul class="review-list">
+    {% for note in notifications %}
+      <li class="review">
+        <div class="review-head">
+          {% if note.actor %}
+            {% if note.actor.avatar %}
+              <img class="avatar avatar-row" src="{{ note.actor.avatar.url }}" alt="">
+            {% else %}
+              <span class="avatar avatar-row avatar-placeholder" aria-hidden="true"></span>
+            {% endif %}
+            <a class="review-author" href="{% url 'user-profile' note.actor.localname %}">{{ note.actor.localname }}</a>
+          {% else %}
+            {# SET_NULL actor: the account is gone, the event still happened. #}
+            {# The row stays and the actor's deep link goes with the name. #}
+            <span class="review-author">Someone</span>
+          {% endif %}
+          {% if note.kind == "like" %}
+            {% if note.status and not note.status.deleted %}
+              liked <a href="{% url 'status' note.status.id %}">your post</a>
+            {% else %}
+              liked a post that is no longer here
+            {% endif %}
+          {% elif note.kind == "reply" %}
+            {% if note.status and not note.status.deleted %}
+              {# The link is the reply itself, not the post it answered — the #}
+              {# reply is what arrived, and /status/<id>/ renders it in full. #}
+              replied to your post — <a href="{% url 'status' note.status.id %}">their reply</a>
+            {% else %}
+              replied to a post that is no longer here
+            {% endif %}
+          {% else %}
+            {# A follow's deep link is the actor's profile, already drawn above. #}
+            followed you
+          {% endif %}
+          <span class="muted">{{ note.created|date:"Y-m-d" }}</span>
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+  {% if page_obj.paginator.num_pages > 1 %}
+  <nav class="pager">
+    {% if page_obj.has_previous %}<a href="{{ page_query }}page={{ page_obj.previous_page_number }}">← Previous</a>{% endif %}
+    <span class="muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}<a href="{{ page_query }}page={{ page_obj.next_page_number }}">Next →</a>{% endif %}
+  </nav>
+  {% endif %}
+  {% else %}
+  <p class="muted">No notifications yet. When someone follows you, likes one of your posts, or replies to you, it shows up here.</p>
+  {% endif %}
+</section>
+{% endblock %}
