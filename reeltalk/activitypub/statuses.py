@@ -60,6 +60,7 @@ from reeltalk.core.models import (
     Status,
     resolve_film_id,
 )
+from reeltalk.notifications.models import Notification, notify
 
 from .identity import reference_url
 from .mirrors import fetch_image_bytes, image_storage_name
@@ -457,6 +458,14 @@ def _mirror_status(sender, note: dict, request):
         # mirror that row so the feed renders the event as "watched" with
         # stars (R35) instead of a standalone note.
         _ensure_shelf_row(sender, Shelf.READ, film)
+    # A remote reply to one of our posts (notifications increment 2, R92):
+    # the federated half of the reply pair. The create branch only — this
+    # function also serves ``Update`` of an existing mirror, and an edit to
+    # a reply nobody asked about is not a fresh "replied to you". The
+    # ``parent is not None`` test is what keeps a plain top-level note from
+    # notifying anyone: with no parent there is no one the note answered.
+    if parent is not None:
+        notify(parent.user, sender, Notification.Kind.REPLY, status)
     return status
 
 

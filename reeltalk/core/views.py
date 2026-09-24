@@ -24,6 +24,7 @@ from reeltalk.activitypub.broadcast import (
 )
 from reeltalk.activitypub.identity import accepts_activitypub
 from reeltalk.activitypub.objects import film_document, note_document
+from reeltalk.notifications.models import Notification, notify
 
 from .catalog import create_or_match_film, search_local
 from .forms import FilmForm
@@ -261,6 +262,12 @@ def reply_to_status(request, status_id):
     # author and the replier's remote followers. A dead recipient drops its
     # send — this request must not fail because of one unreachable instance.
     broadcast_reply(request, reply)
+    # The parent author's notification (notifications increment 2, R92).
+    # This is the local half of the reply pair; the federated half is written
+    # by ``_mirror_status``. ``notify()`` owns who actually gets told — it
+    # no-ops when the parent is the replier's own post, and a reply to a
+    # mirror of a remote post has a remote author for exactly that reason.
+    notify(parent.user, request.user, Notification.Kind.REPLY, reply)
     blocked_ids = set(request.user.blocks.values_list("id", flat=True))
     return JsonResponse(
         {
@@ -303,6 +310,13 @@ def like_status(request, status_id):
     # recipient drops its send — this request must not fail because of one
     # unreachable instance.
     broadcast_like(request, status, request.user, liked=liked)
+    # The author's notification (notifications increment 2, R92). Only the
+    # like half of the toggle is an event: taking a like back is not a
+    # second "liked this" for the ledger. Unlike the follow route, this one
+    # carries no self-guard upstream, so a member liking their own post is
+    # reachable and arrives here — ``notify()`` is what stops it.
+    if liked:
+        notify(status.user, request.user, Notification.Kind.LIKE, status)
     return JsonResponse({"liked": liked, "count": status.likes.count()})
 
 

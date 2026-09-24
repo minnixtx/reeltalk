@@ -45,6 +45,7 @@ a fact about nothing, and nothing on this instance renders it.
 """
 
 from reeltalk.core.models import Like
+from reeltalk.notifications.models import Notification, notify
 
 from .identity import reference_url
 from .statuses import resolve_status_reference
@@ -72,5 +73,17 @@ def handle_like(activity, sender, request) -> str | None:
         return f"dropped, no such note here ({target_url})"
     if status.deleted:
         return "dropped, the target is a tombstone"
-    Like.objects.get_or_create(user=sender, status=status)
+    _like, created = Like.objects.get_or_create(user=sender, status=status)
+    # The author's notification (notifications increment 2, R92): the
+    # federated half of the like pair, and the half a local-only wiring would
+    # have left dark. Gated on ``created`` because the event is the like
+    # arriving, not an activity mentioning it — a second Like activity for a
+    # pair we already hold changes nothing, so it has nothing new to say.
+    # Redelivery of the *same* activity never reaches this line: the dedup
+    # row and the handler share one transaction (``inbox.py``), which is what
+    # stops a retried delivery writing a second notification. The recipient
+    # may be a remote mirror of another instance's post, which is why this
+    # calls ``notify()`` rather than creating a row directly.
+    if created:
+        notify(status.user, sender, Notification.Kind.LIKE, status)
     return None

@@ -50,6 +50,7 @@ from reeltalk.activitypub.mirrors import (
 )
 from reeltalk.core.models import Shelf, feed_entries, popular_genres, trending_films
 from reeltalk.core.utils import render_markdown
+from reeltalk.notifications.models import Notification, notify
 
 from .forms import ProfileForm, SignupForm
 from .models import Invite, SiteSettings, User
@@ -335,6 +336,11 @@ def _change_follow(request, localname: str, *, undo: bool):
             messages.success(request, f"You no longer follow {target.get_full_name()}.")
         else:
             follower.follows.add(target)
+            # The followed member's notification (notifications increment 2,
+            # R92). The local half of the follow pair — the federated half is
+            # written by ``handle_follow`` on the receiving side. An unfollow
+            # is not an event to announce, so only the add branch reaches it.
+            notify(target, follower, Notification.Kind.FOLLOW)
             messages.success(request, f"You now follow {target.get_full_name()}.")
     elif undo:
         try:

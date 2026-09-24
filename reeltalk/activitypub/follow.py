@@ -36,6 +36,7 @@ local user's feed (increment 6 supplies those statuses).
 import uuid
 
 from reeltalk.core.models import Like
+from reeltalk.notifications.models import Notification, notify
 from reeltalk.social.models import User
 
 from .delivery import deliver_activity, inbox_for
@@ -111,6 +112,14 @@ def handle_follow(activity, sender, request):
         _answer_follow(sender, followed, request, activity, accepted=False)
         return
     sender.follows.add(followed)
+    # The followed member's notification (notifications increment 2, R92):
+    # the federated half of the follow pair, on the accepted path only. A
+    # blocked sender above got a ``Reject`` and must not also leave a row
+    # saying they were followed. It sits with the M2M write rather than after
+    # the delivery so both roll back together if the ``Accept`` cannot be
+    # signed and sent — a retry then re-processes the whole event rather than
+    # finding the ledger already written and the answer never sent.
+    notify(followed, sender, Notification.Kind.FOLLOW)
     _answer_follow(sender, followed, request, activity, accepted=True)
 
 
