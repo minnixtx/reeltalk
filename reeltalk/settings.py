@@ -60,6 +60,12 @@ INSTALLED_APPS = [
     # them, so one shared home beats bolting the model onto whichever app
     # asked first.
     "reeltalk.notifications",
+    # Mentions (§2C): the parser and the storage. Its own app for the same
+    # reason notifications got one -- the feature spans core (write + render),
+    # activitypub (the wire in both directions) and notifications (the kind),
+    # so none of those three is the natural owner. Increment 1 only: nothing
+    # calls into it yet.
+    "reeltalk.mentions",
     # Task queue (M2, R4): Django-Q2's ORM cluster tables. The worker service
     # runs `qcluster` from the same image; its cluster lives in Postgres.
     "django_q",
