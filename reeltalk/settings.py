@@ -102,6 +102,10 @@ TEMPLATES = [
                 # instance policy; `site` is only passed by the views that
                 # happen to need it, so the bit itself goes through here.
                 "reeltalk.social.context_processors.signup_open",
+                # The header badge (R94): server-rendered, no polling. One
+                # indexed COUNT on an authenticated render, guarded inside
+                # the processor, and it never runs for a JSON response.
+                "reeltalk.notifications.context_processors.unread_notifications",
             ],
         },
     },
