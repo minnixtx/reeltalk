@@ -122,6 +122,39 @@ def film_document(film, request) -> dict:
     return doc
 
 
+def mention_tag(user, request) -> dict:
+    """One ``Mention`` tag, in the shape Mastodon reads and nothing more.
+
+    Mastodon's ``MentionSerializer`` carries exactly ``type`` / ``href`` /
+    ``name``, so a fourth field here would be ours alone and no peer owes it
+    anything. ``href`` is the **actor URI**, never a ``/user/…`` page path:
+    Mastodon resolves a mention on ``href`` and never on ``name``
+    (``process_mention``, app/lib/activitypub/activity/create.rb), so a
+    ``name`` nobody can resolve is harmless while an ``href`` nobody can
+    reach loses the mention outright.
+
+    The href follows the same local/remote split every other actor reference
+    in this codebase uses — a local member's actor URI is built from their
+    localname on this host, a mirror's is the ``actor_url`` received from
+    its home instance. Building our own URL for a mirror would put a
+    same-host URI on the wire about somebody who does not live here; it
+    would still resolve in the end, through our profile page re-serving
+    their real id, but it says the wrong thing on the way.
+
+    ``name`` is ``"@" + localname``, which is Mastodon's ``acct`` form for
+    free: ``@alice`` for a local member, ``@minnix@upallnight.minnix.dev``
+    for a mirror, because a mirror's stored localname already carries the
+    domain. It is built from the **stored** localname, never from whatever
+    casing was typed, so the name and the href always describe the same
+    account.
+    """
+    if user.local:
+        href = absolute_uri(request, actor_path(user.localname))
+    else:
+        href = user.actor_url
+    return {"type": "Mention", "href": href, "name": f"@{user.localname}"}
+
+
 def note_document(status, request) -> dict:
     """The **Note** wire document for a status (review / rating / comment).
 
@@ -156,6 +189,15 @@ def note_document(status, request) -> dict:
         # for it would make the thread unresolvable there — and claim our own
         # identity for their object (R42).
         doc["inReplyTo"] = note_reference(request, status.reply_parent)
+    mentions = [
+        mention_tag(mention.user, request)
+        for mention in status.mentions.select_related("user")
+    ]
+    # Omitted when there are none, the way ``film_document`` omits what a
+    # document does not carry. An empty ``tag`` array says nothing, and a
+    # peer that iterates it pays for the privilege.
+    if mentions:
+        doc["tag"] = mentions
     return doc
 
 

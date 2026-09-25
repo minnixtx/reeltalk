@@ -14,7 +14,7 @@ re-parse on their own:
   true.
 """
 
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 
@@ -63,3 +63,43 @@ class StatusMention(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user.localname} mentioned in status {self.status_id}"
+
+
+def sync_status_mentions(status, users) -> None:
+    """Make ``status``'s mention rows exactly ``users``.
+
+    Called at the two local status write sites *before* the broadcast, so
+    the outbound ``tag`` array and the delivery audience are both built from
+    what the saved text actually says rather than from a second parse of it.
+
+    A **sync**, not an append, because ``mark_watched`` updates a review in
+    place (D5): on the second save of a review the previous rows are
+    already there, and blindly inserting would trip
+    ``status_mention_unique``. Leaving the old rows alone is worse than the
+    constraint — an edit that drops ``@bob`` would keep broadcasting an
+    ``Update`` that tags him and delivers to his inbox, long after the text
+    stopped addressing him.
+
+    Rows that survive are left as they were rather than deleted and
+    re-inserted, so a mention that persists across edits keeps its row and
+    its id. That is also what makes increment 4's per-(recipient, status)
+    idempotency cheap: the row it guards on is still the same row. The
+    ordering consequence is worth stating — surviving rows keep the
+    position they were first inserted at, so the ``tag`` order is
+    first-mentioned, not re-sorted to match a later edit's wording.
+
+    One transaction, because a half-applied sync would leave the wire
+    describing a set that is neither the old one nor the new one.
+    """
+    wanted = list(users)
+    current = set(status.mentions.values_list("user_id", flat=True))
+    wanted_ids = {user.pk for user in wanted}
+    stale = current - wanted_ids
+    fresh = [user for user in wanted if user.pk not in current]
+    with transaction.atomic():
+        if stale:
+            status.mentions.filter(user_id__in=stale).delete()
+        if fresh:
+            StatusMention.objects.bulk_create(
+                StatusMention(status=status, user=user) for user in fresh
+            )
