@@ -101,8 +101,12 @@ def _unique_in_order(users):
     return ordered
 
 
-def _resolve_typed_handle(handle: str):
+def resolve_typed_handle(handle: str):
     """The user a handle typed into a post names, or ``None``.
+
+    Public because the renderer resolves a mention with this same function:
+    the set of handles that notify and the set that render as links must be
+    one answer, not two that can drift apart.
 
     Mirrors ``social.views._resolve_profile_user``, which answers the same
     question for the profile route, so a typed handle resolves to the same
@@ -142,7 +146,7 @@ def mentions_from_text(raw_markdown: str):
     hidden = _hide_non_mention_regions(raw_markdown)
     found = []
     for match in MENTION_RE.finditer(hidden):
-        user = _resolve_typed_handle(match.group(1))
+        user = resolve_typed_handle(match.group(1))
         if user is not None:
             found.append(user)
     return _unique_in_order(found)

@@ -245,7 +245,7 @@ def reply_to_status(request, status_id):
         reply = add_reply(
             request.user,
             parent,
-            content=render_markdown(raw_content),
+            content=render_markdown(raw_content, mentions=True),
             raw_content=raw_content,
         )
     except ValueError as exc:
@@ -350,7 +350,7 @@ def mark_watched_view(request, film_id):
             user,
             film,
             rating=request.POST.get("rating"),
-            content=render_markdown(raw_content),
+            content=render_markdown(raw_content, mentions=True),
             raw_content=raw_content,
         )
     except ValueError as exc:
