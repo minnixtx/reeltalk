@@ -66,6 +66,12 @@ INSTALLED_APPS = [
     # so none of those three is the natural owner. Increment 1 only: nothing
     # calls into it yet.
     "reeltalk.mentions",
+    # Moderation (moderation arc, R100/R101): the moderator role's gate and
+    # surface. Its own app because the arc reaches into core (statuses, the
+    # delete path), social (the role, suspension) and activitypub (the Flag
+    # wire, the domain block), so none of those three is the natural owner --
+    # the same span that justified the two apps above.
+    "reeltalk.moderation",
     # Task queue (M2, R4): Django-Q2's ORM cluster tables. The worker service
     # runs `qcluster` from the same image; its cluster lives in Postgres.
     "django_q",

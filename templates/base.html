@@ -32,6 +32,16 @@
         {# Ahead of the handle so the handle keeps the right grid edge (R80). #}
         <a class="notifications-link" href="{% url 'notifications' %}">{{ unread_notifications }} unread</a>
         {% endif %}
+        {% if user.is_moderator %}
+        {# The moderator's way onto /moderate/ (R101). An <a> and no .btn for #}
+        {# the same reason as the badge above — `button, .btn` is the lit #}
+        {# crimson control in three rule blocks and this only navigates. #}
+        {# Placed after the badge so neither existing element moves, and the #}
+        {# handle keeps the right grid edge (R80). .header-user is pinned to #}
+        {# its own grid column at both breakpoints, so one more flex child #}
+        {# here cannot reflow the top row. #}
+        <a class="moderation-link" href="{% url 'moderation' %}">Moderate</a>
+        {% endif %}
         {# The avatar rides inside the handle link so the corner stays one tab stop. #}
         <a class="user-name" href="{% url 'user-profile' user.localname %}">
           {% if user.avatar %}

@@ -99,6 +99,20 @@ class User(AbstractBaseUser, PermissionsMixin):
         default=False,
         help_text="Designates whether the user can log into this admin site.",
     )
+    # Deliberately a separate field rather than a reuse of is_staff (R100).
+    # is_staff is what Django's admin site checks, so "promote to moderator"
+    # through that field would silently mean "hand over the whole admin" —
+    # site settings, user records, the merge tool. A moderator's is_staff
+    # stays False, so /admin/ still refuses them, and the grant happens only
+    # in UserAdmin's Roles fieldset, which itself requires is_staff to reach.
+    # The escalation path is therefore absent rather than merely checked.
+    is_moderator = models.BooleanField(
+        default=False,
+        help_text=(
+            "Designates a site moderator. Independent of staff status: a "
+            "moderator can moderate /moderate/ and cannot open the admin."
+        ),
+    )
 
     # Follow/block relations defined up front so M4 builds on them instead of
     # bolting on a profile model (R10). Server-level blocking is a federation

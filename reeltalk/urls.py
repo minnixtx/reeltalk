@@ -46,6 +46,10 @@ urlpatterns = [
         name="invite-accept",
     ),
     path("about/", social_views.about, name="about"),
+    # Moderation (R101): /moderate/ sits outside Django admin, because a
+    # moderator cannot reach admin chrome at all (R100) and the queue could
+    # not live inside it.
+    path("", include("reeltalk.moderation.urls")),
     # Getting-started page (M6): the core loop for new users; public.
     path("welcome/", social_views.welcome, name="welcome"),
     # The human profile page at the actor URL (M5): Person JSON-LD for AP

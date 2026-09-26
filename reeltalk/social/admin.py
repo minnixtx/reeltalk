@@ -66,7 +66,22 @@ class AdminUserChangeForm(UserChangeForm):
 
     class Meta:
         model = User
-        fields = ("display_name", "email", "avatar", "is_staff", "is_superuser")
+        fields = (
+            "display_name",
+            "email",
+            "avatar",
+            "is_staff",
+            "is_superuser",
+            # Kept consistent with the Roles fieldset below. Which half is
+            # load-bearing was measured, not assumed: ModelAdmin.get_form
+            # rebuilds this form from flatten_fieldsets(self.get_fieldsets(...)),
+            # so on the admin change page the FIELDSET is what puts the field on
+            # screen and this tuple is overridden. Deleting it from here changes
+            # nothing in the admin; deleting it from the fieldset takes the field
+            # off the page. This entry is what makes AdminUserChangeForm correct
+            # for anyone using the form directly.
+            "is_moderator",
+        )
 
 
 @admin.register(User)
@@ -91,7 +106,7 @@ class UserAdmin(admin.ModelAdmin):
     fieldsets = [
         (None, {"fields": ("localname", "password")}),
         ("Profile", {"fields": ("display_name", "email", "avatar")}),
-        ("Roles", {"fields": ("is_staff", "is_superuser")}),
+        ("Roles", {"fields": ("is_staff", "is_superuser", "is_moderator")}),
         (
             "Federation (read-only)",
             {

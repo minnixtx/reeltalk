@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Moderation — ReelTalk{% endblock %}
+
+{% block content %}
+{# The moderation surface, increment 1: the gate and the empty state only. #}
+{# The report queue itself is increment 2, so nothing is listed here yet. #}
+{# No new CSS — every class below already exists (R101). #}
+<section class="moderation-queue">
+  <h1 class="pane-title">Moderation</h1>
+  <p class="pane-sub">Reports about posts and members will arrive here.</p>
+  <p class="muted">
+    Nothing to review yet. The report queue lands in the next increment — until
+    then there is nothing a member can report and nothing for a moderator to act on.
+  </p>
+</section>
+{% endblock %}
