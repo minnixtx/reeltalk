@@ -25,6 +25,7 @@ from reeltalk.activitypub.broadcast import (
 from reeltalk.activitypub.identity import accepts_activitypub
 from reeltalk.activitypub.objects import film_document, note_document
 from reeltalk.mentions.models import sync_status_mentions
+from reeltalk.mentions.notify import record_mentions
 from reeltalk.mentions.parser import mentions_from_text
 from reeltalk.notifications.models import Notification, notify
 
@@ -264,9 +265,16 @@ def reply_to_status(request, status_id):
     # delivery audience (mentions increment 3). Parsed from the raw markdown
     # the member typed — not the rendered HTML, which has already erased the
     # difference between a handle in prose and one in a code span — and
-    # written *before* the broadcast so both read the same rows. Recording
-    # only: no notification here, that stays increment 4's per R90.
-    sync_status_mentions(reply, mentions_from_text(raw_content))
+    # written *before* the broadcast so both read the same rows.
+    mentioned = mentions_from_text(raw_content)
+    sync_status_mentions(reply, mentioned)
+    # The mention notification (mentions increment 4). Immediately after
+    # the sync so the set notified and the set on the wire are the same list,
+    # never a second parse of it. The parent's author is in that set and is
+    # suppressed here rather than hereafter: the reply row below already
+    # covers them, and M-c says one notification, not two. The mention still
+    # renders and still rides the ``tag`` array — only the ledger row goes.
+    record_mentions(reply, mentioned)
     # Federation broadcast (increment 5): the threaded Create to the post's
     # author and the replier's remote followers. A dead recipient drops its
     # send — this request must not fail because of one unreachable instance.
@@ -371,9 +379,16 @@ def mark_watched_view(request, film_id):
     # insert: D5 updates an existing review in place, so a re-save of a
     # review that mentions someone would collide on the unique constraint,
     # and an edit that drops a mention would otherwise keep delivering to
-    # the person the text no longer names. Recording only — the mention
-    # notification stays increment 4's per R90.
-    sync_status_mentions(status, mentions_from_text(raw_content))
+    # the person the text no longer names.
+    mentioned = mentions_from_text(raw_content)
+    sync_status_mentions(status, mentioned)
+    # The mention notification (mentions increment 4). Because D5 updates
+    # in place, this one call site covers both halves of M-e: a review that
+    # newly mentions someone notifies, and every later save of that same
+    # review notifies them again zero times. A review has no reply parent, so
+    # only the idempotency guard is exercised here — the M-c half belongs to
+    # the reply route above.
+    record_mentions(status, mentioned)
     # Federation broadcast (M4 increment 6): the review to remote followers,
     # plus the watchlist removal when mark_watched took the film off it. A
     # dead follower drops its send — this request must not fail because of

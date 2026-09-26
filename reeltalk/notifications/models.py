@@ -23,16 +23,24 @@ from django.utils import timezone
 class Notification(models.Model):
     """One event, addressed to one local user.
 
-    ``kind`` carries exactly the three events that have a producer on this
+    ``kind`` carries exactly the events that have a producer on this
     instance (R90). The enum is narrow on purpose: a value with no producer is
     not a free placeholder but a code path nobody can trigger and a test that
     can only be written against a fiction.
+
+    ``MENTION`` is the fourth and it arrived the way R90 required — with its
+    parser, not before it. R90 declined the kind in 2026-09 because
+    ``grep -rn 'mention' --include=*.py`` returned nothing outside tests, and
+    closed with "if mentions arrive later, the kind joins with the parser, not
+    before it". ``reeltalk.mentions`` (increments 1–3) is that parser, so the
+    kind lands with its producers in increment 4 rather than ahead of them.
     """
 
     class Kind(models.TextChoices):
         FOLLOW = "follow", "Follow"
         LIKE = "like", "Like"
         REPLY = "reply", "Reply"
+        MENTION = "mention", "Mention"
 
     # CASCADE: a notification is addressed to a person and means nothing
     # without them. This is the one edge that decides how the table is read, so

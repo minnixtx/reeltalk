@@ -55,8 +55,22 @@
             {% else %}
               replied to a post that is no longer here
             {% endif %}
-          {% else %}
-            {# A follow's deep link is the actor's profile, already drawn above. #}
+          {% elif note.kind == "mention" %}
+            {% if note.status and not note.status.deleted %}
+              {# The mention lives inside the other member's post, so the deep #}
+              {# link is their post rather than a reply of ours. #}
+              mentioned you in <a href="{% url 'status' note.status.id %}">their post</a>
+            {% else %}
+              mentioned you in a post that is no longer here
+            {% endif %}
+          {% elif note.kind == "follow" %}
+            {# Explicit, not a catch-all. Before increment 4 this was {% else %}, #}
+            {# which meant a fourth kind with no branch of its own rendered every #}
+            {# mention on the page as "followed you" — silently, and with no #}
+            {# failing test, because nothing asserted the wrong verb was wrong. #}
+            {# An unknown kind now renders no verb at all: visibly broken rather #}
+            {# than confidently wrong. A follow's deep link is the actor's #}
+            {# profile, already drawn above. #}
             followed you
           {% endif %}
           <span class="muted">{{ note.created|date:"Y-m-d" }}</span>
@@ -72,7 +86,7 @@
   </nav>
   {% endif %}
   {% else %}
-  <p class="muted">No notifications yet. When someone follows you, likes one of your posts, or replies to you, it shows up here.</p>
+  <p class="muted">No notifications yet. When someone follows you, likes one of your posts, replies to you, or mentions you, it shows up here.</p>
   {% endif %}
 </section>
 {% endblock %}

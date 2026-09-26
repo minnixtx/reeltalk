@@ -86,7 +86,15 @@ def test_the_kind_enum_holds_only_events_that_have_a_producer():
     # R90: a kind with no producer is not a spare slot for later, it is a
     # code path nobody can trigger and a test that can only be written
     # against a fiction. A fourth kind joins with its parser, not before it.
-    assert {kind.value for kind in Notification.Kind} == {"follow", "like", "reply"}
+    # "mention" joined in mentions increment 4 for exactly that reason — the
+    # parser (increments 1–2), the renderer and the outbound wire (3) all
+    # landed first, so this set still names only reachable events.
+    assert {kind.value for kind in Notification.Kind} == {
+        "follow",
+        "like",
+        "reply",
+        "mention",
+    }
 
 
 def test_notify_never_notifies_yourself(alice, bob, post):

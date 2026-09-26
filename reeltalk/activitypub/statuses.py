@@ -60,6 +60,9 @@ from reeltalk.core.models import (
     Status,
     resolve_film_id,
 )
+from reeltalk.mentions.models import sync_status_mentions
+from reeltalk.mentions.notify import record_mentions
+from reeltalk.mentions.parser import mentions_from_tags
 from reeltalk.notifications.models import Notification, notify
 
 from .identity import reference_url
@@ -421,6 +424,15 @@ def _mirror_status(sender, note: dict, request):
         # An empty note mirrors nothing.
         return None
 
+    # Mentions are read off the wire here — this function ignored ``note["tag"]``
+    # entirely until increment 4. They must be read from the tag array rather
+    # than re-parsed from ``content``, because the wire carries rendered HTML
+    # and a mirror keeps ``raw_content=""``: the typed text a parser would
+    # need does not exist on this side. Resolution is existing-rows-only (M-b),
+    # so an unknown href is dropped rather than chased — the same no-fetch
+    # posture as the ``inReplyTo`` above (R89).
+    mentioned = mentions_from_tags(note.get("tag"), request)
+
     existing = Status.objects.filter(local=False, remote_url=home_url).first()
     if existing is not None:
         if existing.deleted:
@@ -435,6 +447,18 @@ def _mirror_status(sender, note: dict, request):
         )
         if existing.is_review and existing.film_id is not None:
             _ensure_shelf_row(sender, Shelf.READ, existing.film)
+        # A remote edit can newly mention someone, and M-e says that
+        # notifies. This is the one place the standing "the update branch
+        # never notifies" rule looks like it is being broken, and it is not:
+        # that rule is about the **reply** kind — the ``notify(Kind.REPLY)``
+        # further down stays create-only, because an edit to a reply nobody
+        # asked about is not a fresh "replied to you". The mention kind gets
+        # its own guard inside ``record_mentions``, keyed on
+        # ``(recipient, status)``, so ten edits naming the same member write
+        # one row. The rule and the guard are different mechanisms for
+        # different kinds; neither is loosened here.
+        sync_status_mentions(existing, mentioned)
+        record_mentions(existing, mentioned)
         return existing
 
     status = Status(
@@ -458,6 +482,15 @@ def _mirror_status(sender, note: dict, request):
         # mirror that row so the feed renders the event as "watched" with
         # stars (R35) instead of a standalone note.
         _ensure_shelf_row(sender, Shelf.READ, film)
+    # The inbound mention producer (mentions increment 4). ``status.user``
+    # is the verified sender, so the mention is attributed to who actually
+    # signed the activity rather than to the note's self-declared
+    # ``attributedTo`` — the same attribution rule as every other mirror
+    # write. M-c is exercised through the status: when a remote member
+    # replies to one of our posts *and* @mentions its author, the reply row
+    # below already covers them and ``record_mentions`` drops them here.
+    sync_status_mentions(status, mentioned)
+    record_mentions(status, mentioned)
     # A remote reply to one of our posts (notifications increment 2, R92):
     # the federated half of the reply pair. The create branch only — this
     # function also serves ``Update`` of an existing mirror, and an edit to
