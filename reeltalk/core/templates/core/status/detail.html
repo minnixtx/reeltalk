@@ -46,6 +46,22 @@
   {% endif %}
   {% if status.content %}<div class="review-body">{{ status.content|safe }}</div>{% endif %}
   {% comment %}
+  The report control (moderation increment 2). Placed inside the article,
+  under the content it is about — a report reads as a statement about the
+  post when it sits below it, and as a statement about the page when it
+  floats above. ``can_report`` and ``already_reported`` both come from the
+  same helper the profile uses, so the two host pages cannot drift on who
+  may report what. The control is withheld on your own post, and the route
+  refuses it too; a control that renders for someone who cannot use it is
+  its own bug.
+  {% endcomment %}
+  {% if can_report and not already_reported %}
+    {% url 'report-status' status.id as report_action %}
+    {% include "moderation/_report_form.html" with action_url=report_action label="post" question="What is wrong with this post?" id_prefix="status" %}
+  {% elif already_reported %}
+    <p class="muted report-filed-note">You have already reported this post.</p>
+  {% endif %}
+  {% comment %}
   The orphan line (increment 4). A soft-deleted post 404s on its own URL,
   so this page is the only place a reply to it can be read — and a reply
   that reads as addressed to nothing is the silent-vanish failure wearing

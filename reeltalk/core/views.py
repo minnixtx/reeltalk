@@ -27,6 +27,7 @@ from reeltalk.activitypub.objects import film_document, note_document
 from reeltalk.mentions.models import sync_status_mentions
 from reeltalk.mentions.notify import record_mentions
 from reeltalk.mentions.parser import mentions_from_text
+from reeltalk.moderation.models import report_state
 from reeltalk.notifications.models import Notification, notify
 
 from .catalog import create_or_match_film, search_local
@@ -187,6 +188,7 @@ def status_detail(request, status_id):
     # form is that the data keeps its real nesting (so inReplyTo stays
     # honest) and the page refuses to render it as indentation.
     replies = _thread_rows(status, blocked_ids)
+    can_report, already_reported = report_state(request.user, target_status=status)
     return render(
         request,
         "core/status/detail.html",
@@ -209,6 +211,11 @@ def status_detail(request, status_id):
             "like_count": status.likes.count(),
             "liked_by_viewer": request.user.is_authenticated
             and status.likes.filter(user=request.user).exists(),
+            # The report control (moderation increment 2). Both halves come
+            # from one helper shared with the profile so the post page and
+            # the profile cannot drift on who may report what.
+            "can_report": can_report,
+            "already_reported": already_reported,
         },
     )
 

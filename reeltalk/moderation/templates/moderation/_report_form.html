@@ -1,0 +1,31 @@
+{% comment %}
+The report control, shared by the post page and the profile (increment 2).
+
+Wrapped in <details> rather than laid out flat: reporting is a rare action
+on a page people come to read, and an always-visible form with radio
+buttons would sit above the replies like a permanent complaint desk. The
+content is in the DOM either way — <details> hides it visually, not
+structurally — so the control is present for a keyboard and a test alike.
+
+The category is a RadioSelect rather than a <select> because the two
+options are the whole decision and hiding them behind a closed dropdown
+makes the report feel like it says nothing.
+
+Rendered only where the caller has already decided the viewer may use it.
+A control that renders for someone who cannot use it is its own bug, so
+every gate lives in the caller, not here.
+{% endcomment %}
+<details class="report-box">
+  <summary>Report this {{ label }}</summary>
+  <form method="post" action="{{ action_url }}" class="report-form">
+    {% csrf_token %}
+    <fieldset>
+      <legend class="muted">{{ question }}</legend>
+      <label><input type="radio" name="category" value="spam"> Spam</label>
+      <label><input type="radio" name="category" value="other"> Something else</label>
+    </fieldset>
+    <label for="{{ id_prefix }}-report-comment">Anything else we should know? (optional)</label>
+    <textarea id="{{ id_prefix }}-report-comment" name="comment" rows="3" maxlength="500"></textarea>
+    <button type="submit" class="btn">Send report</button>
+  </form>
+</details>

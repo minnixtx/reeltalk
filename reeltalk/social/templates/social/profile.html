@@ -40,6 +40,21 @@
           <button type="submit" class="btn">Block</button>
         </form>
       {% endif %}
+      {% comment %}
+      Report a member (moderation increment 2). Kept out of the .btn family
+      on purpose: Block and Report are not the same kind of action, and the
+      lit crimson control is the strongest thing on this row. ``can_report``
+      and ``already_reported`` come from the same helper the post page uses,
+      so the two host pages cannot drift on who may report what. Nothing
+      renders here on one's own profile or for an anonymous visitor — both
+      are already outside the enclosing ``{% if %}``.
+      {% endcomment %}
+      {% if can_report and not already_reported %}
+        {% url 'report-user' profile_user.localname as report_action %}
+        {% include "moderation/_report_form.html" with action_url=report_action label="member" question="What is wrong with this member?" id_prefix="profile" %}
+      {% elif already_reported %}
+        <span class="muted report-filed-note">You have already reported this member.</span>
+      {% endif %}
     {% endif %}
   </div>
 </header>

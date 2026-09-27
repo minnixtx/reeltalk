@@ -3,15 +3,126 @@
 {% block title %}Moderation — ReelTalk{% endblock %}
 
 {% block content %}
-{# The moderation surface, increment 1: the gate and the empty state only. #}
-{# The report queue itself is increment 2, so nothing is listed here yet. #}
-{# No new CSS — every class below already exists (R101). #}
+{# The report queue (increment 2). One card per unresolved target, not one #}
+{# row per report — R107 says staff are told once per target, and three #}
+{# reports of the same post is one decision with three pieces of evidence. #}
+{# No new CSS: every class below already exists (R101). #}
 <section class="moderation-queue">
   <h1 class="pane-title">Moderation</h1>
-  <p class="pane-sub">Reports about posts and members will arrive here.</p>
-  <p class="muted">
-    Nothing to review yet. The report queue lands in the next increment — until
-    then there is nothing a member can report and nothing for a moderator to act on.
+  <p class="pane-sub">
+    {% if cards %}
+      {{ paginator.count }} unresolved report{{ paginator.count|pluralize }}
+      about {{ cards|length }} target{{ cards|length|pluralize }}, most recently reported first.
+    {% else %}
+      Nothing to review.
+    {% endif %}
   </p>
+
+  {% if cards %}
+  <ul class="review-list">
+    {% for card in cards %}
+      <li class="review moderation-card">
+        <div class="review-head">
+          <span class="review-author">
+            {% if card.target_status %}
+              Reported post by
+              <a href="{% url 'user-profile' card.target_user.localname %}">@{{ card.target_user.localname }}</a>
+            {% else %}
+              Reported member
+              <a href="{% url 'user-profile' card.target_user.localname %}">@{{ card.target_user.localname }}</a>
+            {% endif %}
+          </span>
+          {% if card.target_status %}
+            {# A link to the post itself, alongside the copy rendered below. #}
+            {# The inline copy is so a moderator can triage without leaving #}
+            {# the queue; this is so they can go read the thread when the #}
+            {# copy is not enough. Both are needed — one without the other #}
+            {# is either a queue you cannot decide from or a queue you #}
+            {# cannot investigate. #}
+            <a class="report-target-link" href="{% url 'status' card.target_status.id %}">view post</a>
+          {% endif %}
+          <span class="muted">
+            {{ card.reports|length }} report{{ card.reports|length|pluralize }}
+          </span>
+        </div>
+
+        {% comment %}
+        The reported content, inline. A moderator cannot decide without
+        reading the thing, and making them open the post in another tab is
+        how a queue gets dismissed unread. A status that has since been
+        soft-deleted has its content cleared by delete(), so the tombstone
+        says so rather than rendering an empty box that looks like the
+        reporter had nothing to point at.
+        {% endcomment %}
+        {% if card.target_status %}
+          <div class="review-body">
+            {% if card.target_status.deleted %}
+              <p class="muted">This post has since been deleted — its content is no longer here.</p>
+            {% else %}
+              {% if card.target_status.film %}
+                <p class="muted">
+                  on <a href="{% url 'film' card.target_status.film.id %}">{{ card.target_status.film.title }}</a>
+                </p>
+              {% endif %}
+              {{ card.target_status.content|safe }}
+            {% endif %}
+          </div>
+        {% else %}
+          <div class="review-body">
+            <p class="muted">
+              Reported as a member, not about one post.
+              {% if card.target_user.summary %}Their bio is on their profile.{% endif %}
+            </p>
+          </div>
+        {% endif %}
+
+        {% comment %}
+        Every reporter's own words. The category is the triage label and the
+        comment is the evidence; both are shown per reporter rather than
+        collapsed into the card, because "three people said spam" and "one
+        said spam and two said something else" are different pictures.
+        {% endcomment %}
+        <ul class="report-list">
+          {% for report in card.reports %}
+            <li class="report">
+              <span class="report-category">{{ report.get_category_display }}</span>
+              by <a href="{% url 'user-profile' report.reporter.localname %}">@{{ report.reporter.localname }}</a>
+              <span class="muted">{{ report.created|date:"Y-m-d H:i" }}</span>
+              {% if report.comment %}
+                <blockquote class="report-comment">{{ report.comment }}</blockquote>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+
+        {% comment %}
+        Dismiss resolves the whole card. The form posts one report id
+        because that is the handle the card was built from; the view acts
+        on the target behind it, so a three-report card needs one click.
+        {% endcomment %}
+        <form method="post" action="{% url 'moderation-dismiss' card.latest.id %}" class="dismiss-form">
+          {% csrf_token %}
+          <label for="note-{{ card.latest.id }}">Note (kept on the record)</label>
+          <input type="text" id="note-{{ card.latest.id }}" name="note" maxlength="500">
+          <button type="submit" class="btn">Dismiss</button>
+        </form>
+      </li>
+    {% endfor %}
+  </ul>
+
+  {% if page_obj.paginator.num_pages > 1 %}
+  <nav class="pager">
+    {% if page_obj.has_previous %}<a href="{{ page_query }}page={{ page_obj.previous_page_number }}">← Previous</a>{% endif %}
+    <span class="muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}<a href="{{ page_query }}page={{ page_obj.next_page_number }}">Next →</a>{% endif %}
+  </nav>
+  {% endif %}
+  {% else %}
+  <p class="muted">
+    No unresolved reports. When a member reports a post or another member, it
+    arrives here with the reported content inline.
+    {% if resolved_count %}{{ resolved_count }} report{{ resolved_count|pluralize }} previously handled.{% endif %}
+  </p>
+  {% endif %}
 </section>
 {% endblock %}

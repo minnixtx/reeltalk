@@ -50,6 +50,7 @@ from reeltalk.activitypub.mirrors import (
 )
 from reeltalk.core.models import Shelf, feed_entries, popular_genres, trending_films
 from reeltalk.core.utils import render_markdown
+from reeltalk.moderation.models import report_state
 from reeltalk.notifications.models import Notification, notify
 
 from .forms import ProfileForm, SignupForm
@@ -305,6 +306,14 @@ def user_profile(request, localname):
         # on one's own profile and for anonymous visitors).
         data["is_following"] = request.user.follows.filter(pk=user.pk).exists()
         data["is_blocked"] = request.user.blocks.filter(pk=user.pk).exists()
+        # The report control (moderation increment 2) rides the same gate as
+        # those two buttons. ``report_state`` is shared with the post page so
+        # the two host pages cannot drift on who may report what, and it
+        # returns R107's dedup state so the profile says "already reported"
+        # rather than offering a button that would quietly do nothing.
+        can_report, already_reported = report_state(request.user, target_user=user)
+        data["can_report"] = can_report
+        data["already_reported"] = already_reported
     if not user.local:
         # The home instance the mirror came from (the actor URL's netloc).
         data["home_instance"] = urlparse(user.actor_url).netloc
