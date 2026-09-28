@@ -1393,6 +1393,15 @@ Each is sized for one session and ends at a committed, deployed, verified checkp
 
 Notifications (`PLAN.md:58`, `§5`) — "you got a like / someone replied" needs the whole unbuilt `Notification` model, page and count badge. This feature will want it, but it is a separate piece of work, not a tail on these six.
 
+**PARKED — click the post body to open it (restated by the owner 2026-09-28, explicitly out of scope for the moderation arc).** The owner's original §2A ask was *"clicking on a post in the feed and having it open in its own page similar to how it works in Mastodon."* What shipped satisfies the navigation half but not the interaction half: `templates/home.html:36` puts the link on the **muted timestamp** (`title="Open this post"`) and nothing else. The review body, the row, and the author name are all inert — `review-author` is a plain `<span>`, so **a profile is not reachable from the feed at all**. Mastodon makes the post content itself the click target, which is what the owner wants here.
+
+This is the exact item **R84 deferred** — *"the link's visual affordance — whole row vs timestamp permalink vs title, and how a linked row should look different from a plain one — is not in increment 2. That is design work, which stays parked at R73"* — so it is a parked decision coming back, not a bug. Two things to settle when it is picked up, neither of which is styling-only:
+
+- **The click target must not swallow the controls inside the row.** A Like button and the reply count live inside the same row; making the row clickable means the button's click must not also navigate. Mastodon solves this by linking the content and leaving controls outside the link, not by putting a click handler on a container that holds buttons.
+- **The author name is a separate link, not part of this one.** Whether `review-author` points at the profile is a question R84 never addressed, and it is what makes a suspended account's profile reachable from the feed — relevant to the moderation surface, where the unsuspend control now lives on that profile.
+
+**How to apply:** when the R73 pass resumes, this is a feed-IA item as much as a visual one. Do not treat it as "add a hover colour."
+
 ### Feed interactions increment 1 — feed row identity (executed 2026-09-22, commit `9b78651`)
 
 Implements decision 1 and the storage half of decision 5. **No user-visible change, no template and no CSS in the diff, by design** — this is the prerequisite increments 2–6 all assume.
