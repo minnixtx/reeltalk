@@ -23,7 +23,7 @@ Two shapes are borrowed rather than invented:
 """
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -61,13 +61,16 @@ class Report(models.Model):
     class Action(models.TextChoices):
         """What the moderator did.
 
-        Only ``dismiss`` exists today because only dismiss is built — the
-        content delete is increment 3, suspension is 4 and the ban is 5.
+        Only ``dismiss`` and ``delete_status`` exist today because only
+        those two are built — suspension is increment 4 and the ban is 5.
         Each joins with its producer rather than ahead of it, so no value in
-        this enum names an action no code path can take.
+        this enum names an action no code path can take. A future session
+        reading this should add the value **with** the code that writes it,
+        not in anticipation of it.
         """
 
         DISMISS = "dismiss", "Dismissed"
+        DELETE_STATUS = "delete_status", "Deleted the post"
 
     # CASCADE both ways on the people. A report is a statement made by one
     # person about another; neither half survives the deletion of the
@@ -311,3 +314,53 @@ def dismiss_report(report, *, by_user, note=""):
     return Report.unresolved_for_target(report.target_key).update(
         resolved_at=now, resolved_by=by_user, action=Report.Action.DISMISS, note=note
     )
+
+
+def delete_reported_status(report, *, by_user, note=""):
+    """Delete the reported post and resolve its whole pile as deleted (R106/R107).
+
+    The mirror of :func:`dismiss_report` with a heavier first half. The
+    post goes through ``Status.delete()`` — R17 soft-delete — which is
+    already the filter at ~19 read sites, so the content vanishes from the
+    feed, the film page, the user tabs, the outbox and the thread walk with
+    **no new read-path code**. The row stays as a tombstone with its
+    identity intact, which is what lets the report keep pointing at it and
+    what keeps the ``Delete`` activity's wire identity stable — that id is
+    built from ``note_local_id(status)``, which soft-delete preserves.
+
+    The pile is resolved with the **same** target grouping as dismiss,
+    because the card the moderator acted on is the unit of work: three
+    members reporting one post is one deletion with three pieces of
+    evidence, not three deletions.
+
+    **What this deliberately does not do is decide who may delete.** The
+    R103 guard lives in :func:`reeltalk.moderation.decorators.can_act_on`
+    and is the caller's check, not this function's — one gate, one place,
+    and a helper that silently refused would make a view's own guard
+    untestable. Nor does it broadcast: the local write must commit before
+    any federation runs, and whether a broadcast is owed at all depends on
+    the author's locality, which is the caller's call. See
+    ``views.delete_status`` for both.
+
+    Returns ``(status, count)`` — the tombstoned status, and the number of
+    report rows resolved. ``status`` is ``None`` when the report was about
+    a member rather than a post, which is why the caller checks before
+    reaching for a broadcast.
+    """
+    status = report.target_status
+    if status is None:
+        return None, 0
+    now = timezone.now()
+    # Atomic so the audit record and the deletion cannot come apart: a
+    # report claiming a delete that did not happen is worse than no record,
+    # and a post gone with its report still open would re-present the card
+    # as an unresolved decision about content that is no longer here.
+    with transaction.atomic():
+        count = Report.unresolved_for_target(report.target_key).update(
+            resolved_at=now,
+            resolved_by=by_user,
+            action=Report.Action.DELETE_STATUS,
+            note=note,
+        )
+        status.delete()
+    return status, count

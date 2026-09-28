@@ -27,6 +27,16 @@ urlpatterns = [
         views.dismiss,
         name="moderation-dismiss",
     ),
+    # The one destructive action in this increment. Named for what it does
+    # to the *post* rather than for the report, so that when increment 4
+    # adds a suspend and increment 5 a ban — both aimed at the target
+    # account rather than at a post — the three read as distinct verbs on
+    # one card instead of three near-identical "act on this report" routes.
+    path(
+        "moderate/<int:report_id>/delete-status/",
+        views.delete_status,
+        name="moderation-delete-status",
+    ),
     # Members filing a report, from the reported object's own page.
     path(
         "status/<int:status_id>/report/",

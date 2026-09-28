@@ -1,8 +1,12 @@
-"""Who may moderate (increment 1, R100/R101).
+"""Who may moderate, and who may be acted on (R100/R101/R103).
 
-One definition of the moderator gate, so that every moderation route in this
-arc answers the question the same way and there is exactly one place to
-audit.
+One definition of each half of the permission model, so that every
+moderation route in this arc answers both questions the same way and there
+is exactly one place to audit. ``may_moderate`` is the gate on the surface;
+``can_act_on`` is the gate on the *target* of a destructive action. They
+are separate questions and are deliberately not collapsed into one
+predicate: passing the first says you may open the queue, and says nothing
+about whether the thing in front of you is yours to destroy.
 
 ``user_passes_test`` is deliberately NOT used, even though it looks like the
 obvious Django primitive for this. Its failure path is a redirect to the
@@ -40,6 +44,60 @@ def may_moderate(user):
         user.is_authenticated
         and (user.is_moderator or user.is_staff or user.is_superuser)
     )
+
+
+def can_act_on(actor, target) -> bool:
+    """R103, as amended by the owner on 2026-09-27 (R103b).
+
+    This instance has three kinds of account and no others:
+
+    * **the admin** — ``is_superuser``.
+    * **a moderator** — ``is_moderator``.
+    * **a regular user** — neither.
+
+    ``is_staff`` is not a fourth kind. It is Django's door to ``/admin/``,
+    and R100 keeps a moderator's copy of it ``False`` precisely so a
+    moderator never reaches admin chrome. What it does decide here is which
+    side of the line an account sits on: an account holding the admin door
+    is on the admin's side, so a moderator never touches it. That is the
+    narrowest reading of "only a regular user", and it needs no new role to
+    express.
+
+    The rule reads the **actor**, not the surface they are standing on, so
+    one ``/moderate/`` page serves both the admin and a moderator without
+    a second page carrying a second rule. Hiding the control in a template
+    is not the guarantee; this is what the action itself calls.
+
+    * **The admin** may act on anyone, including another moderator and
+      including themselves. Checked *before* every shield, so the ordering
+      here is load-bearing and not incidental.
+    * **A moderator** may act only on a **regular user**, and not on
+      themselves. Never on the admin — that is the escalation path R100
+      exists to keep absent rather than merely checked. Never on another
+      moderator — peers do not moderate peers.
+
+    The self check is **defense-in-depth, not a load-bearing clause.** Any
+    actor who reaches it already holds at least one of the three flags in
+    the shield below, so the shield refuses them anyway; deleting the self
+    check turns no test red, and that is the honest description rather than
+    a claim of necessity. It stays because ``may_moderate`` and this
+    function are edited independently, and a future change to what a
+    moderator carries should not silently let one delete their own post.
+
+    The same rule covers every destructive action in this arc, content or
+    account: deleting a post, suspending, banning. A moderator's reach is
+    "regular users who are not me", and it does not widen for the heavier
+    actions — if anything the heavier ones are where the line matters more.
+    """
+    if not actor.is_authenticated or target is None:
+        return False
+    if actor.is_superuser:
+        return True
+    if not may_moderate(actor):
+        return False
+    if actor.pk == target.pk:
+        return False
+    return not (target.is_superuser or target.is_moderator or target.is_staff)
 
 
 def moderator_required(view_func):

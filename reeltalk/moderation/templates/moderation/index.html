@@ -96,15 +96,41 @@
         </ul>
 
         {% comment %}
-        Dismiss resolves the whole card. The form posts one report id
-        because that is the handle the card was built from; the view acts
-        on the target behind it, so a three-report card needs one click.
+        One form, two verbs. The note field is shared because this is one
+        decision about one card: the moderator writes the reason once, then
+        chooses what to do with it. The delete button overrides the form's
+        action with the HTML5 ``formaction`` attribute rather than the form
+        being split in two — two forms would mean two note inputs and two
+        chances of filling in the wrong one.
+
+        ``.btn`` moves to **delete** and Dismiss becomes a plain button.
+        §2D names this trap directly: ``.btn`` *is* the lit crimson control,
+        so two actions of different severity rendering identically is wrong,
+        and the destructive one takes the lit control while the lighter one
+        takes the plain one the rest of the site uses. The parked R73 pass
+        styles both properly.
+
+        ``can_delete`` is computed by the view from ``can_act_on`` (R103) —
+        the template reads a boolean and does not decide a permission. The
+        route enforces the same function independently, so a hand-built POST
+        is refused even though no button was drawn.
         {% endcomment %}
         <form method="post" action="{% url 'moderation-dismiss' card.latest.id %}" class="dismiss-form">
           {% csrf_token %}
           <label for="note-{{ card.latest.id }}">Note (kept on the record)</label>
           <input type="text" id="note-{{ card.latest.id }}" name="note" maxlength="500">
-          <button type="submit" class="btn">Dismiss</button>
+          <button type="submit">Dismiss</button>
+          {% if card.can_delete %}
+            <button type="submit" class="btn" formaction="{% url 'moderation-delete-status' card.latest.id %}">Delete post</button>
+            {% if not card.target_user.local %}
+              {# Said plainly because it is the difference between a #}
+              {# moderator thinking they removed a post from the network #}
+              {# and one who knows they removed it from here. We cannot #}
+              {# sign a Delete as an account we do not own, so a remote #}
+              {# author's post is removed from this instance only. #}
+              <span class="muted">From another server — this removes it here only.</span>
+            {% endif %}
+          {% endif %}
         </form>
       </li>
     {% endfor %}
