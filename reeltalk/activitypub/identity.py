@@ -225,3 +225,48 @@ def actor_update_activity(user, request) -> dict:
         "actor": absolute_uri(actor_path(user.localname)),
         "object": person_document(user, request),
     }
+
+
+def person_delete_activity(user) -> dict:
+    """A ``Delete`` claiming this actor itself, for the ban broadcast (R102).
+
+    Shaped against what the peer's handler actually accepts rather than
+    against what an ``Update`` looks like, because the two are not
+    interchangeable and getting it wrong fails silently. Mastodon's
+    ``ActivityPub::Activity::Delete#perform`` opens with::
+
+        return delete_person if @account.uri == object_uri
+
+    where ``@account`` is the **signature-verified** sender. Three
+    consequences, each of which this shape satisfies:
+
+    * **The ``object`` is the bare actor URI, not the Person document.**
+      A peer compares the object's URI against the signer's; an embedded
+      document would not match and the activity would fall through to the
+      status-delete branch and find nothing.
+    * **The actor must be the banned user, and the signature must be theirs.**
+      A ``Delete(Person)`` signed by the moderator about someone else does
+      not delete that person — it fails the ``==`` test and is a no-op. Same
+      rule increment 3 pinned for the status delete and 4b for the actor
+      update: the identity on the wire is the actor the statement describes,
+      never whoever pressed the button. It follows that a *mirror* cannot be
+      banned by us at all — we hold no private key for another instance's
+      identity.
+    * **The activity id is deterministic**, ``<actor>#delete``, matching
+      Mastodon's ``DeleteActorSerializer``. A ban is a single fact about one
+      actor rather than a stream of distinct events, so a replayed delivery
+      dedupes on the receiving side instead of arriving as new news.
+
+    ``to`` names the public collection because the statement is about a
+    public actor and its removal is not addressed to anyone in particular —
+    again matching the peer's own serializer, which emits the same.
+    """
+    actor = absolute_uri(actor_path(user.localname))
+    return {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "id": f"{actor}#delete",
+        "type": "Delete",
+        "actor": actor,
+        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "object": actor,
+    }

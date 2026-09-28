@@ -31,6 +31,7 @@ from django.views.decorators.http import require_POST
 
 from reeltalk.activitypub.broadcast import (
     broadcast_actor_update,
+    broadcast_person_delete,
     broadcast_status_delete,
 )
 from reeltalk.core.models import Status
@@ -38,12 +39,14 @@ from reeltalk.moderation.decorators import can_act_on, moderator_required
 from reeltalk.moderation.forms import ReportForm
 from reeltalk.moderation.models import (
     Report,
+    ban_reported_member,
     delete_reported_status,
     dismiss_report,
     file_report,
     record_federation_outcome,
     suspend_reported_member,
 )
+from reeltalk.social.models import User
 from reeltalk.social.views import _resolve_profile_user
 
 # Cards, not rows (R107: staff are told once per unresolved *target*).
@@ -83,8 +86,38 @@ def index(request):
             "page_obj": page_obj,
             "page_query": "?",
             "resolved_count": Report.objects.filter(resolved_at__isnull=False).count(),
+            "banned_accounts": banned_accounts(request.user),
         },
     )
+
+
+def banned_accounts(actor):
+    """Every banned local account this actor may lift, most recent first.
+
+    The lift surface, and it exists because the ban took the other one away.
+    A suspension keeps a public profile that explains itself, so 4b put the
+    unsuspend control there. A ban deliberately leaves **no** public page —
+    the profile is ``410 Gone``, which is the whole point of the action,
+    not an oversight. That means the only surface still showing a banned
+    account is a moderator's, and without a surface there is no lift: an
+    action nobody can see is an action nobody can undo.
+
+    Filtered by ``can_act_on`` here rather than in the template, so a
+    moderator sees exactly the bans they may lift and no others, and the
+    route re-checks the same function independently. A list that showed a
+    ban the viewer cannot lift would be a control that 403s, which is the
+    pattern this arc keeps refusing.
+
+    Local accounts only. A remote mirror cannot be banned by us at all, so
+    there is never a remote row here to wonder about.
+    """
+    return [
+        user
+        for user in User.objects.filter(banned_at__isnull=False, local=True).order_by(
+            "-banned_at"
+        )
+        if can_act_on(actor, user)
+    ]
 
 
 def queue_cards(actor):
@@ -144,6 +177,17 @@ def queue_cards(actor):
                 and can_act_on(actor, target),
                 "can_suspend": target.local
                 and target.suspended_at is None
+                and can_act_on(actor, target),
+                # Ban sits beside suspend rather than above it, and the two
+                # conditions differ in exactly one column on purpose. Ban
+                # requires the same thing suspend requires — a local account
+                # this actor may act on, not already under that state — and
+                # reads ``banned_at`` for the last part rather than
+                # ``suspended_at``. A banned account is not "more suspended",
+                # and a control keyed on the wrong column would offer to ban
+                # someone already banned while hiding the ban itself.
+                "can_ban": target.local
+                and target.banned_at is None
                 and can_act_on(actor, target),
             }
             cards[report.target_key] = card
@@ -395,6 +439,161 @@ def unsuspend(request, localname):
     else:
         messages.success(request, f"@{target.localname} is no longer suspended.")
     return redirect("user-profile", localname=target.localname)
+
+
+@moderator_required
+@require_POST
+def ban(request, report_id):
+    """Ban the reported member from the queue (increment 5, R102/R103b).
+
+    The heaviest thing this instance does to a person, and it reaches it
+    through the *same two gates* as the delete and the suspend rather than a
+    third. ``moderator_required`` for the surface; ``can_act_on`` for the
+    target. R103b's reach — a moderator acts only on a regular user who is
+    not them — does not widen for the heavier verb, and does not narrow either:
+    on the owner's 2026-09-28 call a moderator may both impose and lift a
+    ban, so the guard that permits the click is the same one that permits the
+    undo, and neither verb gets a private rule.
+
+    **What the moderator is told before clicking, and why it is not scare
+    text.** A ban removes content, and the removal is real: ``Status.delete()``
+    is R17 soft-delete, which clears ``content`` and ``raw_content`` on the
+    way to becoming a tombstone. Lifting the ban restores the account, the
+    localname and the actor document — **it does not restore the writing.**
+    That is not this increment being pessimistic; it is what the instance's
+    delete semantics are, and the author's own delete behaves identically.
+    The alternative would be a private content backup attached to the ban,
+    which is a different product. So the disclosure says it plainly, in the
+    one place it can be read before the click rather than after.
+
+    **A resolved report is not a live ban handle**, exactly as with the delete
+    and the suspend. A bookmark from last quarter must not be able to re-fire
+    a decision that was already made about it.
+
+    **Remote targets are refused.** R102 defines ban as an action on an
+    account we own. We cannot ban a remote account at its home instance, and
+    we could not sign a ``Delete(Person)`` for one even if we tried — a
+    mirror holds no private key, and a peer would rightly refuse a statement
+    about their user signed by somebody else. The effects available against a
+    remote target are *remove their content here* and *refuse them here*,
+    which is increment 6's domain block.
+
+    **The broadcast is loud and non-blocking (R108).** The ban commits before
+    any network call, so a dead peer cannot undo the decision; but a ban that
+    did not federate is written into the report's audit line and shown to the
+    moderator, because "this account is gone here and their followers still
+    have every word of it" is the fact that must not be quiet.
+    """
+    report = get_object_or_404(
+        Report.objects.select_related("target_user", "target_status"), id=report_id
+    )
+    if report.resolved_at is not None:
+        raise Http404("This report has already been resolved.")
+    target = report.target_user
+    if not can_act_on(request.user, target):
+        raise PermissionDenied
+    if not target.local:
+        raise Http404(
+            "Ban applies to accounts on this instance; remote accounts "
+            "are handled by the domain block."
+        )
+
+    note = request.POST.get("note", "").strip()
+    # The local write — the report pile, the content removal, the account
+    # state — commits inside the helper, before any network call runs, so a
+    # dead follower can never lose the ban or the audit record.
+    _, banned, count, removed = ban_reported_member(
+        report, by_user=request.user, note=note
+    )
+    if not banned:
+        messages.info(request, f"@{target.localname} was already banned.")
+        return redirect("moderation")
+
+    failures = broadcast_person_delete(request, target)
+    if failures:
+        hosts = ", ".join(
+            sorted({urlparse(f.inbox).netloc or f.inbox for f in failures})
+        )
+        record_federation_outcome(
+            report,
+            f"[federation] {len(failures)} remote recipient(s) not told about "
+            f"the ban: {hosts}",
+        )
+        messages.warning(
+            request,
+            f"@{target.localname} is banned here, but {len(failures)} "
+            f"remote {'server was' if len(failures) == 1 else 'servers were'} "
+            f"not told ({hosts}). Their content may still be live there.",
+        )
+    elif count > 1:
+        messages.success(
+            request,
+            f"@{target.localname} banned; {count} reports about them resolved "
+            f"and {len(removed)} post{'' if len(removed) == 1 else 's'} removed.",
+        )
+    else:
+        messages.success(
+            request,
+            f"@{target.localname} banned; "
+            f"{len(removed)} post{'' if len(removed) == 1 else 's'} removed.",
+        )
+    return redirect("moderation")
+
+
+@moderator_required
+@require_POST
+def unban(request, localname):
+    """Lift a ban from the moderation queue (R102 as amended 2026-09-28).
+
+    Not on the profile, and the reason is the ban's own design. 4b put the
+    unsuspend control on the profile because R102 requires a suspended
+    account to keep a visible page that explains itself — the lift lives on
+    the surface that still shows the account. A banned account deliberately
+    has **no** public page: the profile is ``410 Gone``, which is the point
+    of the ban and not an oversight to route around. So the surface that
+    still shows a banned account is the moderator's, and the control lives
+    on ``/moderate/``.
+
+    Same guard as the ban, unchanged, which is the whole shape of the
+    owner's call: whoever may impose it may lift it, and nobody else may do
+    either. A moderator cannot lift a ban on an account they could never
+    have banned.
+
+    **No note field, and it is the same gap unsuspend left.** R106 wants a
+    note on every action, but the record this arc keeps is the ``Report``
+    row, and by now that row is closed and drained. Appending to it would
+    rewrite a closed decision rather than add a new one. The honest fix is a
+    separate audit surface, which R106 declined.
+
+    **Nothing is broadcast, and there is nothing to broadcast.** A
+    ``Delete(Person)`` has no inverse. Re-announcing a previously-deleted
+    actor with an ``Update`` is not something any peer is obliged to handle
+    sanely, and a wrong guess here tells the network something about an
+    identity we already told it was dead. What restores federation is
+    ordinary discovery: the actor URL answers ``200`` again, so a peer that
+    is asked for it — by a search, or by someone re-following — gets the
+    live document and rebuilds its mirror. The follow graph on their side is
+    not restored, because that was destroyed by the delete and we cannot
+    reach across to re-create it.
+    """
+    target = _resolve_profile_user(localname)
+    if target is None:
+        raise Http404("No such user")
+    if not can_act_on(request.user, target):
+        raise PermissionDenied
+    if target.banned_at is None:
+        messages.info(request, f"@{target.localname} is not banned.")
+        return redirect("moderation")
+
+    target.unban()
+    messages.success(
+        request,
+        f"@{target.localname}'s ban is lifted — they can sign in again. "
+        "Their removed posts do not come back, and remote servers that "
+        "processed the delete will only learn they exist again by being "
+        "shown: the account is re-followable, not re-followed.",
+    )
+    return redirect("moderation")
 
 
 @login_required

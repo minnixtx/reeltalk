@@ -157,9 +157,20 @@ def notify(recipient, actor, kind, status=None):
       recording a suspended actor tells a recipient that somebody did a
       thing that is no longer visible anywhere on this instance.
 
-    A suspended actor's *existing* ledger rows are not touched, for the
-    reason R102 gives for everything else in suspend: hiding is not
-    deleting, and unsuspend restores the ledger exactly as it was.
+    * **No notification involving a banned account, on either side**
+      (R102). Checked as its own clause rather than folded into the
+      suspension line below, because the two states are independent facts
+      and a combined test would let a mutation to either half pass while the
+      other was broken. The reasoning is the same shape with a harder edge:
+      a banned recipient has no reachable profile and no sign-in, so a
+      notification they can never act on is pure dead weight, and a banned
+      actor has had their content *removed* — not hidden — so the ledger
+      would be asserting that somebody did a thing whose evidence no longer
+      exists anywhere.
+
+    Neither a suspend nor a ban touches *existing* ledger rows: a suspend
+    hides rather than deletes, so unsuspend restores the ledger exactly as
+    it was, and a ban removes content — the ledger is not content.
     """
     if recipient.pk == actor.pk:
         return None
@@ -168,6 +179,8 @@ def notify(recipient, actor, kind, status=None):
     if recipient.blocks.filter(pk=actor.pk).exists():
         return None
     if recipient.suspended_at is not None or actor.suspended_at is not None:
+        return None
+    if recipient.banned_at is not None or actor.banned_at is not None:
         return None
     return Notification.objects.create(
         recipient=recipient, actor=actor, kind=kind, status=status

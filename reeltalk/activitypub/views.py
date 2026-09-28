@@ -16,7 +16,7 @@ document), verify the signature, then dedup + dispatch in ``inbox``.
 import json
 
 from django.conf import settings
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, HttpResponseGone, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 
@@ -62,6 +62,28 @@ def _local_user(localname: str) -> "User | None":
     ).first()
 
 
+def _banned_gone(user):
+    """``410 Gone`` for a banned actor's endpoint, ``None`` otherwise.
+
+    A helper rather than five copies of the same branch, but the reason it is
+    a real 410 and not the 404 these views already return for a missing user
+    belongs on each caller. For a peer, the two codes mean different things:
+    404 invites a retry and leaves the actor's status undetermined, while 410
+    is the tombstone — the actor was here and is permanently gone. That is the
+    statement ``Delete(Person)`` already made, and an endpoint that answers
+    404 after the delete would contradict it.
+
+    Suspension deliberately does **not** use this. A suspended account keeps
+    its 404-on-endpoints and its fetchable Person document carrying
+    ``suspended: true``, because a suspend is reversible and a peer has to
+    be able to resolve the actor id our ``Update(Person)`` points at. Ban
+    removes the document; suspend flags it. Two states, two wire behaviour.
+    """
+    if user.banned_at is not None:
+        return HttpResponseGone("This account has been removed.")
+    return None
+
+
 @require_GET
 def webfinger(request):
     """RFC 6454: ``?resource=acct:<localname>@<domain>`` → JRD document."""
@@ -75,6 +97,9 @@ def webfinger(request):
     user = _local_user(localname)
     if user is None:
         return HttpResponse(status=404)
+    gone = _banned_gone(user)
+    if gone is not None:
+        return gone
     actor = absolute_uri(actor_path(user.localname))
     doc = {
         "subject": f"acct:{user.localname}@{settings.DOMAIN}",
@@ -160,6 +185,9 @@ def outbox(request, localname):
     user = _local_user(localname)
     if user is None:
         return HttpResponse(status=404)
+    gone = _banned_gone(user)
+    if gone is not None:
+        return gone
     collection_url = absolute_uri(outbox_path(user.localname))
     statuses = (
         Status.objects.filter(user=user, deleted=False, local=True)
@@ -214,8 +242,21 @@ def _person_collection(request, user, collection_url, related):
     suspended disappears from everyone they follow's ``followers`` array
     while their own profile stays fetchable as a Person document carrying
     ``suspended: true``.
+
+    A **banned** member is dropped by the same clause and for the same
+    reason, from a different column. They are already gone from their own
+    endpoints, so the only place they could still surface is inside somebody
+    else's collection — a banned follower still appearing in the
+    ``followers`` array of everyone they followed, which is a public list of
+    a relationship to an account that no longer exists. Listing both columns
+    here rather than folding ban into suspension is the point: the two states
+    are independent, and a collection that hid only one would leak the other.
     """
-    persons = list(related.all().filter(suspended_at__isnull=True).order_by("id"))
+    persons = list(
+        related.all()
+        .filter(suspended_at__isnull=True, banned_at__isnull=True)
+        .order_by("id")
+    )
 
     def items_by_offset(start, count):
         page = persons[start : start + count]
@@ -230,6 +271,9 @@ def followers(request, localname):
     user = _local_user(localname)
     if user is None:
         return HttpResponse(status=404)
+    gone = _banned_gone(user)
+    if gone is not None:
+        return gone
     url = absolute_uri(followers_path(user.localname))
     return _person_collection(request, user, url, user.followers.all())
 
@@ -240,6 +284,9 @@ def following(request, localname):
     user = _local_user(localname)
     if user is None:
         return HttpResponse(status=404)
+    gone = _banned_gone(user)
+    if gone is not None:
+        return gone
     url = absolute_uri(following_path(user.localname))
     return _person_collection(request, user, url, user.follows.all())
 
@@ -290,8 +337,12 @@ def _inbox_response(request):
 @csrf_exempt
 def inbox(request, localname):
     """The user's per-actor inbox — the target of inbound activity delivery."""
-    if _local_user(localname) is None:
+    user = _local_user(localname)
+    if user is None:
         return HttpResponse(status=404)
+    gone = _banned_gone(user)
+    if gone is not None:
+        return gone
     return _inbox_response(request)
 
 

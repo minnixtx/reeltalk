@@ -47,6 +47,15 @@ urlpatterns = [
         views.suspend,
         name="moderation-suspend",
     ),
+    # Increment 5's heaviest verb, aimed at the same target account. Its
+    # own trailing segment for the same reason suspend has one: three
+    # distinct verbs on one card read better than three near-identical
+    # "act on this report" routes.
+    path(
+        "moderate/<int:report_id>/ban/",
+        views.ban,
+        name="moderation-ban",
+    ),
     # Members filing a report, from the reported object's own page.
     path(
         "status/<int:status_id>/report/",
@@ -66,5 +75,16 @@ urlpatterns = [
         "user/<str:localname>/unsuspend/",
         views.unsuspend,
         name="user-unsuspend",
+    ),
+    # Lifting a ban lives under /moderate/, not in the member's URL space,
+    # and the asymmetry with unsuspend above is forced rather than chosen.
+    # A suspended account keeps a public profile that explains itself, so
+    # its lift sits on that page. A banned account has no public page at
+    # all — the profile is 410 Gone — so the only surface that still shows
+    # it is the moderator's. See ``views.unban``.
+    path(
+        "moderate/<str:localname>/unban/",
+        views.unban,
+        name="moderation-unban",
     ),
 ]

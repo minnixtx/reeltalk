@@ -169,6 +169,45 @@
               <button type="submit" class="btn" formaction="{% url 'moderation-suspend' card.latest.id %}">Suspend account</button>
             </details>
           {% endif %}
+
+          {% comment %}
+          Ban (moderation increment 5), in its own collapsed disclosure for
+          the same reason suspend is in one: ``.btn`` is the lit crimson
+          control, so a third lit button rendered beside "Delete post" would
+          make three different severities look identical. Collapsed by
+          default, nothing lit is on screen until someone opens a drawer on
+          purpose, and the interaction cost stays ordered — delete is one
+          click, suspend is two, ban is two with a warning that says the
+          word "gone" in it. No CSS added; R73 stays parked.
+
+          The warning carries the one fact that is not obvious from the word
+          "ban" and that cannot be undone afterwards: the writing is
+          destroyed. A suspend hides content and a lift brings it back; a
+          ban removes it, and lifting the ban restores the *person*, not
+          what they wrote. That is not a scare tactic — it is the honest
+          difference between the two drawers, and the moderator is the only
+          person who will ever be able to explain the gap, so they are the
+          one who has to know before they click rather than after.
+          {% endcomment %}
+          {% if card.can_ban %}
+            <details class="ban-disclosure">
+              <summary>Ban this account</summary>
+              <p class="muted">
+                Banning <strong>@{{ card.target_user.localname }}</strong>
+                removes their posts, reviews and replies from this instance
+                and tells the servers that hold copies to drop them. Their
+                profile stops existing, and their name stays reserved so
+                nobody else can take it.
+              </p>
+              <p class="muted">
+                <strong>This does not bring back their writing.</strong>
+                Lifting a ban later restores the account and lets them sign
+                in again, but the posts stay removed — they are gone the same
+                way an author's own delete is gone.
+              </p>
+              <button type="submit" class="btn" formaction="{% url 'moderation-ban' card.latest.id %}">Ban account</button>
+            </details>
+          {% endif %}
         </form>
       </li>
     {% endfor %}
@@ -187,6 +226,58 @@
     arrives here with the reported content inline.
     {% if resolved_count %}{{ resolved_count }} report{{ resolved_count|pluralize }} previously handled.{% endif %}
   </p>
+  {% endif %}
+
+  {% comment %}
+  Banned accounts — the lift. This section exists because the ban destroyed
+  the surface that would otherwise have held it.
+
+  A suspend keeps a public profile that explains itself, so increment 4b
+  put the unsuspend control there: the lift belongs on the surface that
+  still shows the account. A ban deliberately leaves no public page at all
+  — the profile answers 410 Gone — so nothing public shows a banned
+  account, and an action nobody can see is an action nobody can undo. The
+  moderator's own queue is the only surface left that can hold it.
+
+  It sits outside the ``{% if cards %}`` block on purpose: a drained queue
+  with a live ban is exactly the moment the lift is needed, so hiding it
+  behind "nothing to review" would defeat the section.
+
+  The lift is a plain button, not ``.btn``. R96 reserves the lit crimson
+  control for destructive actions, and this one puts a person back. Note
+  also that the list is already filtered by ``can_act_on`` in the view, so
+  every row here is liftable by whoever is looking at it — there is no
+  "you can see this but not touch it" state to explain.
+  {% endcomment %}
+  {% if banned_accounts %}
+  <section class="banned-accounts">
+    <h2 class="pane-title">Banned accounts</h2>
+    <p class="pane-sub">
+      {{ banned_accounts|length }} banned account{{ banned_accounts|length|pluralize }}
+      you can lift. Lifting restores the sign-in, the profile and the name;
+      it does not restore their removed posts, and it does not re-follow
+      them on servers that processed the delete.
+    </p>
+    <ul class="review-list">
+      {% for banned_user in banned_accounts %}
+        <li class="review banned-account">
+          <div class="review-head">
+            <span class="review-author">@{{ banned_user.localname }}</span>
+            <span class="muted">banned {{ banned_user.banned_at|date:"Y-m-d H:i" }}</span>
+          </div>
+          {% if banned_user.ban_reason %}
+            <div class="review-body">
+              <blockquote class="report-comment">{{ banned_user.ban_reason }}</blockquote>
+            </div>
+          {% endif %}
+          <form method="post" action="{% url 'moderation-unban' banned_user.localname %}">
+            {% csrf_token %}
+            <button type="submit">Lift this ban</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
   {% endif %}
 </section>
 {% endblock %}

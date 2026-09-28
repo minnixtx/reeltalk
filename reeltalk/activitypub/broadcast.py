@@ -31,8 +31,15 @@ own data is not a social act).
 
 import requests
 
+from reeltalk.core.models import Status
+
 from .delivery import DeliveryFailure, deliver_activity, inbox_for
-from .identity import absolute_uri, actor_path, actor_update_activity
+from .identity import (
+    absolute_uri,
+    actor_path,
+    actor_update_activity,
+    person_delete_activity,
+)
 from .objects import (
     create_activity,
     delete_activity,
@@ -212,6 +219,90 @@ def broadcast_actor_update(request, user) -> list[DeliveryFailure]:
     moderator, exactly as the delete view does.
     """
     return _deliver_to_followers(request, user, actor_update_activity(user, request))
+
+
+def person_delete_audience(user) -> list:
+    """Every remote account that ever received this actor's content.
+
+    The audience question §2D flags as the hard part of a Person delete, and
+    the reason the status helper cannot be reused. ``broadcast_status_delete``
+    addresses the author's followers, which is right for a post: the people
+    who subscribed to it. A Person delete has to reach **everyone who holds a
+    copy of anything this actor sent them**, and three groups received that
+    actor's content without following them:
+
+    * **Remote users the actor mentioned.** A mention is an address, and
+      ``broadcast_status_create`` delivered to them precisely so the mention
+      arrived. They hold the Note and do not follow the author, so the
+      follower list would never reach them.
+    * **Remote authors the actor replied to.** ``broadcast_reply`` delivers
+      to the parent author whether or not they follow the replier — that is
+      the whole point of threading — so a stranger who was answered holds a
+      reply from this actor in their thread.
+    * **The actor's own remote followers**, who need it most.
+
+    Mastodon solves the same problem bluntly: ``Account.inboxes`` minus the
+    followers, i.e. every account this instance knows about, at low priority.
+    That is a reasonable hammer, but here the three sets *are* enumerable —
+    the mention rows and the reply edges are in our own tables — so we name
+    them instead of fanning out to every inbox on the box. Our deliveries are
+    synchronous with no retry queue, so the difference between "everyone who
+    got this actor's content" and "every account we have ever seen" is the
+    difference between a request that finishes and one that does not.
+
+    Deliberately **not** filtered on ``deleted``. A status this actor deleted
+    months ago is still a status those recipients hold, and telling them the
+    actor is gone is exactly as true now as it would have been then. Scoping
+    to live statuses would under-deliver the one message that matters.
+
+    Returns remote users only. A local member has no inbox and reads the
+    local rows anyway, so they are not a delivery target for anything.
+    """
+    recipient_ids: set[int] = set(user.followers.values_list("id", flat=True))
+    own_statuses = Status.objects.filter(user=user)
+    recipient_ids.update(own_statuses.values_list("mentions__user", flat=True))
+    recipient_ids.update(
+        own_statuses.filter(reply_parent__isnull=False).values_list(
+            "reply_parent__user", flat=True
+        )
+    )
+    recipient_ids.discard(user.pk)
+    recipient_ids.discard(None)
+    if not recipient_ids:
+        return []
+    # ``type(user).objects`` rather than an imported ``User``: social.models
+    # already imports activitypub.crypto at module level, so a model import
+    # back the other way here is the kind of edge that turns into a cycle the
+    # next time either side grows an import.
+    return list(type(user).objects.filter(pk__in=recipient_ids, local=False))
+
+
+def broadcast_person_delete(request, user, audience=None) -> list[DeliveryFailure]:
+    """Tell the network that this actor is gone (R102, ban).
+
+    One activity, not one per status. A peer that accepts a ``Delete(Person)``
+    removes its mirror of the account *and everything hanging off it*, so
+    the per-status deletes a naive reading of "content removed" suggests
+    would multiply the fan-out by the target's status count to say something
+    the person delete already says. With synchronous delivery and no retry
+    queue, ``statuses x followers`` POSTs inside one moderator request is
+    not a shape that survives a member with a few hundred reviews.
+
+    **Signed as the banned user, never the moderator** — see
+    :func:`~reeltalk.activitypub.identity.person_delete_activity` for why
+    that is a correctness requirement rather than a convention. A mirror
+    cannot be broadcast at all, which is a second reason ban stays a
+    local-account action.
+
+    ``audience`` lets a caller pass a pre-computed set
+    (:func:`person_delete_audience`); it defaults to computing it, because
+    the common case is exactly that set and a caller who forgets it should
+    get the right answer rather than a silent empty send.
+    """
+    activity = person_delete_activity(user)
+    if audience is None:
+        audience = person_delete_audience(user)
+    return _deliver_signed(request, user, activity, audience)
 
 
 def broadcast_like(request, status, user, *, liked: bool) -> None:

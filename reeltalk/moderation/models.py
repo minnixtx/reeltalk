@@ -27,6 +27,8 @@ from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from reeltalk.core.models import Status
+
 
 class Report(models.Model):
     """One member's report about one status or one account (R98).
@@ -82,6 +84,7 @@ class Report(models.Model):
         DISMISS = "dismiss", "Dismissed"
         DELETE_STATUS = "delete_status", "Deleted the post"
         SUSPEND = "suspend", "Suspended the account"
+        BAN = "ban", "Banned the account"
 
     # CASCADE both ways on the people. A report is a statement made by one
     # person about another; neither half survives the deletion of the
@@ -419,6 +422,71 @@ def suspend_reported_member(report, *, by_user, note=""):
         )
         suspended = target.suspend(reason=note)
     return target, suspended, count
+
+
+def ban_reported_member(report, *, by_user, note=""):
+    """Ban the reported member: remove their content, resolve the pile (R102/R106).
+
+    The fourth member of the family beside dismiss, delete and suspend, and
+    it keeps their shape on purpose — one helper, one transaction, the whole
+    target pile resolved with who/when/what/note on every row. A ban that
+    closed only the clicked row would put the same card straight back on the
+    queue.
+
+    **This is the one action that removes content rather than hiding it, and
+    the difference is the whole point of R102.** Suspend touches no
+    ``Status`` row at all; ban soft-deletes every live one the target owns.
+    Because ``deleted=False`` is already the filter at roughly nineteen read
+    sites, that single write takes the reviews, comments, replies and notes
+    out of the feed, the film pages, the user tabs, the outbox and the
+    thread walk with no new read-path code — which is exactly why ban must
+    NOT borrow the suspension filters. If it did, the action would hide what
+    it promised to remove, and nothing would announce it.
+
+    **The content does not come back.** ``Status.delete()`` is R17
+    soft-delete and clears ``content`` and ``raw_content`` on the way to
+    becoming a tombstone. An unban restores the account, the localname and
+    the actor document, but the writing is destroyed. That is inherent to
+    the delete semantics this instance uses everywhere — the author's own
+    delete does the same thing — so the honest place to disclose it is the
+    confirmation the moderator reads before clicking, not a restore path
+    this increment does not have.
+
+    **The removal itself lives in :meth:`User.ban`, not here.** This helper
+    resolves the pile and calls the one writer of the ban state; that writer
+    owns the soft-delete. The split is deliberate but so is the direction —
+    a model method that reaches into another app's tables for one caller is
+    the wrong shape, whereas a state transition that leaves out the thing
+    the state *means* is worse. See the note on ``User.ban`` for how the
+    second of those was found.
+
+    **Does not decide who may ban** (that is ``can_act_on``, plus the
+    moderator-may-ban call the route applies) and **does not broadcast** —
+    the local write must commit before any network call, and only a local
+    account can be signed for. See ``views.ban`` for both.
+
+    Returns ``(target, banned, count, removed)`` — the account, whether this
+    call is what banned it (``False`` on a replay), the number of report
+    rows resolved, and the statuses this action tombstoned (empty on a
+    replay, because this call tombstoned nothing).
+    """
+    target = report.target_user
+    now = timezone.now()
+    with transaction.atomic():
+        count = Report.unresolved_for_target(report.target_key).update(
+            resolved_at=now,
+            resolved_by=by_user,
+            action=Report.Action.BAN,
+            note=note,
+        )
+        # Captured before the call, because ``User.ban()`` is what removes
+        # the content and after it there is nothing left to enumerate. On a
+        # replay nothing was removed by this call, so reporting the
+        # pre-existing live statuses as "removed" would be a lie — hence
+        # the list is cleared rather than returned.
+        live_before = list(Status.objects.filter(user=target, deleted=False))
+        banned = target.ban(reason=note)
+    return target, banned, count, (live_before if banned else [])
 
 
 def record_federation_outcome(report, line: str) -> int:

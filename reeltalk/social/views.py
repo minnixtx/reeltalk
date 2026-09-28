@@ -31,7 +31,12 @@ from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.db import transaction
-from django.http import Http404, HttpResponse, JsonResponse
+from django.http import (
+    Http404,
+    HttpResponse,
+    HttpResponseGone,
+    JsonResponse,
+)
 from django.shortcuts import redirect, render, reverse
 from django.views.decorators.http import require_POST
 
@@ -287,6 +292,23 @@ def user_profile(request, localname):
     user = _resolve_profile_user(localname)
     if user is None:
         raise Http404("No such user")
+    # A banned actor is **gone**, not hidden — and this sits above the
+    # content-negotiation split so it answers for peers as well as browsers.
+    # R102 asks for ``410 Gone`` by name, and the status code is the point:
+    # it is the ActivityPub tombstone convention, so a peer that re-fetches
+    # the actor id we just sent a ``Delete(Person)`` for gets the same answer
+    # the delete told it. Serving the Person document here would contradict
+    # the delete; serving a 404 would leave a gap between "never existed" and
+    # "was removed", which is exactly the distinction the ban is making.
+    #
+    # This is why the lift does not live here. A suspended account still has a
+    # page that shows it, so 4b put the unsuspend control on the profile. A
+    # banned account deliberately has no public page at all, so the unban
+    # control lives on ``/moderate/`` — the rule is that the lift lives on
+    # the surface that still shows the account, and for a ban that surface is
+    # the moderator's, not the public's.
+    if user.banned_at is not None:
+        return HttpResponseGone("This account has been removed.")
     if accepts_activitypub(request):
         if not user.local:
             return HttpResponse(status=404)
@@ -363,6 +385,21 @@ def _change_follow(request, localname: str, *, undo: bool):
     follower = request.user
     if follower.pk == target.pk:
         messages.error(request, "You can't follow yourself.")
+    elif target.banned_at is not None and not undo:
+        # Same rule as the suspension branch above: the route refuses what
+        # the page withholds, and only the *follow* half. An unfollow stays
+        # always-allowed because removing a subscription surfaces nothing and
+        # must never be blocked by somebody else's moderation state.
+        #
+        # It matters more here than for a suspend, because a banned profile
+        # 410s rather than rendering anything: without this clause the only
+        # way to reach the follow route on a banned account is a hand-built
+        # POST, and a hand-built POST that succeeds is the whole reason the
+        # check exists. Following a banned account would also survive the
+        # ban in a way nothing else does — the M2M row would sit there, and
+        # if the ban were ever lifted the follower would start receiving a
+        # feed they subscribed to against a 410.
+        messages.error(request, "That account has been removed and cannot be followed.")
     elif target.suspended_at is not None and not undo:
         # R85's rule — the route refuses what the page withholds. The
         # suspended profile renders no follow control, so this is not a
@@ -574,6 +611,12 @@ def user_films(request, localname):
     profile = _resolve_profile_user(localname)
     if profile is None:
         raise Http404("No such user")
+    if profile.banned_at is not None:
+        # Answered here rather than redirected to the profile. A suspension
+        # redirects because the profile has something to say and the tab
+        # should show it; a ban has nothing to say anywhere, and a 302 into
+        # a 410 would make the tab's own status code wrong.
+        return HttpResponseGone("This account has been removed.")
     if profile.suspended_at is not None:
         # Redirect to the profile rather than 404 the tab. The profile is
         # where R102 says a suspended account explains itself, and a films

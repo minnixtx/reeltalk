@@ -13,7 +13,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
-from django.db import models
+from django.db import models, transaction
 from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 from django.utils.dateformat import format as date_format
@@ -150,6 +150,20 @@ class User(AbstractBaseUser, PermissionsMixin):
     # different way, or never exist at all (a direct suspend from the member
     # page), while this account has to be able to explain itself on its own.
     suspension_reason = models.TextField(blank=True, default="")
+    # Ban is a SEPARATE state from suspension, not a stronger value of the
+    # same column (R102). The two differ in what they do to content —
+    # suspend hides rows intact, ban removes them — and the code that
+    # enforces each must stay visibly distinct. Folding ban into
+    # ``suspended_at`` would make the suspension read-filters do ban's
+    # work, which is the failure mode §2D names: an action that promised to
+    # remove content and quietly only hid it. So ban gets its own column,
+    # and nothing in ``ban()`` writes to a suspension field.
+    #
+    # NULL means "not banned", the same one-fact economy as ``suspended_at``.
+    banned_at = models.DateTimeField(null=True, blank=True, default=None)
+    # Same reasoning as ``suspension_reason``: the account has to be able to
+    # explain itself independently of whichever report (if any) caused it.
+    ban_reason = models.TextField(blank=True, default="")
 
     # Follow/block relations defined up front so M4 builds on them instead of
     # bolting on a profile model (R10). Server-level blocking is a federation
@@ -220,7 +234,7 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     @property
     def is_active(self) -> bool:
-        """Derived from the suspension state — there is no ``is_active`` column.
+        """Derived from both severities — there is no ``is_active`` column.
 
         ``AbstractBaseUser`` supplies ``is_active = True`` as a plain class
         attribute and ``ModelBackend.user_can_authenticate`` is literally
@@ -230,16 +244,26 @@ class User(AbstractBaseUser, PermissionsMixin):
 
         Deriving rather than storing keeps one source of truth, and because
         ``get_user()`` runs ``user_can_authenticate`` on **every** request, an
-        already-suspended account's existing sessions are cut on its next
-        click with no session-store work.
+        already-banned account's existing sessions are cut on its next click
+        with no session-store work.
+
+        **Both severities are read here, and neither stands in for the other.**
+        A ban is not "suspension plus". An account can be banned with
+        ``suspended_at`` NULL and must still be refused, so the ban half of
+        this test is independently necessary — a mutation that drops it lets a
+        banned member sign right back in. Listing both also keeps the two
+        states honest in the other direction: if a later change ever made
+        ``ban()`` set ``suspended_at`` as a shortcut, this property would be
+        redundantly correct rather than quietly load-bearing on the wrong
+        field.
 
         **The cost, and it is not hypothetical:** this is a Python property,
         not a field, so ``User.objects.filter(is_active=True)`` raises
         ``FieldError``. Anything that wants active users queries
-        ``suspended_at__isnull=True``. A test pins the raise so nobody
-        rediscovers it in production.
+        ``suspended_at__isnull=True, banned_at__isnull=True``. A test pins the
+        raise so nobody rediscovers it in production.
         """
-        return self.suspended_at is None
+        return self.suspended_at is None and self.banned_at is None
 
     def suspend(
         self, *, reason: str = "", origin: str = SuspensionOrigin.LOCAL
@@ -291,6 +315,98 @@ class User(AbstractBaseUser, PermissionsMixin):
         self.save(
             update_fields=["suspended_at", "suspension_origin", "suspension_reason"]
         )
+        return True
+
+    def remove_all_content(self) -> list:
+        """Soft-delete every live status this account owns; return the tombstones.
+
+        Split out from :meth:`ban` rather than inlined because it is the
+        part worth naming on its own, and because a caller that wants the
+        list for a report message must capture it *before* the removal
+        rather than reconstruct it after.
+
+        One status at a time rather than a bulk ``.update()`` because
+        ``Status.delete()`` is instance-level by design (R17): it keeps the
+        identity fields that hold the row's wire id stable and clears only
+        the user content. A queryset update would either skip the
+        content-clearing — leaving rows that read as deleted but still
+        serve text, the worst of both — or re-implement that logic in SQL
+        where it can drift from the model.
+        """
+        removed = list(Status.objects.filter(user=self, deleted=False))
+        for status in removed:
+            status.delete()
+        return removed
+
+    def ban(self, *, reason: str = "") -> bool:
+        """Ban this account: **content removed**, profile gone, name reserved (R102).
+
+        The only writer of the ban state. Deliberately writes nothing to a
+        suspension column — see the field comment on ``banned_at``. Ban and
+        suspend are different promises, and the way to keep them different
+        is to keep their writers different rather than to describe the
+        difference carefully.
+
+        **The content removal happens here, not in the caller.** It is part
+        of what a ban *is* rather than a step one particular entry point
+        remembers. The first cut of this increment left the soft-delete in
+        ``ban_reported_member``, and a test that called ``user.ban()``
+        directly found the review still sitting on the film page: login cut,
+        profile gone, and the content untouched — a half-ban with nothing
+        announcing it. Any future caller (a management command, an import
+        hook, a bulk tool) would inherit that. Putting the removal inside
+        the one writer means there is no way to ban without it.
+
+        **What a lift cannot undo, and why the UI says so.** ``Status.delete()``
+        is R17 soft-delete, which *clears* ``content`` and ``raw_content`` —
+        a ban therefore destroys the review text, and :meth:`unban` restores
+        the account, the localname and the actor document but **not the
+        writing**. That asymmetry is inherent to the delete semantics the
+        whole instance uses, not something this increment could avoid without
+        giving the ban its own private content backup. It is stated on the
+        confirmation the moderator reads before clicking.
+
+        Local accounts only, for the same reason suspend is: we cannot ban an
+        account at its home instance, and we hold no private key to sign one
+        away with.
+
+        Returns ``True`` when this call banned the account and ``False`` when
+        it already was, so a caller can tell a decision from a replay. A
+        replay removes nothing — the first ban already did.
+        """
+        if self.banned_at is not None:
+            return False
+        # One transaction: an account that is banned but whose content is
+        # still live is exactly the half-state this method exists to make
+        # unreachable.
+        with transaction.atomic():
+            self.banned_at = timezone.now()
+            self.ban_reason = reason
+            self.save(update_fields=["banned_at", "ban_reason"])
+            self.remove_all_content()
+        return True
+
+    def unban(self) -> bool:
+        """Lift a ban (R102 as amended 2026-09-28: a moderator may).
+
+        Restores the sign-in, the profile, the actor document and the
+        localname reservation. **It does not restore content** — see
+        :meth:`ban` for why the writing is gone for good — and it cannot
+        un-send a ``Delete(Person)``: peers that processed one dropped this
+        actor and the follow graph on their side, so they come back only by
+        being re-followed. What is restored is the *account*, not the
+        history.
+
+        Leaves any separate suspension alone. A ban and a suspend are
+        independent facts, and lifting one must not silently lift the other;
+        an account that was suspended *and* banned is still suspended after
+        an unban, and its own lift lives on the profile it can still reach.
+        """
+        if self.banned_at is None:
+            return False
+        self.banned_at = None
+        self.ban_reason = ""
+        self.save(update_fields=["banned_at", "ban_reason"])
         return True
 
     @property
@@ -378,16 +494,26 @@ class User(AbstractBaseUser, PermissionsMixin):
         suspension filter — home statuses and shelf events both come from
         this membership set.
 
-        Self is unconditional. A suspended user cannot reach this line:
+        A **banned** account is dropped by the same shape and for a related
+        but distinct reason. Their statuses are soft-deleted, so the status
+        half of the feed is already handled by the ``deleted`` filter —
+        what this clause actually catches is **shelf events**, which are
+        derived from ``ShelfFilm`` rows and never pass through ``deleted``.
+        Without it a banned member's "added X to their Watchlist" would go
+        on appearing in their followers' feeds forever. Two columns, two
+        reasons, one clause each: this is the account-visibility half of ban,
+        not the content-removal half.
+
+        Self is unconditional. A banned user cannot reach this line:
         ``is_active`` is derived from the same column, so their session is
         already cut on the request that would have rendered it (R102b).
         """
         blocked = set(self.blocks.values_list("id", flat=True))
         followed = [
             uid
-            for uid in self.follows.filter(suspended_at__isnull=True).values_list(
-                "id", flat=True
-            )
+            for uid in self.follows.filter(
+                suspended_at__isnull=True, banned_at__isnull=True
+            ).values_list("id", flat=True)
             if uid not in blocked
         ]
         return [self.id] + followed
