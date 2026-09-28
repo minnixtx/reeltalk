@@ -131,6 +131,44 @@
               <span class="muted">From another server — this removes it here only.</span>
             {% endif %}
           {% endif %}
+
+          {% comment %}
+          Suspend (moderation increment 4), in a collapsed disclosure that
+          shares this form's note field via ``formaction`` rather than being
+          a second form of its own.
+
+          The disclosure is the whole answer to the ``.btn`` collision
+          §2D names. ``.btn`` *is* the lit crimson control, so a second
+          lit button beside increment 3's "Delete post" would render two
+          different severities identically. Collapsed by default, they are
+          never adjacent: the card shows Dismiss and (maybe) Delete, and
+          Suspend only appears when someone deliberately opens it.
+
+          That ordering is worth more than colour would have been. Delete
+          costs one click; suspend costs two, with a warning to read
+          between them. The heavier action is harder to fire by accident,
+          which is the property we actually wanted, and it costs no CSS —
+          R73 stays parked and increment 3's rendering is untouched.
+
+          The warning is plain language rather than "suspend" because the
+          word does not carry what it means: this person will not be able
+          to sign in, and everything they have written disappears from
+          every page on the instance. Both facts belong where they can be
+          read before the click, not after.
+          {% endcomment %}
+          {% if card.can_suspend %}
+            <details class="suspend-disclosure">
+              <summary>Suspend this account</summary>
+              <p class="muted">
+                Suspending <strong>@{{ card.target_user.localname }}</strong>
+                stops them signing in and hides their posts, reviews and
+                replies everywhere on this instance. It does not delete
+                anything — the account and its content are still here, and a
+                moderator can restore them later.
+              </p>
+              <button type="submit" class="btn" formaction="{% url 'moderation-suspend' card.latest.id %}">Suspend account</button>
+            </details>
+          {% endif %}
         </form>
       </li>
     {% endfor %}

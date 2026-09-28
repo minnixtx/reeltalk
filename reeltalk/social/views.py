@@ -50,6 +50,7 @@ from reeltalk.activitypub.mirrors import (
 )
 from reeltalk.core.models import Shelf, feed_entries, popular_genres, trending_films
 from reeltalk.core.utils import render_markdown
+from reeltalk.moderation.decorators import can_act_on
 from reeltalk.moderation.models import report_state
 from reeltalk.notifications.models import Notification, notify
 
@@ -293,6 +294,29 @@ def user_profile(request, localname):
             person_document(user, request),
             content_type="application/activity+json",
         )
+    # A suspended account's profile renders a **suspended state** rather
+    # than 404ing, because R102 says so in as many words: "profile shows a
+    # suspended state". That is the one place the plan asks for the account
+    # to be *visible and explained* rather than hidden, and it is load-
+    # bearing for two reasons beyond the visitor's benefit. A person who
+    # cannot tell they were suspended cannot ask about it, and a moderator
+    # needs a surface that still shows the account in order to lift it —
+    # the queue has already drained.
+    #
+    # The AP arm above is deliberately reached first and still serves the
+    # full Person document, now carrying ``suspended: true``. A peer has
+    # to be able to fetch the actor id our ``Update(Person)`` points at;
+    # 404ing it would make the broadcast unresolvable.
+    if user.suspended_at is not None:
+        return render(
+            request,
+            "social/profile_suspended.html",
+            {
+                "profile_user": user,
+                "can_unsuspend": request.user.is_authenticated
+                and can_act_on(request.user, user),
+            },
+        )
     if not user.local:
         refresh_mirror_profile(user)
         user.refresh_from_db()
@@ -339,6 +363,17 @@ def _change_follow(request, localname: str, *, undo: bool):
     follower = request.user
     if follower.pk == target.pk:
         messages.error(request, "You can't follow yourself.")
+    elif target.suspended_at is not None and not undo:
+        # R85's rule — the route refuses what the page withholds. The
+        # suspended profile renders no follow control, so this is not a
+        # button with no route; it is the route refusing a hand-built POST.
+        # Only the **follow** half is refused: an unfollow is the removal of
+        # an existing subscription and must always work, and a block is
+        # defensive personal state that surfaces nothing. A new follow is
+        # the one action here that would subscribe somebody to a hidden
+        # account's future output — and on unsuspend they would wake up to
+        # a feed from someone they never actually chose to follow.
+        messages.error(request, "That account is suspended and cannot be followed.")
     elif target.local:
         if undo:
             follower.follows.remove(target)
@@ -465,9 +500,15 @@ def find_user(request):
             if not localname or not domain:
                 error = "Enter a full handle: user@domain."
             elif domain.lower() == settings.DOMAIN.lower():
-                user = User.objects.filter(
-                    local=True, localname__iexact=localname
-                ).first()
+                # Routed through the profile resolver rather than a
+                # second local lookup of our own. This was a duplicate of
+                # ``_resolve_profile_user``'s local branch, and a duplicate
+                # is two places for a rule to drift — the classic case being
+                # one of them gaining a suspension filter while the other
+                # quietly keeps resolving. Now there is one answer, and a
+                # suspended account found here lands on the profile that
+                # says so rather than on a page that 404s unexpectedly.
+                user = _resolve_profile_user(localname)
                 if user is None:
                     error = f"No user named {localname!r} on this instance."
                 else:
@@ -533,6 +574,14 @@ def user_films(request, localname):
     profile = _resolve_profile_user(localname)
     if profile is None:
         raise Http404("No such user")
+    if profile.suspended_at is not None:
+        # Redirect to the profile rather than 404 the tab. The profile is
+        # where R102 says a suspended account explains itself, and a films
+        # tab that 404s while the profile two segments up says "suspended"
+        # is two answers where one would do. This also means the tab never
+        # needs its own suspension template or its own rule — it inherits
+        # the profile's.
+        return redirect("user-profile", localname=profile.localname)
     tab = request.GET.get("tab", "all")
     if tab not in ("watchlist", "watched"):
         tab = "all"

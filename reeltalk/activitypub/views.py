@@ -44,7 +44,22 @@ def _local_user(localname: str) -> "User | None":
     # (signup rejects insensitive duplicates), and Mastodon lowercases
     # usernames. The stored spelling wins — responses carry it back so
     # remotes learn the canonical case.
-    return User.objects.filter(local=True, localname__iexact=localname).first()
+    #
+    # A suspended account resolves to nothing here (R102), which takes out
+    # its outbox, followers, following, webfinger entry and per-user inbox
+    # in one clause. That is the right shape for four of the five: a hidden
+    # account has no public collections and should not answer webfinger.
+    #
+    # The fifth is the inbox, and the cost is deliberate: a peer delivering
+    # to a suspended user's inbox now gets 404 rather than 202. Mastodon
+    # force-Rejects a suspended account's inbound follows instead, and its
+    # own comment says that part is **not reversible** — §2D told us not to
+    # copy that without deciding it, so we do not. A 404 is the reversible
+    # equivalent: nothing is cancelled, nothing is told, and unsuspend
+    # reopens the inbox with no state to unwind.
+    return User.objects.filter(
+        local=True, localname__iexact=localname, suspended_at__isnull=True
+    ).first()
 
 
 @require_GET
@@ -187,10 +202,20 @@ def _person_collection(request, user, collection_url, related):
     """Serve a followers/following relation as an OrderedCollection of Persons.
 
     Includes both local users (full Person documents) and remote mirrors (a
-    minimal Person document keyed on the mirror's home actor URL — increment
-    5). Ordered by id so pages are stable.
+    minimal Person document keyed on the mirror's home actor URL —
+    increment 5). Ordered by id so pages are stable.
+
+    A **suspended** member is dropped from the collection (R102), filtered
+    here rather than at the two callers so the followers list and the
+    following list cannot drift apart on the rule. Note this is a different
+    filter from the one in ``_local_user``: that one hides the suspended
+    account's *own* endpoints, this one hides suspended accounts from
+    somebody else's collection. Both are needed, and a follower who is
+    suspended disappears from everyone they follow's ``followers`` array
+    while their own profile stays fetchable as a Person document carrying
+    ``suspended: true``.
     """
-    persons = list(related.all().order_by("id"))
+    persons = list(related.all().filter(suspended_at__isnull=True).order_by("id"))
 
     def items_by_offset(start, count):
         page = persons[start : start + count]

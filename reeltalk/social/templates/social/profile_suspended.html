@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}@{{ profile_user.localname }} — suspended — ReelTalk{% endblock %}
+
+{% block content %}
+{# The suspended account's profile (moderation increment 4, R102). #}
+{# R102 asks for this page by name: a suspend leaves the "profile showing a #}
+{# suspended state". It is deliberately NOT a 404 and deliberately NOT the #}
+{# normal profile with a banner on it. #}
+{# #}
+{# Not a 404 because an account that vanishes without explanation cannot be #}
+{# asked about, and because a moderator needs somewhere that still shows the #}
+{# account in order to lift the suspension — the queue that raised it has #}
+{# already drained. #}
+{# #}
+{# Not the normal profile with a banner because that template is built to #}
+{# display the person: avatar, bio, follow and block controls. Rendering it #}
+{# and covering most of it up leaves a page whose every remaining control is #}
+{# a lie, and risks a future edit to profile.html surfacing something this #}
+{# page means to withhold. A separate template has nothing to leak. #}
+{# #}
+{# No new CSS: every class below already exists (R101). #}
+<section class="profile-suspended">
+  <h1 class="pane-title">@{{ profile_user.localname }}</h1>
+  <p class="pane-sub">This account has been suspended.</p>
+
+  <p class="muted">
+    Its posts, reviews and replies are hidden across this instance, and it
+    cannot sign in. Nothing has been deleted — the account and everything it
+    wrote are still here, just not shown.
+  </p>
+
+  {% if can_unsuspend %}
+    {% comment %}
+    The lift. This is the only control on the page, and it is here rather
+    than on the queue card because a suspend resolves the report pile that
+    raised it — by the time anyone wants to undo one, the card is gone.
+    Plain button, not ``.btn``: the lit crimson control is reserved for
+    destructive actions (R96), and this one puts a person back rather than
+    taking something away.
+    {% endcomment %}
+    <form method="post" action="{% url 'user-unsuspend' profile_user.localname %}">
+      {% csrf_token %}
+      <button type="submit">Unsuspend this account</button>
+    </form>
+    <p class="muted">
+      Visible to moderators and the site admin only. Unsuspending restores
+      the account and all of its content immediately.
+    </p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -122,10 +122,27 @@ def resolve_typed_handle(handle: str):
       ``minnix@upallnight.minnix.dev``. Reproducing that exactly is the
       requirement, not an oversight to smooth over: a parser more forgiving
       than the route would resolve a handle whose profile link then 404s.
+
+    A **suspended** account resolves to ``None`` (R102), which is the whole
+    suspension filter for this app and lands in three places at once: no new
+    ``StatusMention`` row, no mention notification, and a typed handle
+    renders as plain text rather than a link. One clause covers all three
+    because both the parser and the renderer ask this one function.
+
+    What it cannot reach is the chips already baked into stored
+    ``Status.content`` HTML at write time — there is no query behind those.
+    Their links still point at ``/user/<localname>/``, which now renders a
+    suspended-state page rather than the profile, so an existing chip stays
+    a live link that says plainly that the account is suspended instead of
+    rotting into a dead one.
     """
     if "@" not in handle:
-        return User.objects.filter(local=True, localname__iexact=handle).first()
-    return User.objects.filter(local=False, localname=handle).first()
+        return User.objects.filter(
+            local=True, localname__iexact=handle, suspended_at__isnull=True
+        ).first()
+    return User.objects.filter(
+        local=False, localname=handle, suspended_at__isnull=True
+    ).first()
 
 
 def mentions_from_text(raw_markdown: str):

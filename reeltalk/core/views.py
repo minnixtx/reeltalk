@@ -73,11 +73,20 @@ def film_detail(request, film_id):
         )
     reviews = (
         Status.objects.filter(
-            film=film, status_type__in=list(Status.REVIEW_TYPES), deleted=False
+            film=film,
+            status_type__in=list(Status.REVIEW_TYPES),
+            deleted=False,
+            user__suspended_at__isnull=True,
         )
         .select_related("user")
         .order_by("-published_date")
     )
+    # Suspension is filtered in the queryset above rather than alongside the
+    # per-viewer block rule below, and the difference is the point: this
+    # hides a suspended reviewer from *every* visitor including anonymous
+    # ones, where R56's block only ever hides from the logged-in viewer.
+    # A suspended account that vanished from the home feed but still showed
+    # here is the exact half-state R102 was written to prevent.
     if request.user.is_authenticated:
         # R56: hide the reviews of users this viewer has blocked. Blocking is
         # per-logged-in-user state, so anonymous visitors see every review.
@@ -119,10 +128,19 @@ def _reply_to_label(parent, root, blocked_ids) -> str:
     block rule is that they are not here would leak the one thing blocking
     is meant to hide, and naming a deleted reply would point at a row the
     reader cannot see.
+
+    A **suspended** author gets the same treatment as a blocked one (R102).
+    The leak is the same shape and arguably worse: a block is one viewer's
+    private choice, so naming a blocked handle leaks it to nobody but
+    oneself, whereas a suspension is a server decision and printing the
+    handle of the account the server just hid would name an account that is
+    not supposed to be visible at all. "a hidden reply" covers both rather
+    than distinguishing them, because the reader's correct action is
+    identical either way.
     """
     if parent.pk == root.pk:
         return ""
-    if parent.user_id in blocked_ids:
+    if parent.user_id in blocked_ids or parent.user.suspended_at is not None:
         return "a hidden reply"
     if parent.deleted:
         return "a deleted reply"
@@ -138,11 +156,18 @@ def _thread_rows(root, blocked_ids) -> list[tuple[Status, str]]:
     author's reply does not take its live replies down with it — the walk
     already goes through hidden rows, and dropping a node here only drops
     that node.
+
+    Suspension is dropped by the same node-level rule for the same reason.
+    Note that it drops only the suspended author's **own** rows: a live
+    reply *under* a suspended row still renders, because the walk goes
+    through hidden nodes on purpose. That is the correct outcome — hiding
+    the whole subtree would let one suspension erase conversations other
+    people are still having, which is more deletion than a hide decided.
     """
     return [
         (reply, _reply_to_label(parent, root, blocked_ids))
         for reply, parent in conversation(root)
-        if reply.user_id not in blocked_ids
+        if reply.user_id not in blocked_ids and reply.user.suspended_at is None
     ]
 
 
@@ -167,8 +192,29 @@ def status_detail(request, status_id):
     statuses are tombstones and are served by neither arm.
     """
     status = get_object_or_404(
-        Status.objects.select_related("reply_parent"), id=status_id, deleted=False
+        Status.objects.select_related("reply_parent", "user"),
+        id=status_id,
+        deleted=False,
     )
+    # A suspended author's post page 404s on **both** arms (R102), and the
+    # placement above the content-negotiation split is a deliberate
+    # deviation from the block rule's position below rather than an
+    # oversight of it. A block cannot hide anything from the AP arm because
+    # blocks are personal, per-viewer state that is deliberately not
+    # federated (R53/R54) — there is no server-level answer to give a peer.
+    # Suspension *is* a server-level answer, and R102 says the content is
+    # hidden, so the arm that serves the object to a machine is included.
+    # Unsuspend gives both arms straight back, because nothing was removed.
+    #
+    # The cost of that choice, stated rather than hidden: a peer that
+    # re-fetches a Note it already holds now gets a 404 where it previously
+    # got the document, and some implementations read a 404 on a known
+    # object as a deletion. We send no `Delete` on suspend, so this is a
+    # quieter signal than a tombstone and a louder one than nothing. The
+    # actor-level ``suspended: true`` in the Person document is the
+    # authoritative federation signal either way.
+    if status.user.suspended_at is not None:
+        raise Http404
     if accepts_activitypub(request):
         if not status.local:
             raise Http404
@@ -208,7 +254,14 @@ def status_detail(request, status_id):
             # control — see ``FeedEntry.interactive`` for the same gate on
             # a feed row — but the count is shown for them too, because a
             # like count is a fact about the post rather than an offer.
-            "like_count": status.likes.count(),
+            #
+            # Suspended likers are excluded here by hand because this is a
+            # raw ``status.likes.count()`` that deliberately does not go
+            # through ``like_counts()`` — the same tally, reached by a
+            # second path, so the suspension clause has to be said twice.
+            # That duplication is the cost of the batching helper not
+            # applying to a single-row page.
+            "like_count": status.likes.filter(user__suspended_at__isnull=True).count(),
             "liked_by_viewer": request.user.is_authenticated
             and status.likes.filter(user=request.user).exists(),
             # The report control (moderation increment 2). Both halves come
@@ -247,7 +300,14 @@ def reply_to_status(request, status_id):
     parent's *home* URL, so the instance that owns that turn sees its own
     post being answered rather than a URL of ours.
     """
-    parent = get_object_or_404(Status, id=status_id, deleted=False)
+    parent = get_object_or_404(
+        Status.objects.select_related("user"), id=status_id, deleted=False
+    )
+    # The same R85 refusal as ``like_status`` above: the post page hides a
+    # suspended author's post, so the composer's route refuses it too.
+    # Without this a hidden post keeps quietly accepting replies.
+    if parent.user.suspended_at is not None:
+        raise Http404
     raw_content = request.POST.get("content", "")
     if not raw_content.strip():
         return JsonResponse({"error": "A reply needs some text."}, status=400)
@@ -327,7 +387,15 @@ def like_status(request, status_id):
     of their post and sends the ``Like`` to their author; unliking deletes
     the row and sends the ``Undo``.
     """
-    status = get_object_or_404(Status, id=status_id, deleted=False)
+    status = get_object_or_404(
+        Status.objects.select_related("user"), id=status_id, deleted=False
+    )
+    # R85's rule — the route refuses exactly what the page withholds. The
+    # post page 404s on a suspended author, so the like route must not stay
+    # open behind it: a hidden post that still accepts writes is a way to
+    # accumulate interactions nobody can ever see the reason for.
+    if status.user.suspended_at is not None:
+        raise Http404
     liked = toggle_like(request.user, status)
     # Federation broadcast (increment 5): the Like / Undo(Like) to the
     # post's author, and nothing at all when that author is local. A dead
@@ -341,7 +409,15 @@ def like_status(request, status_id):
     # reachable and arrives here — ``notify()`` is what stops it.
     if liked:
         notify(status.user, request.user, Notification.Kind.LIKE, status)
-    return JsonResponse({"liked": liked, "count": status.likes.count()})
+    # Suspended likers are out of the tally, matching ``like_counts()`` and
+    # the post page's own count, so the number the button updates to is the
+    # number the page renders.
+    return JsonResponse(
+        {
+            "liked": liked,
+            "count": status.likes.filter(user__suspended_at__isnull=True).count(),
+        }
+    )
 
 
 @login_required

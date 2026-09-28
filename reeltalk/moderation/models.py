@@ -61,16 +61,27 @@ class Report(models.Model):
     class Action(models.TextChoices):
         """What the moderator did.
 
-        Only ``dismiss`` and ``delete_status`` exist today because only
-        those two are built — suspension is increment 4 and the ban is 5.
-        Each joins with its producer rather than ahead of it, so no value in
-        this enum names an action no code path can take. A future session
-        reading this should add the value **with** the code that writes it,
-        not in anticipation of it.
+        Only values with a live producer appear — ``suspend`` joined with
+        the queue action that writes it in increment 4, and the ban is
+        increment 5. Each value arrives with its producer rather than ahead
+        of it, so no value in this enum names an action no code path can
+        take. A future session should add the value **with** the code that
+        writes it, not in anticipation of it.
+
+        Note there is deliberately **no ``unsuspend`` value.** Unsuspend is
+        not a response to a report — it is a separate act on the account,
+        taken from the profile rather than the queue, and by then the pile
+        that this row belongs to has long since been resolved. Recording it
+        here would mean rewriting a closed decision rather than appending a
+        new one. The gap that leaves (an unsuspend carries no persisted
+        moderator note) is recorded in the increment's execution record
+        rather than papered over by widening this enum past what the queue
+        can actually produce.
         """
 
         DISMISS = "dismiss", "Dismissed"
         DELETE_STATUS = "delete_status", "Deleted the post"
+        SUSPEND = "suspend", "Suspended the account"
 
     # CASCADE both ways on the people. A report is a statement made by one
     # person about another; neither half survives the deletion of the
@@ -364,6 +375,50 @@ def delete_reported_status(report, *, by_user, note=""):
         )
         status.delete()
     return status, count
+
+
+def suspend_reported_member(report, *, by_user, note=""):
+    """Suspend the reported member and resolve the pile as suspended (R102/R106).
+
+    The third member of the family beside :func:`dismiss_report` and
+    :func:`delete_reported_status`, and it keeps their shape on purpose: one
+    helper, one transaction, the whole target pile resolved with who/when/
+    what/note recorded on every row. A suspend that closed only the clicked
+    row would put the same card straight back on the queue.
+
+    **The account is the target, not the post.** ``target_user`` is the
+    thing being suspended even when the card was raised by a post report,
+    because that is what R102 defines suspend as — a state of an account.
+    The reported post is left exactly where it is: suspend hides content,
+    it does not remove it, and the read-side filters are what make it
+    disappear. A moderator who wants the post itself gone uses delete.
+
+    ``User.suspend()`` is the only writer of the suspension state and
+    returns ``False`` for an already-suspended account, which is passed
+    straight back so the caller can tell a decision from a replay rather
+    than assuming one happened. The pile is still resolved either way —
+    the work item is closed whether or not this click changed the account.
+
+    **Does not decide who may suspend** (that is ``can_act_on``, the
+    caller's question) and **does not broadcast** (the local write must
+    commit before any network call, and only a local account can be
+    signed for). See ``views.suspend`` for both.
+
+    Returns ``(target, suspended, count)`` — the account acted on, whether
+    this call is what suspended it (``False`` on a replay), and the number
+    of report rows resolved.
+    """
+    target = report.target_user
+    now = timezone.now()
+    with transaction.atomic():
+        count = Report.unresolved_for_target(report.target_key).update(
+            resolved_at=now,
+            resolved_by=by_user,
+            action=Report.Action.SUSPEND,
+            note=note,
+        )
+        suspended = target.suspend(reason=note)
+    return target, suspended, count
 
 
 def record_federation_outcome(report, line: str) -> int:

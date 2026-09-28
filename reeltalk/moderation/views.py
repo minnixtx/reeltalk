@@ -29,7 +29,10 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from reeltalk.activitypub.broadcast import broadcast_status_delete
+from reeltalk.activitypub.broadcast import (
+    broadcast_actor_update,
+    broadcast_status_delete,
+)
 from reeltalk.core.models import Status
 from reeltalk.moderation.decorators import can_act_on, moderator_required
 from reeltalk.moderation.forms import ReportForm
@@ -39,6 +42,7 @@ from reeltalk.moderation.models import (
     dismiss_report,
     file_report,
     record_federation_outcome,
+    suspend_reported_member,
 )
 from reeltalk.social.views import _resolve_profile_user
 
@@ -98,12 +102,21 @@ def queue_cards(actor):
     a third reporter is more urgent than one that has sat untouched for a
     week, and the newest report is the one that changed the picture.
 
-    Each card carries ``can_delete`` — whether *this* actor may delete this
-    card's post — computed here so R103 has exactly one implementation. The
-    template reads a boolean and does not get to decide a permission; a
-    moderator and the site admin looking at the same card get different
-    buttons out of the same function, which is what "the guard reads the
-    actor, not the surface" looks like on a page.
+    Each card carries ``can_delete`` and ``can_suspend`` — whether *this*
+    actor may take that action on this card — computed here so R103 has
+    exactly one implementation. The template reads booleans and does not
+    get to decide a permission; a moderator and the site admin looking at
+    the same card get different buttons out of the same function, which is
+    what "the guard reads the actor, not the surface" looks like on a page.
+
+    ``can_suspend`` adds two conditions on top of ``can_act_on``, and both
+    are about what suspend *is* rather than who is asking.
+    ``target_user.local`` because R102 defines suspend and ban as actions
+    on an account we own — we cannot suspend a remote account at its home
+    instance, and we could not even sign the actor update for one. And
+    ``suspended_at is None`` because suspending an already-suspended
+    account is not a decision; the control that lifts one lives on the
+    profile, not on a queue card that this action drains away.
     """
     cards = {}
     for report in Report.unresolved().select_related(
@@ -114,8 +127,9 @@ def queue_cards(actor):
         card = cards.get(report.target_key)
         if card is None:
             status = report.target_status
+            target = report.target_user
             card = {
-                "target_user": report.target_user,
+                "target_user": target,
                 "target_status": status,
                 "reports": [],
                 "latest": report,
@@ -127,7 +141,10 @@ def queue_cards(actor):
                 # question, and the target is the one the card is about.
                 "can_delete": bool(status)
                 and not status.deleted
-                and can_act_on(actor, report.target_user),
+                and can_act_on(actor, target),
+                "can_suspend": target.local
+                and target.suspended_at is None
+                and can_act_on(actor, target),
             }
             cards[report.target_key] = card
         card["reports"].append(report)
@@ -243,14 +260,147 @@ def delete_status(request, report_id):
     return redirect("moderation")
 
 
+@moderator_required
+@require_POST
+def suspend(request, report_id):
+    """Suspend the reported member from the queue (increment 4, R102/R103b).
+
+    The heaviest action the queue offers, and it carries the same two gates
+    as the delete rather than a third. ``moderator_required`` says the
+    visitor may be here at all; ``can_act_on`` (R103 as amended by R103b)
+    says this account is theirs to act on — a moderator may suspend only a
+    **regular user**, never the site admin, never a peer moderator, never
+    an account holding the ``/admin/`` door, never themselves. The owner
+    settled the reach once for every destructive action, so this guard is
+    reused unchanged rather than widened for the heavier verb.
+
+    **A resolved report is not a live suspend handle**, exactly as with the
+    delete. Dismiss can afford idempotence because re-resolving changes
+    nothing; a suspend cannot, so the route refuses instead of leaving a
+    bookmark from last quarter able to re-fire a decision that was already
+    made.
+
+    **Remote targets are refused, and not only by the hidden control.**
+    R102 defines suspend as an action on an account we own. We cannot
+    suspend a remote account at its home instance, and we could not sign
+    the actor update even if we tried — a mirror holds no private key. The
+    effects available against a remote target are *remove their content
+    here* and *refuse them here*, which is increment 6's domain block.
+
+    **The broadcast is loud and non-blocking (R108).** The suspend itself
+    is committed before any network call, so a dead peer cannot undo the
+    decision; but a suspend that did not federate is written into the
+    report's audit line and shown to the moderator, because "this account
+    is suspended here and nobody else knows" is exactly the fact that must
+    not be quiet.
+    """
+    report = get_object_or_404(
+        Report.objects.select_related("target_user", "target_status"), id=report_id
+    )
+    if report.resolved_at is not None:
+        raise Http404("This report has already been resolved.")
+    target = report.target_user
+    if not can_act_on(request.user, target):
+        raise PermissionDenied
+    if not target.local:
+        raise Http404(
+            "Suspend applies to accounts on this instance; remote accounts "
+            "are handled by the domain block."
+        )
+
+    note = request.POST.get("note", "").strip()
+    # The local write commits inside the helper, before any network call,
+    # so a dead follower can never lose the suspension or the audit record.
+    _, suspended, count = suspend_reported_member(
+        report, by_user=request.user, note=note
+    )
+    if not suspended:
+        messages.info(request, f"@{target.localname} was already suspended.")
+        return redirect("moderation")
+
+    failures = broadcast_actor_update(request, target)
+    if failures:
+        hosts = ", ".join(
+            sorted({urlparse(f.inbox).netloc or f.inbox for f in failures})
+        )
+        record_federation_outcome(
+            report,
+            f"[federation] {len(failures)} remote recipient(s) not told about "
+            f"the suspension: {hosts}",
+        )
+        messages.warning(
+            request,
+            f"@{target.localname} is suspended here, but {len(failures)} "
+            f"remote {'server was' if len(failures) == 1 else 'servers were'} "
+            f"not told ({hosts}).",
+        )
+    elif count > 1:
+        messages.success(
+            request,
+            f"@{target.localname} suspended; {count} reports about them resolved.",
+        )
+    else:
+        messages.success(request, f"@{target.localname} suspended.")
+    return redirect("moderation")
+
+
+@moderator_required
+@require_POST
+def unsuspend(request, localname):
+    """Lift a suspension from the suspended account's profile (R102).
+
+    Not a queue route, and that placement is forced rather than chosen. A
+    suspend resolves the pile that raised it, so the card is gone by the
+    time anyone wants to undo it — and a suspension with no surface that
+    still shows the account is a suspension nobody can lift. The profile is
+    the one place a suspended account remains visible (R102 requires
+    exactly that), so the lift lives there.
+
+    Same guard as the suspend, unchanged: ``moderator_required`` for the
+    surface, ``can_act_on`` for the target. R103b's reach does not get
+    looser just because this direction is the friendly one — a moderator
+    still cannot lift a suspension on an account they could never have
+    imposed, which keeps the two verbs from becoming an asymmetric way to
+    act on a peer.
+
+    **No note field, and deliberately so.** R106 wants a note on every
+    action, but the record this arc keeps is the ``Report`` row, and by now
+    that row is closed — appending to a resolved decision would rewrite it
+    rather than add to it. Rather than claim to record something this
+    surface cannot, the control asks for no note. The gap is stated in the
+    increment's execution record instead of being papered over with a
+    second audit table the plan declined.
+    """
+    target = _resolve_profile_user(localname)
+    if target is None:
+        raise Http404("No such user")
+    if not can_act_on(request.user, target):
+        raise PermissionDenied
+    if target.suspended_at is None:
+        messages.info(request, f"@{target.localname} is not suspended.")
+        return redirect("user-profile", localname=target.localname)
+
+    target.unsuspend()
+    failures = broadcast_actor_update(request, target)
+    if failures:
+        hosts = ", ".join(
+            sorted({urlparse(f.inbox).netloc or f.inbox for f in failures})
+        )
+        messages.warning(
+            request,
+            f"@{target.localname} is unsuspended, but {len(failures)} "
+            f"remote {'server was' if len(failures) == 1 else 'servers were'} "
+            f"not told ({hosts}).",
+        )
+    else:
+        messages.success(request, f"@{target.localname} is no longer suspended.")
+    return redirect("user-profile", localname=target.localname)
+
+
 @login_required
 @require_POST
 def report_status(request, status_id):
     """Report someone else's post (members-only control, R98).
-
-    The lookup excludes tombstones: a deleted status has nothing left to
-    act on, and reporting one would file an accusation against content that
-    is already gone.
 
     A member reporting their **own** post is refused, not silently
     swallowed. The refusal is a message plus a redirect rather than a 403,

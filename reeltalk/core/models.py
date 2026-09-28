@@ -590,11 +590,19 @@ def like_counts(status_ids: list[int]) -> dict[int, int]:
     The counts are viewer-independent, following the home-rail rule in
     ``index``: a blocked user's like still counts toward the tally; only
     the lists hide their rows.
+
+    A **suspended** user's like does not count (R102), and that does not
+    break the viewer-independence stated above. That invariant is about
+    *who is looking* — one viewer's personal block list must not leak into
+    another's numbers. Suspension is not per-viewer: it is one server-wide
+    fact, so excluding it keeps every viewer seeing the same tally. It is
+    also symmetric — unsuspending restores the number exactly, because
+    nothing was deleted to hide it.
     """
     if not status_ids:
         return {}
     rows = (
-        Like.objects.filter(status_id__in=status_ids)
+        Like.objects.filter(status_id__in=status_ids, user__suspended_at__isnull=True)
         .values("status_id")
         .annotate(n=Count("id"))
     )
@@ -668,11 +676,20 @@ def reply_counts(status_ids: list[int]) -> dict[int, int]:
     withheld from a mirror. (The post page's own thread count is a
     different number and does filter blocked replies — that page hides the
     rows rather than the tally.)
+
+    A **suspended** author's reply does not count, for the same reason
+    ``like_counts`` excludes a suspended like: suspension is a server-wide
+    fact rather than per-viewer state, so the viewer-independence of the
+    tally survives it, and unsuspend gives the number straight back.
     """
     if not status_ids:
         return {}
     rows = (
-        Status.objects.filter(reply_parent_id__in=status_ids, deleted=False)
+        Status.objects.filter(
+            reply_parent_id__in=status_ids,
+            deleted=False,
+            user__suspended_at__isnull=True,
+        )
         .values("reply_parent_id")
         .annotate(n=Count("id"))
     )
@@ -1115,11 +1132,21 @@ def live_reviews():
     """The review statuses the rail counts (R61).
 
     D5's review kinds alike — written reviews and rating-only entries — minus
-    soft-deleted rows. Includes remote mirrors: the rail shows what this
-    instance holds, which is the point of federation.
+    soft-deleted rows and minus anything written by a **suspended** account
+    (R102). Includes remote mirrors: the rail shows what this instance holds,
+    which is the point of federation.
+
+    The suspension clause belongs here rather than at each caller because this
+    is the one definition every rail count already routes through — genre
+    subfeed rows, trending-film counts, popular-genre pill counts and the
+    index rails all widen or narrow together. Adding it to the shared
+    definition is what stops one rail showing a suspended reviewer's work
+    while another hides it.
     """
     return Status.objects.filter(
-        status_type__in=list(Status.REVIEW_TYPES), deleted=False
+        status_type__in=list(Status.REVIEW_TYPES),
+        deleted=False,
+        user__suspended_at__isnull=True,
     )
 
 

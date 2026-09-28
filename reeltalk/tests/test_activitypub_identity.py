@@ -85,9 +85,18 @@ def test_person_document_shape():
         # Defines Multikey/assertionMethod so a strict JSON-LD processor
         # keeps the typed key instead of dropping it (R88).
         "https://www.w3.org/ns/cid/v1",
+        # ``toot:suspended`` (moderation increment 4). The only
+        # non-standard term we publish, and it needs the prefix declared or
+        # a strict processor drops the term as undefined.
+        {"toot": "http://joinmastodon.org/ns#"},
     ]
     assert doc["id"] == actor
     assert doc["type"] == "Person"
+    # Emitted **always**, including the false case — the one deliberate
+    # exception to the omit-when-empty rule two assertions below. An
+    # ``Update(Person)`` that omitted the flag would make "unsuspended"
+    # indistinguishable from "this server never spoke the flag".
+    assert doc["suspended"] is False
     assert doc["preferredUsername"] == "alice"
     # No display name yet — the localname stands in.
     assert doc["name"] == "alice"

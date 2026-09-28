@@ -32,7 +32,7 @@ own data is not a social act).
 import requests
 
 from .delivery import DeliveryFailure, deliver_activity, inbox_for
-from .identity import absolute_uri, actor_path
+from .identity import absolute_uri, actor_path, actor_update_activity
 from .objects import (
     create_activity,
     delete_activity,
@@ -59,12 +59,24 @@ def _deliver_signed(
     the caller unable to tell a moderator that the remote copy is still up.
     Every recipient that did not get a 2xx comes back in the returned list
     with the reason, so a surface that owes its actor the truth can pay it.
+
+    A **suspended** recipient is skipped (R102). We cannot suspend a remote
+    mirror from this increment's UI — suspend is defined for local accounts
+    only — so this branch is unreachable from the moderator queue today. It
+    is here because it is the one place every outbound audience passes
+    through, and increment 6's domain block needs exactly this skip rather
+    than three new ones at the three audience builders. It is tested by
+    suspending a mirror directly, so the branch is covered and a mutation
+    that removes it turns a test red rather than hiding behind an
+    unproducible state.
     """
     signer = absolute_uri(actor_path(actor.localname))
     key_id = f"{signer}#main-key"
     failures: list[DeliveryFailure] = []
     for recipient in recipients:
         if recipient.local:
+            continue
+        if recipient.suspended_at is not None:
             continue
         inbox = inbox_for(recipient)
         try:
@@ -176,6 +188,30 @@ def broadcast_shelf_event(request, user, film, identifier: str, *, added: bool) 
     """
     activity = shelf_event_activity(user, film, identifier, request, added=added)
     return _deliver_to_followers(request, user, activity)
+
+
+def broadcast_actor_update(request, user) -> list[DeliveryFailure]:
+    """Tell a user's remote followers that their Person document changed (R102).
+
+    The suspend/unsuspend broadcast. It is the only way a peer learns that
+    an account it already holds has been suspended or restored — no status
+    activity is involved, since suspend hides content rather than deleting
+    it, so without this call the peer keeps a Person document that says
+    nothing about a decision we made.
+
+    **The signer is the suspended user themselves, not the moderator.**
+    Same rule increment 3 pinned for the delete: the identity on the wire
+    is the actor the document describes, never whoever pressed the button.
+    That means a suspension of a *mirror* could not be broadcast at all —
+    we hold no private key for another instance's identity — which is a
+    second reason suspend stays a local-account action.
+
+    Deliberately **not** silenced on failure. R108's call is that a
+    moderation action which did not federate must be loud, and the caller
+    gets the failure list back so it can write the audit line and tell the
+    moderator, exactly as the delete view does.
+    """
+    return _deliver_to_followers(request, user, actor_update_activity(user, request))
 
 
 def broadcast_like(request, status, user, *, liked: bool) -> None:

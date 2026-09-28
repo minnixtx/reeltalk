@@ -147,12 +147,23 @@ def person_document(user, request) -> dict:
             # Defines Multikey / assertionMethod / publicKeyMultibase so a
             # strict JSON-LD processor does not drop the typed key.
             "https://www.w3.org/ns/cid/v1",
+            # ``toot:suspended`` is the only non-standard term we publish,
+            # and it is here because the vocabulary is already the de facto
+            # one for this flag — the peer's own Person document declares
+            # the same mapping, which is how this was chosen rather than
+            # guessed. A strict processor needs the prefix declared or it
+            # drops the term as undefined.
+            {"toot": "http://joinmastodon.org/ns#"},
         ],
         "id": actor,
         "type": "Person",
         "preferredUsername": user.localname,
         "name": user.display_name or user.localname,
         "url": actor,
+        # Emitted **always**, never only when true, for the reason spelled
+        # out on ``actor_update_activity``: omitting it on an unsuspend
+        # would leave a peer unable to tell "cleared" from "never spoken".
+        "suspended": user.suspended_at is not None,
         "inbox": absolute_uri(inbox_path(user.localname)),
         "outbox": absolute_uri(outbox_path(user.localname)),
         "followers": absolute_uri(followers_path(user.localname)),
@@ -182,3 +193,35 @@ def person_document(user, request) -> dict:
     if user.avatar:
         doc["image"] = absolute_uri(user.avatar.url)
     return doc
+
+
+def actor_update_activity(user, request) -> dict:
+    """An ``Update(Person)`` announcing this actor's current document.
+
+    The suspension broadcast (R102): a peer that already holds our Person
+    document needs to be told its state changed, because nothing else on
+    the wire will. The document carried by the activity is the same
+    ``person_document`` the route serves, so the peer cannot receive an
+    update whose body disagrees with what it would get by fetching the
+    actor URL itself.
+
+    **The ``suspended`` flag is emitted always, not only when true.** The
+    peer's own vocabulary declares it — ``"suspended": "toot:suspended"``
+    was read off ``upallnight.minnix.dev``'s Person ``@context``, not
+    recalled — and Mastodon omits the key when the account is fine. We do
+    the opposite on purpose: an ``Update(Person)`` that *omits* the flag
+    makes "this account was unsuspended" indistinguishable from "this
+    server does not speak the flag", which is R88's silence-that-kills
+    shape. Sending ``false`` is the only way an unsuspend says anything at
+    all. Whether a given peer **honours** an inbound ``suspended: true`` is
+    that peer's business and is not claimed anywhere here.
+
+    The audience is the actor's remote followers, which is what
+    ``broadcast_actor_update`` does.
+    """
+    return {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": "Update",
+        "actor": absolute_uri(actor_path(user.localname)),
+        "object": person_document(user, request),
+    }

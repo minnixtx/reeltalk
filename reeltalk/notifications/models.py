@@ -144,12 +144,30 @@ def notify(recipient, actor, kind, status=None):
       R85 refused one on the *like* write because the read path had none. Here
       the notification **is** the read surface, so filtering at its creation
       filters the read surface.
+    * **No notification involving a suspended account, on either side**
+      (R102). Refusing at the write rather than at the render is the same
+      argument as the block guard one line above, and it is why this belongs
+      in the one door rather than in ``notifications/views.py``: the
+      recipient's own ledger already renders a vanished actor sanely through
+      the ``SET_NULL`` "Someone" fallback, so a render-time suspension
+      filter would have nothing to make readable — it would only leave the
+      row in the table to come back on unsuspend. Two directions are
+      refused because both are wrong in different ways: notifying a suspended
+      recipient tells a hidden account things it cannot act on, and
+      recording a suspended actor tells a recipient that somebody did a
+      thing that is no longer visible anywhere on this instance.
+
+    A suspended actor's *existing* ledger rows are not touched, for the
+    reason R102 gives for everything else in suspend: hiding is not
+    deleting, and unsuspend restores the ledger exactly as it was.
     """
     if recipient.pk == actor.pk:
         return None
     if not recipient.local:
         return None
     if recipient.blocks.filter(pk=actor.pk).exists():
+        return None
+    if recipient.suspended_at is not None or actor.suspended_at is not None:
         return None
     return Notification.objects.create(
         recipient=recipient, actor=actor, kind=kind, status=status

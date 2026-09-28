@@ -336,6 +336,15 @@ def _resolve_actor(actor_url: str, request, *, fetch: bool) -> "User | None":
     the mirror (R42). Returns None when the URL cannot be resolved (unknown
     local user, no mirror and fetch disabled, or an unreachable/unusable
     remote document).
+
+    A **suspended** account never resolves (R102), on either branch. That is
+    the chokepoint for the whole inbound attribution surface: a suspended
+    sender cannot be attributed, so their activity is refused at the door
+    with a 401 rather than being written down and hidden later; and a
+    suspended local user cannot be the object of an inbound Follow, because
+    ``resolve_known_actor`` returns nothing for them. Both halves are
+    reversible — nothing is cancelled, and unsuspending reopens resolution
+    with no state to unwind.
     """
     base = actor_url.split("#", 1)[0]
     if not base:
@@ -345,8 +354,14 @@ def _resolve_actor(actor_url: str, request, *, fetch: bool) -> "User | None":
         match = _ACTOR_PATH_RE.match(parsed.path)
         if not match:
             return None
-        return User.objects.filter(local=True, localname__iexact=match.group(1)).first()
-    mirror = User.objects.filter(local=False, actor_url=base).first()
+        return User.objects.filter(
+            local=True,
+            localname__iexact=match.group(1),
+            suspended_at__isnull=True,
+        ).first()
+    mirror = User.objects.filter(
+        local=False, actor_url=base, suspended_at__isnull=True
+    ).first()
     if mirror is not None:
         return mirror
     if not fetch:

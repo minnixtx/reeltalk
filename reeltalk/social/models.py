@@ -368,11 +368,26 @@ class User(AbstractBaseUser, PermissionsMixin):
         and shelf events alike (R54). You cannot block yourself, so self is
         always present. Following a blocked user stays allowed (R50) but their
         content stays hidden while the block stands.
+
+        A **suspended** account is dropped here too (R102), and by a
+        different rule than the block. A block is per-viewer state that
+        happens to be subtracted from a shared set; suspension is a fact
+        about the followed account that holds for every viewer at once, so
+        it narrows the followed query itself rather than joining the
+        ``blocked`` subtraction. This one method is the feed's whole
+        suspension filter — home statuses and shelf events both come from
+        this membership set.
+
+        Self is unconditional. A suspended user cannot reach this line:
+        ``is_active`` is derived from the same column, so their session is
+        already cut on the request that would have rendered it (R102b).
         """
         blocked = set(self.blocks.values_list("id", flat=True))
         followed = [
             uid
-            for uid in self.follows.values_list("id", flat=True)
+            for uid in self.follows.filter(suspended_at__isnull=True).values_list(
+                "id", flat=True
+            )
             if uid not in blocked
         ]
         return [self.id] + followed

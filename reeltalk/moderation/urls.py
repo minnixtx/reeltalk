@@ -37,6 +37,16 @@ urlpatterns = [
         views.delete_status,
         name="moderation-delete-status",
     ),
+    # Increment 4's heavier verb, aimed at the target *account* — hence a
+    # distinct trailing segment rather than a verb on the delete route.
+    # Unsuspend is NOT here: by the time a suspension is lifted the queue
+    # card that raised it has been drained, so the lift lives on the
+    # profile, which is the only surface that still shows the account.
+    path(
+        "moderate/<int:report_id>/suspend/",
+        views.suspend,
+        name="moderation-suspend",
+    ),
     # Members filing a report, from the reported object's own page.
     path(
         "status/<int:status_id>/report/",
@@ -47,5 +57,14 @@ urlpatterns = [
         "user/<str:localname>/report/",
         views.report_user,
         name="report-user",
+    ),
+    # Lifting a suspension, from the suspended account's own profile. A
+    # moderator route in the member's URL space, because the profile is the
+    # only surface that still shows a suspended account once the queue has
+    # drained (see ``views.unsuspend``).
+    path(
+        "user/<str:localname>/unsuspend/",
+        views.unsuspend,
+        name="user-unsuspend",
     ),
 ]
