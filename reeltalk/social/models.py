@@ -55,6 +55,19 @@ class UserManager(BaseUserManager):
         return self._create_user(localname, password, email=email or "", **extra_fields)
 
 
+class SuspensionOrigin(models.TextChoices):
+    """Who decided that an account is suspended.
+
+    Only ``LOCAL`` has a producer in this increment. A suspension learned
+    from another instance is increment 6's domain-block work, and this enum
+    follows the rule increment 3 established — a value arrives together with
+    the code that writes it, never ahead of it, so the enum never advertises
+    a state nothing can create.
+    """
+
+    LOCAL = ("local", "Suspended by this instance")
+
+
 class User(AbstractBaseUser, PermissionsMixin):
     # The local part of the federated identity localname@domain (§3.2) and
     # the login name (USERNAME_FIELD). Uniqueness is case-sensitive at the
@@ -113,6 +126,30 @@ class User(AbstractBaseUser, PermissionsMixin):
             "moderator can moderate /moderate/ and cannot open the admin."
         ),
     )
+    # Suspension is a *state of the account*, not a Moderation row (R102's
+    # shape): the code that has to answer "may this user act" runs on every
+    # request and must not join across apps to do it. The audit trail of who
+    # suspended whom lives on the Report that prompted it (R106); these three
+    # columns answer the runtime question only.
+    #
+    # NULL means "not suspended" rather than a boolean plus a timestamp, so
+    # there is one fact here and not two that can disagree — the same economy
+    # R93 used for unread state and R102b used to justify deriving is_active.
+    suspended_at = models.DateTimeField(null=True, blank=True, default=None)
+    # Records who decided. Only LOCAL has a producer in this increment: a
+    # remote-sourced suspension is increment 6's domain-block work, and the
+    # value arrives with the code that writes it rather than ahead of it.
+    suspension_origin = models.CharField(
+        max_length=16,
+        choices=SuspensionOrigin.choices,
+        blank=True,
+        default="",
+    )
+    # The moderator's note at the moment of suspension. Kept separate from
+    # the Report's note because the Report pile can be dismissed, resolved a
+    # different way, or never exist at all (a direct suspend from the member
+    # page), while this account has to be able to explain itself on its own.
+    suspension_reason = models.TextField(blank=True, default="")
 
     # Follow/block relations defined up front so M4 builds on them instead of
     # bolting on a profile model (R10). Server-level blocking is a federation
@@ -179,6 +216,81 @@ class User(AbstractBaseUser, PermissionsMixin):
             return False
         self.private_key, self.public_key = generate_keypair()
         self.save(update_fields=["private_key", "public_key"])
+        return True
+
+    @property
+    def is_active(self) -> bool:
+        """Derived from the suspension state — there is no ``is_active`` column.
+
+        ``AbstractBaseUser`` supplies ``is_active = True`` as a plain class
+        attribute and ``ModelBackend.user_can_authenticate`` is literally
+        ``getattr(user, "is_active", True)``, so before R102b there was no way
+        to stop an account logging in at all: ``user.is_active = False`` wrote
+        an unsaved instance attribute that vanished on the next request.
+
+        Deriving rather than storing keeps one source of truth, and because
+        ``get_user()`` runs ``user_can_authenticate`` on **every** request, an
+        already-suspended account's existing sessions are cut on its next
+        click with no session-store work.
+
+        **The cost, and it is not hypothetical:** this is a Python property,
+        not a field, so ``User.objects.filter(is_active=True)`` raises
+        ``FieldError``. Anything that wants active users queries
+        ``suspended_at__isnull=True``. A test pins the raise so nobody
+        rediscovers it in production.
+        """
+        return self.suspended_at is None
+
+    def suspend(
+        self, *, reason: str = "", origin: str = SuspensionOrigin.LOCAL
+    ) -> bool:
+        """Suspend this account: login cut, content hidden, **rows intact** (R102).
+
+        The only writer of the suspension state. Suspend is the reversible
+        half of the pair — Ban (increment 5) is the one that removes content.
+        Nothing here touches a single ``Status`` row, and that is deliberate:
+        Mastodon's suspend does not delete either, because a suspension that
+        gets appealed should not have destroyed the content a hide preserved.
+        The hiding comes from read-side filters, all keyed on
+        ``suspended_at__isnull=True``.
+
+        Local accounts only. A remote mirror cannot be suspended at its home
+        instance from here — the effects available against a remote target are
+        "remove their content here" and "refuse them here", which is
+        increment 6's domain block, not this.
+
+        Returns ``True`` when this call suspended the account and ``False``
+        when it was already suspended, so a caller can tell a decision from a
+        replay rather than assuming.
+        """
+        if self.suspended_at is not None:
+            return False
+        self.suspended_at = timezone.now()
+        self.suspension_origin = origin
+        self.suspension_reason = reason
+        self.save(
+            update_fields=["suspended_at", "suspension_origin", "suspension_reason"]
+        )
+        return True
+
+    def unsuspend(self) -> bool:
+        """Lift a suspension, restoring the account exactly as it was (R102).
+
+        Because suspend deleted nothing, unsuspend has to restore nothing
+        either — clearing the state brings the content back at every read site
+        at once. That symmetry is the point: a reversible action is one whose
+        inverse is cheap and total. Clears the origin and reason with it, so a
+        lifted suspension does not keep a stale explanation of a decision
+        that is no longer in force.
+        """
+        if self.suspended_at is None:
+            return False
+        self.suspended_at = None
+        self.suspension_origin = ""
+        self.suspension_reason = ""
+        self.save(
+            update_fields=["suspended_at", "suspension_origin", "suspension_reason"]
+        )
         return True
 
     @property

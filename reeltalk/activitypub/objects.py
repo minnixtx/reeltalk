@@ -61,11 +61,11 @@ def film_url(request, film) -> str:
     ShelfEvents use this, so other instances resolve the film to their own
     row (local or mirrored) by D7 instead of creating a duplicate.
     """
-    return film.remote_url or absolute_uri(request, f"/film/{film_local_id(film)}/")
+    return film.remote_url or absolute_uri(f"/film/{film_local_id(film)}/")
 
 
 def note_url(request, status) -> str:
-    return absolute_uri(request, f"/status/{note_local_id(status)}/")
+    return absolute_uri(f"/status/{note_local_id(status)}/")
 
 
 def note_reference(request, status) -> str:
@@ -114,7 +114,7 @@ def film_document(film, request) -> dict:
         if values:
             doc[field] = list(values)
     if film.poster:
-        doc["image"] = absolute_uri(request, film.poster.url)
+        doc["image"] = absolute_uri(film.poster.url)
     if film.tmdb_id is not None:
         doc["tmdbId"] = film.tmdb_id
     if film.imdb_id:
@@ -149,7 +149,7 @@ def mention_tag(user, request) -> dict:
     account.
     """
     if user.local:
-        href = absolute_uri(request, actor_path(user.localname))
+        href = absolute_uri(actor_path(user.localname))
     else:
         href = user.actor_url
     return {"type": "Mention", "href": href, "name": f"@{user.localname}"}
@@ -169,7 +169,7 @@ def note_document(status, request) -> dict:
         "@context": _CONTEXT,
         "id": note_url(request, status),
         "type": "Note",
-        "attributedTo": absolute_uri(request, actor_path(status.user.localname)),
+        "attributedTo": absolute_uri(actor_path(status.user.localname)),
         "publishedTime": _iso(status.published_date),
     }
     if status.content:
@@ -208,10 +208,10 @@ def create_activity(status, user, request) -> dict:
     receiving instances can dedup deliveries; the object rides inline.
     """
     return {
-        "id": f"{absolute_uri(request, outbox_path(user.localname))}"
+        "id": f"{absolute_uri(outbox_path(user.localname))}"
         f"#activity-{note_local_id(status)}",
         "type": "Create",
-        "actor": absolute_uri(request, actor_path(user.localname)),
+        "actor": absolute_uri(actor_path(user.localname)),
         "object": note_document(status, request),
         "publishedTime": _iso(status.published_date),
     }
@@ -226,10 +226,10 @@ def update_activity(status, user, request) -> dict:
     update is idempotent by origin identity on the receiving side.
     """
     return {
-        "id": f"{absolute_uri(request, outbox_path(user.localname))}"
+        "id": f"{absolute_uri(outbox_path(user.localname))}"
         f"#update-{note_local_id(status)}-{uuid.uuid4().hex}",
         "type": "Update",
-        "actor": absolute_uri(request, actor_path(user.localname)),
+        "actor": absolute_uri(actor_path(user.localname)),
         "object": note_document(status, request),
     }
 
@@ -243,10 +243,10 @@ def delete_activity(status, user, request) -> dict:
     without a fetch.
     """
     return {
-        "id": f"{absolute_uri(request, outbox_path(user.localname))}"
+        "id": f"{absolute_uri(outbox_path(user.localname))}"
         f"#delete-{note_local_id(status)}",
         "type": "Delete",
-        "actor": absolute_uri(request, actor_path(user.localname)),
+        "actor": absolute_uri(actor_path(user.localname)),
         "object": note_document(status, request),
     }
 
@@ -279,7 +279,7 @@ def like_activity(liker, target, request, *, undo: bool) -> dict:
     like by (actor, target) — the unique ``(user, status)`` pair R83
     decision 4 put on the table *is* that key — not by resolving an id.
     """
-    actor = absolute_uri(request, actor_path(liker.localname))
+    actor = absolute_uri(actor_path(liker.localname))
     like = {
         "id": f"{actor}#like-{uuid.uuid4().hex}",
         "type": "Like",
@@ -307,7 +307,7 @@ def shelf_event_document(user, film, identifier: str, request) -> dict:
     """
     return {
         "@context": _CONTEXT,
-        "id": f"{absolute_uri(request, actor_path(user.localname))}"
+        "id": f"{absolute_uri(actor_path(user.localname))}"
         f"#shelve-{identifier}-{film_local_id(film)}",
         "type": "ShelfEvent",
         "film": film_url(request, film),
@@ -324,9 +324,9 @@ def shelf_event_activity(user, film, identifier: str, request, *, added: bool) -
     ``shelf_event_document``).
     """
     return {
-        "id": f"{absolute_uri(request, outbox_path(user.localname))}"
+        "id": f"{absolute_uri(outbox_path(user.localname))}"
         f"#shelve-{identifier}-{film_local_id(film)}-{uuid.uuid4().hex}",
         "type": "Create" if added else "Delete",
-        "actor": absolute_uri(request, actor_path(user.localname)),
+        "actor": absolute_uri(actor_path(user.localname)),
         "object": shelf_event_document(user, film, identifier, request),
     }

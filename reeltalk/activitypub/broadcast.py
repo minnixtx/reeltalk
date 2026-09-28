@@ -31,7 +31,7 @@ own data is not a social act).
 
 import requests
 
-from .delivery import deliver_activity, inbox_for
+from .delivery import DeliveryFailure, deliver_activity, inbox_for
 from .identity import absolute_uri, actor_path
 from .objects import (
     create_activity,
@@ -42,36 +42,48 @@ from .objects import (
 )
 
 
-def _deliver_signed(request, actor, activity: dict, recipients) -> None:
+def _deliver_signed(
+    request, actor, activity: dict, recipients
+) -> list[DeliveryFailure]:
     """Deliver ``activity`` to each remote recipient, signed as ``actor``.
 
     ``actor`` signs with their own key — a local user always has one, a
     mirror never does, so the signer is whoever locally caused the activity.
     Local recipients are skipped: they read the local rows their own queries
     already see, so a delivery to one would be a POST with nothing new to
-    say. A recipient whose inbox cannot be reached drops its send — v0.1 has
-    no retry queue, and the caller's request must not fail because of one
-    unreachable instance.
+    say.
+
+    **A failed send is returned, not swallowed.** v0.1 has no retry queue and
+    the caller's request must not fail because of one unreachable instance,
+    so this never raises — but it used to ``continue`` in silence, which left
+    the caller unable to tell a moderator that the remote copy is still up.
+    Every recipient that did not get a 2xx comes back in the returned list
+    with the reason, so a surface that owes its actor the truth can pay it.
     """
-    signer = absolute_uri(request, actor_path(actor.localname))
+    signer = absolute_uri(actor_path(actor.localname))
+    key_id = f"{signer}#main-key"
+    failures: list[DeliveryFailure] = []
     for recipient in recipients:
         if recipient.local:
             continue
+        inbox = inbox_for(recipient)
         try:
-            deliver_activity(
-                inbox_for(recipient),
-                activity,
-                actor.private_key,
-                f"{signer}#main-key",
+            response = deliver_activity(inbox, activity, actor.private_key, key_id)
+        except requests.RequestException as exc:
+            failures.append(
+                DeliveryFailure(recipient, inbox, str(exc) or type(exc).__name__)
             )
-        except requests.RequestException:
-            # Dropped: the local state is committed; the recipient's copy lags.
             continue
+        if not 200 <= response.status_code < 300:
+            failures.append(
+                DeliveryFailure(recipient, inbox, f"HTTP {response.status_code}")
+            )
+    return failures
 
 
-def _deliver_to_followers(request, author, activity: dict) -> None:
+def _deliver_to_followers(request, author, activity: dict) -> list[DeliveryFailure]:
     """Deliver ``activity`` to every remote follower of ``author``."""
-    _deliver_signed(request, author, activity, author.followers.all())
+    return _deliver_signed(request, author, activity, author.followers.all())
 
 
 def _mentioned_remote_users(status):
@@ -128,7 +140,7 @@ def broadcast_status_create(request, status) -> None:
     because of somebody else's server.
     """
     activity = create_activity(status, status.user, request)
-    _deliver_signed(request, status.user, activity, _status_targets(status))
+    return _deliver_signed(request, status.user, activity, _status_targets(status))
 
 
 def broadcast_status_update(request, status) -> None:
@@ -140,7 +152,7 @@ def broadcast_status_update(request, status) -> None:
     which ``sync_status_mentions`` is what the write sites call for.
     """
     activity = update_activity(status, status.user, request)
-    _deliver_signed(request, status.user, activity, _status_targets(status))
+    return _deliver_signed(request, status.user, activity, _status_targets(status))
 
 
 def broadcast_status_delete(request, status) -> None:
@@ -149,7 +161,7 @@ def broadcast_status_delete(request, status) -> None:
     The tombstone keeps its identity (soft-delete — §3.2), so the Note rides
     inline and the receiver keys the deletion by origin id.
     """
-    _deliver_to_followers(
+    return _deliver_to_followers(
         request, status.user, delete_activity(status, status.user, request)
     )
 
@@ -163,7 +175,7 @@ def broadcast_shelf_event(request, user, film, identifier: str, *, added: bool) 
     so an unshelve-then-re-shelve is not deduped away on the receiving side.
     """
     activity = shelf_event_activity(user, film, identifier, request, added=added)
-    _deliver_to_followers(request, user, activity)
+    return _deliver_to_followers(request, user, activity)
 
 
 def broadcast_like(request, status, user, *, liked: bool) -> None:
@@ -181,7 +193,7 @@ def broadcast_like(request, status, user, *, liked: bool) -> None:
     sentence with "not" in it, and the pair must never drift.
     """
     activity = like_activity(user, status, request, undo=not liked)
-    _deliver_signed(request, user, activity, [status.user])
+    return _deliver_signed(request, user, activity, [status.user])
 
 
 def broadcast_reply(request, reply) -> None:
@@ -210,4 +222,4 @@ def broadcast_reply(request, reply) -> None:
     """
     activity = create_activity(reply, reply.user, request)
     targets = _status_targets(reply, extra=[reply.reply_parent.user])
-    _deliver_signed(request, reply.user, activity, targets)
+    return _deliver_signed(request, reply.user, activity, targets)

@@ -36,6 +36,24 @@ SECURE_PROXY_SSL_HEADER = (
     ("HTTP_X_FORWARDED_PROTO", "https") if TRUSTED_PROXIES else None
 )
 
+
+# The one origin every ActivityPub identity is minted from. Deliberately not the
+# request's host+scheme: a moderator acting over http://192.168.1.138:3030
+# would otherwise sign a keyid and mint object ids on a LAN address no internet
+# peer can resolve, and the peer's 401 would be the only trace of it.
+def canonical_origin(domain: str, override: str = "") -> str:
+    """The instance's canonical public origin, from ``DOMAIN`` unless overridden.
+
+    https is the federation-correct default because TLS terminates upstream
+    (D14); a plain-HTTP operator instance sets ``CANONICAL_ORIGIN``
+    explicitly. A trailing slash is stripped so callers can append a path
+    without producing ``//user/…``.
+    """
+    return (override or f"https://{domain}").rstrip("/")
+
+
+CANONICAL_ORIGIN = canonical_origin(DOMAIN, env.str("CANONICAL_ORIGIN", default=""))
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",

@@ -256,7 +256,7 @@ def _invite_context(request, profile_user) -> dict:
     invite = Invite.objects.filter(code=code, created_by=profile_user).first()
     if invite is not None:
         out["invite"] = invite
-        out["invite_link"] = absolute_uri(request, f"/invite/{invite.code}/")
+        out["invite_link"] = absolute_uri(f"/invite/{invite.code}/")
     return out
 
 

@@ -59,6 +59,12 @@ env = [
     "DEBUG = true",
     "DOMAIN = localhost",
     "ALLOWED_HOSTS = localhost",
+    # ActivityPub identities are minted from CANONICAL_ORIGIN, not from the
+    # request (R108). In tests that origin is the host Django's test client
+    # presents, so the suite keeps asserting the URLs it already knows while
+    # still exercising the real code path — which no longer reads the request
+    # at all. Tests that need a different origin override it explicitly.
+    "CANONICAL_ORIGIN = http://testserver",
     # Private, throwaway MEDIA_ROOT: the suite saves tiny fake posters and
     # would otherwise litter the shared media volume (2026-09-10 poster
     # incident cleanup). /tmp is fresh per `docker compose run`.

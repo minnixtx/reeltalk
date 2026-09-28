@@ -364,3 +364,31 @@ def delete_reported_status(report, *, by_user, note=""):
         )
         status.delete()
     return status, count
+
+
+def record_federation_outcome(report, line: str) -> int:
+    """Append a federation outcome to every row in this report's pile (R106).
+
+    R106's rule is that a decision must never be unexplainable after the
+    fact, and the report note is the only record this arc keeps. "The post
+    was deleted here but three remote servers were never told" is exactly the
+    fact a reader needs six months later, and it is unknowable from the row
+    otherwise — the local write and the broadcast are deliberately separate
+    transactions, so the delete succeeding says nothing about delivery.
+
+    Appended rather than replacing because the moderator's own note is
+    theirs; this line is the system reporting what it managed to do.
+    Target-scoped for the same reason ``dismiss_report`` and
+    :func:`delete_reported_status` are — the pile is the unit of work, so
+    every row in it carries the same decision and the same outcome.
+    """
+    rows = Report.objects.filter(
+        target_user_id=report.target_user_id,
+        target_status_id=report.target_status_id,
+    )
+    updated = 0
+    for row in rows:
+        row.note = f"{row.note}\n{line}".strip() if row.note else line
+        row.save(update_fields=["note"])
+        updated += 1
+    return updated

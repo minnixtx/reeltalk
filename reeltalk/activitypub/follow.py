@@ -74,7 +74,7 @@ def _answer_follow(
     """
     if not followed.local or not followed.private_key:
         return
-    acceptor = absolute_uri(request, actor_path(followed.localname))
+    acceptor = absolute_uri(actor_path(followed.localname))
     activity_type = "Accept" if accepted else "Reject"
     deliver_activity(
         inbox_for(sender),
@@ -269,7 +269,7 @@ def _deliver_follow(request, follower: User, mirror: User, *, undo: bool):
         follower.follows.remove(mirror)
     else:
         follower.follows.add(mirror)
-    actor = absolute_uri(request, actor_path(follower.localname))
+    actor = absolute_uri(actor_path(follower.localname))
     activity = _follow_activity(actor, mirror, undo=undo)
     deliver_activity(
         inbox_for(mirror), activity, follower.private_key, f"{actor}#main-key"

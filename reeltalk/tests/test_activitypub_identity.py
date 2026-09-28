@@ -238,39 +238,95 @@ def test_actor_endpoint_remote_mirror_404(client):
 
 
 @pytest.mark.django_db
-def test_actor_endpoint_follows_forwarded_proto_from_a_trusted_proxy(client):
+def test_published_identity_comes_from_the_canonical_origin_not_the_request(client):
+    # The bug this pins: a moderator driving the queue from the LAN over plain
+    # HTTP used to mint actor ids, object ids and keyids on
+    # http://192.168.1.138:3030 — a host no internet peer can resolve, so
+    # every broadcast from that session died with "Public key not found" while
+    # the moderator saw success. Identity is minted from CANONICAL_ORIGIN now,
+    # so the acting host never reaches it.
     User.objects.create_user(localname="alice", password="p")
     with override_settings(
-        TRUSTED_PROXIES=["192.168.1.141/32"],
-        SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"),
+        CANONICAL_ORIGIN="https://reeltalk.minnix.dev",
+        # The LAN host is allowed to serve, exactly as it is in the real deploy's
+        # ALLOWED_HOSTS — that is what made the bug reachable at all. Being
+        # allowed to serve is not the same as being allowed to be published.
+        ALLOWED_HOSTS=["localhost", "192.168.1.138"],
     ):
-        # Host is sent explicitly because a real proxy always sends one: with
-        # no Host header Django rebuilds it from SERVER_NAME/SERVER_PORT and
-        # appends the port whenever it isn't 443 on a secure request, which
-        # would publish "testserver:80" and hide the actual behaviour here.
         response = client.get(
             "/user/alice/",
             HTTP_ACCEPT="application/activity+json",
-            HTTP_X_FORWARDED_PROTO="https",
-            HTTP_HOST="testserver",
-            REMOTE_ADDR="192.168.1.141",
+            HTTP_HOST="192.168.1.138:3030",
         )
-    assert response.json()["id"] == "https://testserver/user/alice/"
+    doc = response.json()
+    assert doc["id"] == "https://reeltalk.minnix.dev/user/alice/"
+    assert doc["publicKey"]["id"] == "https://reeltalk.minnix.dev/user/alice/#main-key"
+    assert doc["inbox"] == "https://reeltalk.minnix.dev/user/alice/inbox/"
+    assert doc["endpoints"]["sharedInbox"] == "https://reeltalk.minnix.dev/inbox/"
+    # Not one field of a published document carries the LAN address, whatever
+    # the browser used to ask for it.
+    assert "192.168.1.138" not in response.content.decode()
 
 
 @pytest.mark.django_db
-def test_actor_endpoint_ignores_forwarded_proto_from_an_untrusted_peer(client):
-    # Same header, different peer: the actor id stays on the real scheme. A
-    # stranger must not be able to push our identity onto https (R74) — the
-    # scheme we publish is only ever what our own TLS terminator reported.
+@pytest.mark.parametrize(
+    "remote_addr, forwarded_proto",
+    [
+        ("192.168.1.141", "https"),  # the trusted terminator
+        ("203.0.113.9", "https"),  # a stranger spoofing it
+        ("203.0.113.9", "http"),
+        ("127.0.0.1", "https"),
+    ],
+)
+def test_no_transport_header_can_rewrite_a_published_identity(
+    client, remote_addr, forwarded_proto
+):
+    # R74 gated X-Forwarded-Proto so a stranger could not pick the scheme we
+    # publish. Minting from CANONICAL_ORIGIN removes the whole surface: the
+    # document no longer reads the transport at all, so there is nothing left
+    # for any peer — trusted or not — to influence. The gate still governs
+    # request.is_secure() and the cookie flags, which is where the transport
+    # genuinely matters (see test_proxy_trust / test_cookie_policy).
     User.objects.create_user(localname="alice", password="p")
-    response = client.get(
-        "/user/alice/",
-        HTTP_ACCEPT="application/activity+json",
-        HTTP_X_FORWARDED_PROTO="https",
-        REMOTE_ADDR="203.0.113.9",
-    )
-    assert response.json()["id"] == "http://testserver/user/alice/"
+    with override_settings(
+        CANONICAL_ORIGIN="https://reeltalk.minnix.dev",
+        ALLOWED_HOSTS=["localhost", "192.168.1.138"],
+        TRUSTED_PROXIES=["192.168.1.141/32"],
+        SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"),
+    ):
+        response = client.get(
+            "/user/alice/",
+            HTTP_ACCEPT="application/activity+json",
+            HTTP_X_FORWARDED_PROTO=forwarded_proto,
+            HTTP_HOST="192.168.1.138:3030",
+            REMOTE_ADDR=remote_addr,
+        )
+    assert response.json()["id"] == "https://reeltalk.minnix.dev/user/alice/"
+    assert "192.168.1.138" not in response.content.decode()
+
+
+@pytest.mark.parametrize(
+    "domain, override, expected",
+    [
+        # No override: the federation-correct default is https on DOMAIN, so
+        # an operator who sets nothing still publishes resolvable identities.
+        ("reeltalk.example.com", "", "https://reeltalk.example.com"),
+        # DOMAIN may carry an explicit port (R52) and the origin carries it through.
+        ("192.168.1.138:3030", "", "https://192.168.1.138:3030"),
+        # A plain-HTTP operator overrides explicitly.
+        (
+            "192.168.1.138:3030",
+            "http://192.168.1.138:3030",
+            "http://192.168.1.138:3030",
+        ),
+        # A trailing slash on the override never becomes a doubled slash.
+        ("example.com", "https://example.com/", "https://example.com"),
+    ],
+)
+def test_the_canonical_origin_is_derived_from_domain(domain, override, expected):
+    from reeltalk.settings import canonical_origin
+
+    assert canonical_origin(domain, override) == expected
 
 
 @pytest.mark.django_db

@@ -19,6 +19,8 @@ real ``Delete`` to the reported post author's remote followers. R104's
 is recorded and read here but is not yet sent to their home instance.
 """
 
+from urllib.parse import urlparse
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
@@ -36,6 +38,7 @@ from reeltalk.moderation.models import (
     delete_reported_status,
     dismiss_report,
     file_report,
+    record_federation_outcome,
 )
 from reeltalk.social.views import _resolve_profile_user
 
@@ -218,9 +221,22 @@ def delete_status(request, report_id):
     # The local write commits inside the helper, before any network call, so
     # a dead follower can never lose the deletion or the audit record.
     _, count = delete_reported_status(report, by_user=request.user, note=note)
-    if status.user.local:
-        broadcast_status_delete(request, status)
-    if count > 1:
+    failures = broadcast_status_delete(request, status) if status.user.local else []
+    if failures:
+        hosts = ", ".join(
+            sorted({urlparse(f.inbox).netloc or f.inbox for f in failures})
+        )
+        record_federation_outcome(
+            report,
+            f"[federation] {len(failures)} remote recipient(s) not notified: {hosts}",
+        )
+        messages.warning(
+            request,
+            f"Post deleted here, but {len(failures)} remote "
+            f"{'server was' if len(failures) == 1 else 'servers were'} "
+            f"not notified ({hosts}). Their copies may still be up.",
+        )
+    elif count > 1:
         messages.success(request, f"Post deleted; {count} reports about it resolved.")
     else:
         messages.success(request, "Post deleted.")

@@ -15,10 +15,14 @@ remote's copy of it lags until the next delivery or an outbox backfill).
 
 import json
 import logging
+from typing import TYPE_CHECKING, NamedTuple
 
 import requests
 
 from .signatures import sign_request
+
+if TYPE_CHECKING:
+    from reeltalk.social.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +57,22 @@ def with_context(activity: dict) -> dict:
     if "@context" in activity:
         return activity
     return {"@context": AS_CONTEXT, **activity}
+
+
+class DeliveryFailure(NamedTuple):
+    """One recipient that did not receive an activity, and why.
+
+    Delivery has always known when it failed — it logs a warning on every
+    non-2xx (R88) — but the knowledge stopped at the log. A caller that
+    cannot see the outcome cannot tell a moderator that the remote copy is
+    still up, which is the difference between a lagging peer and a lie.
+    Returned rather than raised: the local write is already committed, and a
+    dead follower must not turn a successful local action into an error.
+    """
+
+    recipient: "User"
+    inbox: str
+    reason: str
 
 
 def inbox_for(follower) -> str:

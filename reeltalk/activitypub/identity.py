@@ -7,13 +7,15 @@ browsers to the films page. The user's collections sit under the same path
 (``inbox/``, ``outbox/``, ``followers/``, ``following/`` — their routes land
 in increments 3-4), and the instance has one shared inbox at ``/inbox/``.
 
-URLs are built from the request so they carry the host as sent and the
-scheme the trusted-proxy gate settled on (D14, R74) — the same single
-trusted source as signature verification (R39). The wire document itself is
-built fresh against the ActivityPub spec (R7); federation targets are
+URLs are minted from ``settings.CANONICAL_ORIGIN`` rather than from the request,
+so an identifier never depends on which host or scheme the actor's browser
+happened to use (see ``absolute_uri``). The wire document itself is built fresh
+against the ActivityPub spec (R7); federation targets are
 ReelTalk instances and current Mastodon, so no legacy server's extensions
 are needed (R39).
 """
+
+from django.conf import settings
 
 from .crypto import public_key_multibase
 
@@ -57,18 +59,23 @@ def shared_inbox_path() -> str:
     return "/inbox/"
 
 
-def absolute_uri(request, path: str) -> str:
-    """Absolute URL for a site path.
+def absolute_uri(path: str) -> str:
+    """Absolute URL for a site path, on the instance's canonical origin.
 
-    The scheme is ``request.scheme``, which ``TrustedProxySchemeMiddleware``
-    has already reconciled with the operator terminator's forwarded
-    ``X-Forwarded-Proto`` (D14, R74); reading that header here instead would
-    give this module a second, ungated path to a scheme a stranger picked.
-    The authority is the host as sent (``get_host()`` reads the Host header,
-    falling back to the server name) — so documents served behind the proxy
-    carry public URLs.
+    Minted from ``settings.CANONICAL_ORIGIN``, never from the request. An
+    ActivityPub identifier has to be resolvable by whoever receives it, and the
+    host and scheme the acting browser happened to use say nothing about what a
+    peer can reach: a moderator working from ``http://192.168.1.138:3030``
+    would otherwise sign ``http://192.168.1.138:3030/user/alice/#main-key``
+    and mint a ``Delete`` whose object id does not match the
+    ``https://…/status/123/`` the peer already holds. Taking the request out of
+    this function removes that whole class rather than guarding it, and it also
+    means a spoofed ``X-Forwarded-Proto`` can no longer rewrite a published
+    identity at all — the gate in ``TrustedProxySchemeMiddleware`` (R74) still
+    governs ``request.is_secure()`` and the cookie flags, which is where the
+    transport actually matters.
     """
-    return f"{request.scheme}://{request.get_host()}{path}"
+    return f"{settings.CANONICAL_ORIGIN}{path}"
 
 
 def reference_url(value) -> str | None:
@@ -131,7 +138,7 @@ def person_document(user, request) -> dict:
     and prefers the typed entry, so the two never disagree about which key a
     keyid names.
     """
-    actor = absolute_uri(request, actor_path(user.localname))
+    actor = absolute_uri(actor_path(user.localname))
     key_id = f"{actor}#main-key"
     doc = {
         "@context": [
@@ -146,11 +153,11 @@ def person_document(user, request) -> dict:
         "preferredUsername": user.localname,
         "name": user.display_name or user.localname,
         "url": actor,
-        "inbox": absolute_uri(request, inbox_path(user.localname)),
-        "outbox": absolute_uri(request, outbox_path(user.localname)),
-        "followers": absolute_uri(request, followers_path(user.localname)),
-        "following": absolute_uri(request, following_path(user.localname)),
-        "endpoints": {"sharedInbox": absolute_uri(request, shared_inbox_path())},
+        "inbox": absolute_uri(inbox_path(user.localname)),
+        "outbox": absolute_uri(outbox_path(user.localname)),
+        "followers": absolute_uri(followers_path(user.localname)),
+        "following": absolute_uri(following_path(user.localname)),
+        "endpoints": {"sharedInbox": absolute_uri(shared_inbox_path())},
         "publicKey": {
             "id": key_id,
             "owner": actor,
@@ -173,5 +180,5 @@ def person_document(user, request) -> dict:
     if user.summary:
         doc["summary"] = user.summary
     if user.avatar:
-        doc["image"] = absolute_uri(request, user.avatar.url)
+        doc["image"] = absolute_uri(user.avatar.url)
     return doc

@@ -60,7 +60,7 @@ def webfinger(request):
     user = _local_user(localname)
     if user is None:
         return HttpResponse(status=404)
-    actor = absolute_uri(request, actor_path(user.localname))
+    actor = absolute_uri(actor_path(user.localname))
     doc = {
         "subject": f"acct:{user.localname}@{settings.DOMAIN}",
         "aliases": [actor],
@@ -68,8 +68,7 @@ def webfinger(request):
             {
                 "rel": "lrdd",
                 "type": "application/link-descriptions+json",
-                "template": absolute_uri(request, "/.well-known/webfinger")
-                + "?resource={uri}",
+                "template": absolute_uri("/.well-known/webfinger") + "?resource={uri}",
             },
             {
                 "rel": "http://webfinger.net/rel/profile-page",
@@ -89,7 +88,7 @@ def nodeinfo_index(request):
         "links": [
             {
                 "rel": "http://nodeinfo.digip.org/spec/2.0",
-                "href": absolute_uri(request, "/nodeinfo/2.0"),
+                "href": absolute_uri("/nodeinfo/2.0"),
             }
         ]
     }
@@ -146,7 +145,7 @@ def outbox(request, localname):
     user = _local_user(localname)
     if user is None:
         return HttpResponse(status=404)
-    collection_url = absolute_uri(request, outbox_path(user.localname))
+    collection_url = absolute_uri(outbox_path(user.localname))
     statuses = (
         Status.objects.filter(user=user, deleted=False, local=True)
         .select_related("user", "film", "reply_parent")
@@ -206,7 +205,7 @@ def followers(request, localname):
     user = _local_user(localname)
     if user is None:
         return HttpResponse(status=404)
-    url = absolute_uri(request, followers_path(user.localname))
+    url = absolute_uri(followers_path(user.localname))
     return _person_collection(request, user, url, user.followers.all())
 
 
@@ -216,7 +215,7 @@ def following(request, localname):
     user = _local_user(localname)
     if user is None:
         return HttpResponse(status=404)
-    url = absolute_uri(request, following_path(user.localname))
+    url = absolute_uri(following_path(user.localname))
     return _person_collection(request, user, url, user.follows.all())
 
 
