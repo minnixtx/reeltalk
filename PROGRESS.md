@@ -2319,7 +2319,7 @@ Logging in as `probea` over the real route showed the badge at **`1 unread`**, t
 
 ## 2D. Forward plan — moderation and reporting: the moderator role, the queue, suspension and ban
 
-**Increments 1–3 are built; increment 4 is PARTIALLY built (4a: the scheme/trust opener and the suspension model layer, 2026-09-28 — see the execution record at the end of this section for the read-site enumeration the rest of the increment works from); increment 4's read-filter pass and suspend action remain, then 5–6.** Written 2026-09-26 as a forward plan in the §2B/§2C shape, so a session can be pointed at one increment instead of re-deriving the feature. Owner request: *"create a plan for site moderation and reporting. The plan will be broken down into easy-to-complete individual increments so that each increment can be completed by a single session."* All ten shape decisions were settled by the owner before any code was written, as **R98–R107**, and **R103b amended R103 on 2026-09-27** during increment 3 — read both, R103b governs. Six increments, each sized for one session and ending at a committed, gate-verified checkpoint.
+**Increments 1–5 are built (4a `c2a21f2`, 4b `787c68e`+`c679734`, 5 this session, 2026-09-28); only increment 6 remains.** Increment 5 shipped the ban: content removed, `410 Gone` at every actor surface, the localname reserved case-insensitively, a sender-scoped `Delete(Person)` with a precisely enumerated audience, and the lift on `/moderate/` — see its execution record at the end of this section. **The owner settled the one open authority question before code: a moderator may both impose and lift a ban (R109).** Increment 5 is **not deployed** and **not live-verified** (mock-only; the browser round-trip against the owner's Mastodon is handed off, not run). Written 2026-09-26 as a forward plan in the §2B/§2C shape, so a session can be pointed at one increment instead of re-deriving the feature. Owner request: *"create a plan for site moderation and reporting. The plan will be broken down into easy-to-complete individual increments so that each increment can be completed by a single session."* All ten shape decisions were settled by the owner before any code was written, as **R98–R107**, **R103b amended R103 on 2026-09-27** during increment 3, and **R109 amended R102's lift clause on 2026-09-28** during increment 5 — read both halves of each; the later governs. Six increments, each sized for one session and ending at a committed, gate-verified checkpoint.
 
 ### The finding that sets the scope
 
@@ -2403,7 +2403,7 @@ Each sized for one session, ending committed and gate-verified. **Baseline is `1
 2. **✅ DONE 2026-09-27 — the report and the queue.** `Report` model + migration; report controls on a status page and a profile; the POST routes; `/moderate/` rendering unresolved reports with the reported content inline, the reporter, the target, and a dismiss action. Tests: the `(reporter, target)` dedup, cannot report your own content, members-only for the control and moderator-only for the queue, category validation, the dismiss records who and when, and the once-per-unresolved-target notify rule. Ends at: a member reports a post, the moderator sees it and dismisses it. **Two sub-decisions were made inside the settled shape, both recorded in the execution record below and neither re-opening R98–R107: the category set is `spam` + `other` (by elimination — §2D puts `legal` out of scope, and Mastodon's `violation` needs a `rule_ids` ruleset this instance does not have), and the queue is one card per unresolved target with dismiss acting on the whole pile rather than the single row.** **The dedup needs `nulls_distinct=False` and the shape note above does not say so** — see the execution record; without it the trio dedups a status report and does nothing at all for a profile report.
 3. **✅ DONE 2026-09-27/28 (`a2fa978`) — the moderator content action.** Delete a reported status from the queue — `Status.delete()` + `broadcast_status_delete`, recorded on the report. Almost no new machinery: the delete path and the broadcast are both already live and author-only today; this widens the permission and records the decision. Tests: the status is soft-deleted and absent at the read sites, the broadcast fires, the report records `delete_status`, and `can_act_on` refuses a superuser's content. **Delivered as specified, plus four measured findings in the execution record below — the mirrored-author broadcast hazard, the resolved-report-is-not-a-live-handle guard, two redundant clauses in `can_act_on`, and R103b.**
 4. **Suspension.** Split in two. **4a (`c2a21f2`) shipped the scheme/trust layer and the model layer** — `CANONICAL_ORIGIN`, the `DeliveryFailure` return channel, `record_federation_outcome`, `suspended_at` / `suspension_origin` / `suspension_reason`, `is_active` as the derived property, `suspend()` / `unsuspend()`, and the read-site enumeration. **4b (this session) shipped the read filter at every enumerated site, the suspend/unsuspend action, and the live verification.** See the two execution records below.
-5. **Ban.** Content removed, profile `410 Gone`, localname reserved, `Delete(Person)` broadcast, admin-only lift. **The reservation must be case-insensitive** — R40 makes case variants one identity and signup already rejects insensitive duplicates, so reserving `alice` while `Alice` stays free hands the banned identity to a new registrant. Existing `StatusMention` rows pointing at a banned account must render sanely, not 500.
+5. ✅ **Ban.** *(executed 2026-09-28 — record at the end of §2D.)* Content removed, profile `410 Gone`, localname reserved, `Delete(Person)` broadcast, admin-only lift. **The reservation must be case-insensitive** — R40 makes case variants one identity and signup already rejects insensitive duplicates, so reserving `alice` while `Alice` stays free hands the banned identity to a new registrant. Existing `StatusMention` rows pointing at a banned account must render sanely, not 500. **Amended before coding by the owner: the lift is not admin-only — a moderator may both impose and lift (R109).** Not deployed; not live-verified (mock-only, browser test handed to the owner).
 6. **`Flag` both directions + the domain block.** Outbound: a report about a remote user forwarded to their home instance with the reporter masked to the instance representative — **live proof read off Mastodon's own `reports` table, not our status code (R88).** Inbound: `Flag` registered in `HANDLERS`, creating a queue row keyed on the verified sender. Domain block refusing inbound activity from a host and hiding its accounts. This increment also settles the local/remote-target question named under *Shape*.
 
 ### Traps to design around, not discover late
@@ -2667,6 +2667,195 @@ Their `Activity::Update` routes a `Person` object through `update_account` → `
 
 **Two things the probe initially got wrong, both worth keeping as traps.** (1) `requests` follows 302s by default, which turned "redirected to the login page" into a `200` that looked like the page was served — every redirect claim in a probe like this is a **false pass** unless `allow_redirects=False`. (2) `User.objects.filter(pk__in=[<User instances>])` raises `TypeError: Field 'id' expected a number` — `AutoField.get_prep_value` does `int(value)`. Inside `transaction.atomic()` that rolls the whole teardown back and silently leaves the probe's data behind. Use explicit `*_id` pks.
 
+
+### Increment 5 execution record — the ban (executed 2026-09-28)
+
+**What landed.** `User.banned_at` / `ban_reason` with `social.0012`; `is_active`
+derived from **both** severities; `User.ban()` / `unban()` as the only writers,
+with `User.remove_all_content()` as the named removal step; `Report.Action.BAN`
+with `moderation.0004`; `ban_reported_member()` resolving the pile in the
+dismiss/delete/suspend shape; `person_delete_activity()` and
+`broadcast_person_delete()` plus `person_delete_audience()`; `410 Gone` at the
+profile, the films tab, webfinger, the outbox, both person collections, the
+per-actor inbox; banned members dropped from `feed_member_ids` and from
+`_person_collection`; `notify()` refusing both directions; the follow route
+refusing a banned target; the ban disclosure on the queue card; and a
+**Banned accounts** section on `/moderate/` carrying the lift.
+
+**The owner's one open call, made before any code: a moderator may ban and lift.**
+§2D said "liftable by the site admin only" and never said who may impose one.
+Under R103b as written a moderator could already reach a regular user, so the
+literal reading permitted the ban and forbade the undo — an asymmetric power to
+destroy what you cannot restore. The owner chose symmetry in the other direction:
+**whoever may impose a ban may lift it, and nobody else may do either.** This
+amends R102's lift clause and is recorded as **R109**. It leaves `can_act_on`
+byte-identical and used unchanged by both verbs, which is the cleanest possible
+outcome: no second reach guard, no severity-specific rule, nothing to drift.
+
+**Mastodon's `Delete(Person)` is sender-scoped, and that decides the wire.**
+`Activity::Delete#perform` opens with `return delete_person if @account.uri ==
+object_uri`, where `@account` is the **signature-verified** sender. So a
+`Delete(Person)` signed by the moderator about somebody else does not delete
+that person — it fails the `==` and falls through to the status-delete branch,
+finding nothing. Three consequences now pinned by tests: the `object` is the
+**bare actor URI**, not an embedded Person document; the activity must be
+**signed as the banned user** (matching the peer's own
+`DeleteActorSerializer(signer: @account, always_sign: true)`); and the activity
+id is **deterministic**, `<actor>#delete`, so a replayed delivery dedupes
+instead of arriving as new news. Read off the peer rather than assumed, per 4b's
+instruction not to expect `Delete` to mirror `Update`.
+
+**Their audience is two-tier, which is §2D's hard question answered.**
+`delivery_inboxes = @account.followers.inboxes + Relay.enabled` and
+`low_priority_delivery_inboxes = Account.inboxes - delivery_inboxes` — every
+account the instance knows about. We enumerate instead of fanning out, because
+here the sets *are* knowable: **followers ∪ remote users the actor mentioned ∪
+remote authors the actor replied to.** The last two are exactly the groups
+`broadcast_status_create` and `broadcast_reply` deliver to without following the
+actor, so a follower-only audience would leave each of them holding a copy of a
+dead actor's content forever. Not scoped to live statuses — a recipient holds
+the content whatever later became of it, and the delete is equally true now.
+Chosen over Mastodon's blunt `Account.inboxes` because our delivery is
+synchronous with no retry queue: "everyone who got this actor's content" is a
+request that finishes; "every account we have ever seen" is not necessarily.
+
+**One activity, not one per status.** A peer that accepts a `Delete(Person)`
+removes its mirror *and everything hanging off it*, so per-status deletes
+multiply the synchronous POST count by the target's output to say something the
+person delete already says. A literal reading of R102's "each status soft-deleted,
+`Delete` broadcast" would have put `statuses × followers` POSTs inside one
+moderator request. Pinned by a test that bans a three-status member with a remote
+follower and asserts exactly one call.
+
+**A half-ban was found by a test that did not go through the view.** The first
+cut put the soft-delete in `ban_reported_member` and left `User.ban()` writing
+only the state. `test_the_banned_users_review_is_gone_from_the_film_page`
+called the model directly and found the review **still sitting on the film
+page** — login cut, profile gone, content untouched. That is a state with no
+name and no explanation, and every future caller (a management command, an
+import hook, a bulk tool) would have inherited it. The removal now lives inside
+the one writer, inside one transaction, so there is no way to ban without it and
+`ban_reported_member` is back to being what it should be: the pile resolver that
+calls the state transition.
+
+**The lift surface was forced by the tombstone, and the rule generalises.** 4b
+put the unsuspend control on the profile because R102 requires a suspended
+account to keep a visible page that explains itself. A ban deliberately leaves
+**no** public page — the profile is `410 Gone`, which is the point of the
+action, not an oversight to route around. So the surface that still shows a
+banned account is the moderator's, and the lift lives on `/moderate/` in a
+Banned accounts section rendered *outside* the "nothing to review" branch,
+because a drained queue with a live ban is exactly the moment it is needed.
+The rule worth keeping: **the lift lives on the surface that still shows the
+account.** That is why unsuspend and unban sit in different places.
+
+**What a lift does not restore, stated before the click rather than after.**
+`Status.delete()` is R17 soft-delete and *clears* `content` and
+`raw_content`, so a ban destroys the review text and an unban restores the
+account, the localname and the actor document but **not the writing**. That is
+inherent to the delete semantics the whole instance uses — the author's own
+delete behaves identically — and avoiding it would mean a private content backup
+attached to the ban, which is a different product. Separately, a
+`Delete(Person)` has **no inverse**: peers that processed one dropped the actor
+and the follow graph on their side, so they come back only by being re-followed.
+Nothing is broadcast on an unban for that reason — re-announcing a
+previously-deleted actor with an `Update` is not something any peer is obliged
+to handle sanely. Both facts are in the disclosure the moderator reads.
+
+**The two code paths stayed visibly separate, which was the stated risk.** Ban
+has its own column and `ban()` writes nothing to a suspension field; suspend
+sets no ban field. `is_active` reads both columns and **each half is
+independently necessary** — dropping the ban half lets a banned member sign
+straight back in. Ban removes content through `deleted`; it does **not** borrow
+the suspension read-filters, and the account-visibility clauses it does add
+(`feed_member_ids`, `_person_collection`) are separate clauses on a separate
+column. The specific thing ban's feed clause catches is **shelf events**, which
+derive from `ShelfFilm` and never pass through `deleted` — without it a banned
+member's "added X to their Watchlist" would keep appearing in their followers'
+feeds forever. `test_a_suspended_but_not_banned_account_still_gets_its_suspended_page`
+and `test_a_banned_account_does_not_get_the_suspended_page` pin the two states
+against converging from either direction.
+
+**`410` rather than `404` is the substance, not a detail.** For a peer the
+codes differ: 404 invites a retry and leaves the actor undetermined; 410 is the
+tombstone, and it is the statement the `Delete(Person)` already made. An
+endpoint answering 404 after that delete would contradict it. `test_a_410_is_
+not_a_404_anywhere_on_the_actor` walks every surface at once so no single branch
+can quietly regress to the wrong code. Suspension keeps its different wire
+behaviour — 404 on endpoints, fetchable Person document with `suspended: true`
+— because a suspend is reversible and a peer must still resolve the actor id our
+`Update(Person)` points at. **Ban removes the document; suspend flags it.**
+
+**The `.btn` trap was avoided the same way suspend avoided it.** Ban goes in its
+own collapsed `<details>` disclosure, so nothing lit renders adjacent to
+increment 3's "Delete post" or to the suspend drawer, no CSS was added, and R73
+stays parked. Interaction cost stays ordered: delete is one click, suspend is
+two, ban is two with a warning that says the writing is gone. No third visual
+weight was invented and none was needed.
+
+**The localname reservation needed no new mechanism, and knowing why matters.**
+R102 keeps the banned row; `localname` is unique; signup already rejects
+case-insensitive duplicates. So the reservation is done by the row's continued
+existence, and the work is pinning it rather than building it —
+`test_a_banned_localname_cannot_be_re_registered_as_a_case_variant` covers
+`Alice` and `ALICE` against a banned `alice`. **What this means for a future
+session: if anything ever hard-deletes banned rows, the name becomes
+re-registerable and the identity is handed to a stranger.** That dependency is
+written into the test name and docstring rather than left implicit.
+
+**Stored mention chips need no migration.** They are baked into `Status.content`
+HTML at write time with no query to filter, so the chip stays live markup and
+leads to a `410` — the honest answer that the person was here and is not now.
+Because the user row is kept, no FK dangles and nothing 500s. Rewriting every
+stored post to strip chips would be a content migration for a cosmetic gain.
+
+**Two things found by the tests that are consequences rather than bugs, recorded
+so they are not mistaken for oversights.** (1) A follow refusal against a banned
+account sets a flash message that **cannot render**, because the redirect target
+is the tombstone. Only reachable by a hand-built POST — no page offers the
+button — and the writer refused, which is the guarantee. (2) `unban` leaves a
+separate suspension standing: an account both suspended and banned stays
+suspended after the ban is lifted, because two independent facts must not have
+one undo.
+
+**Flagged for the owner, not decided: `has_admin()`.** Still
+`filter(is_superuser=True).exists()`, so a banned admin leaves the instance
+reading as "set up" while no administrator can sign in — the same open
+question 4b left for suspension, now reachable by a second route. Reachable
+today only by a self-ban, since R103b keeps a moderator from banning the admin.
+Both candidate fixes have consequences the owner should weigh: filtering bans
+out makes the instance look *unconfigured* (redirecting to `/setup/`, which
+could invite a second admin creation over a database that already has one);
+counting them, the current behaviour, makes it look fine while it is
+unreachable. `test_has_admin_still_counts_a_banned_only_admin` pins the
+current behaviour so changing it is a decision.
+
+**The gate: `1662 passed + 5 skipped`.** Reconciled against 4b's `1571 + 5`: **87 new
+tests** (53 in `test_ban_action.py`, including one parametrised over three
+unreachable-target kinds, and 34 in `test_ban_read_sites.py`) **+ 4 clean-room
+params** (`social/0012`, `moderation/0004`, and the two new test files)
+`= 1662 exactly`. `ruff check` and `ruff format --check` clean. No pre-existing
+test was replaced — the existing suspension suite passes untouched, which is
+itself the check that ban did not disturb suspend.
+
+**Not proven live.** Everything here is proven by mocked HTTP (`responses`) and
+by the Django test client. What a live round-trip would add is whether
+Mastodon's `delete_person` actually drops the mirror of a banned ReelTalk
+actor, which is strongly implied by reading its `Activity::Delete` but not
+observed. **This requires writing to the owner's Mastodon** — banning `bait`
+(pk 122), whose real remote follower at `upallnight.minnix.dev` is left in
+place for exactly this. The browser test is handed off rather than run: ban
+`bait` from `/moderate/`, then on the peer look for the `@bait@reeltalk.minnix.dev`
+mirror disappearing from `upallnight`'s following list and its statuses gone;
+then lift the ban from the Banned accounts section and confirm the account can
+sign in again while the posts do **not** return and the peer does **not**
+re-follow itself. Nothing in this increment has been described as live-verified.
+
+**Not deployed.** `social.0012` and `moderation.0004` are **not applied to the
+live DB** and the new code is not running. The increment changes what a moderator
+sees, so unlike 4a this needs a deploy to be useful — held until the owner
+wants it, and until the browser round-trip decision above is made.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -2926,3 +3115,5 @@ New owner decisions for the rewrite are recorded here, numbered R1, R2, … The 
 - **R107 — One report per `(reporter, target)`; staff are told once per unresolved target (owner decision 2026-09-26).** The dedup is structural, not a check: a unique constraint on the reporter/target pair makes a second report a no-op rather than a queue entry. Staff notification follows Mastodon's `notify_staff!`, which returns early when `unresolved_siblings?` — N members reporting the same post produce N rows and **one** notification event, so the queue does not shout proportionally to how many people noticed. **What is explicitly *not* claimed here:** rate limiting. R107 bounds duplication, not volume; a member hammering the report endpoint with distinct targets is a rate-limiting problem, and that belongs to the separate, still-unbuilt antispam work in `PLAN.md` §5. **What this closes off:** the queue as a spam target, and mistaking dedup for abuse prevention.
 
 - **R108 — ActivityPub identity is minted from a canonical origin, never from the request; and a moderation action that fails to federate is loud (owner decisions 2026-09-28, taken during increment 4a).** Two questions came up in the same increment and the owner settled both by direct choice rather than by the agent picking. **(1) Identity origin.** `absolute_uri()` was `f"{request.scheme}://{request.get_host()}{path}"`, so every outbound ActivityPub identifier — the signing `keyid`, the activity `id`, the object `id`, `actor`, `attributedTo`, and the collection URLs inside a pushed document — depended on which host and scheme the acting browser happened to use. A moderator working from `http://192.168.1.138:3030` (in both `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` by design, per the owner's standing LAN-access decision) minted identities on an address no internet peer can resolve. The owner was offered canonical-everywhere, canonical-outbound-only, and a host guard, and chose **canonical everywhere**: all ActivityPub URIs come from `settings.CANONICAL_ORIGIN`, derived from `DOMAIN` and overridable. **This narrows R40's "Document URLs use the host as sent" to nothing for identity**, which is why it is recorded as its own decision rather than folded into R40 — R40 as written permits request-derived documents. What R40 keeps: the webfinger `domain must be DOMAIN` rule, case-insensitive localname matching, and the fixed collection URL shapes. What came with the choice: a multi-hostname deploy collapses to one actor id, which is what ActivityPub wants; and a spoofed `X-Forwarded-Proto` can no longer move a published identity **at all**, from any peer, trusted or not — a strictly stronger property than R74's gate, because the document no longer reads the transport. **R74 itself is untouched and still necessary**: it governs `request.is_secure()` and the cookie flags, which is where the transport genuinely matters. The owner's framing of the distinction worth keeping: *being allowed to serve a host is not the same as being allowed to be published as it.* **(2) Loudness.** Asked whether a moderation action that fails to federate should be loud, the owner chose **loud and non-blocking** over blocking the action or a queue-surface-only record. Delivery failures are returned to the caller and surfaced to the moderator inline, with the outcome written to the audit record; the local action still commits and still counts. Rejected: refusing the action on a delivery failure, which couples local correctness to remote availability and would make one dead follower instance undrainable. **What this closes off:** request-derived identity fragments (the same actor described under two ids depending on who asked), a moderator being told an action succeeded when the remote copy is still up, and a spoofed scheme reaching a published identifier. **What it deliberately does not claim:** that any given peer honours an inbound suspension flag — that is the peer's business, and the `toot:suspended` finding above is about vocabulary existing, not about it being obeyed.
+
+- **R109 — A moderator may both impose and lift a ban; R102's lift clause is amended (owner decision 2026-09-28, taken during increment 5 before any code was written).** §2D specified an "admin-only **lift**" and never said who may *impose* a ban. Read literally alongside R103b — under which a moderator may already act on a regular member — that is an asymmetric power: a moderator could permanently destroy another member's content while only the site admin could undo it. The owner chose symmetry in the other direction rather than restricting the ban: **whoever may impose a ban may lift it, and nobody else may do either.** Both verbs use the existing `can_act_on` reach guard byte-identical, so the decision adds no second guard, no severity-specific rule, and nothing able to drift out of step with the rest of the moderation surface. **Why:** a ban the actor who imposed it cannot lift is the worst of both — the irreversibility of the heavy action with none of the accountability of holding it, and a queue where a moderator can see a decision they are forbidden to reverse. **How to apply:** the pairing is the invariant. If a future change restricts who may ban, it must restrict the lift identically in the same commit, or the asymmetry returns by accident. R102's "liftable by the site admin only" is superseded for bans; it still governs nothing else, since suspension was always liftable by whoever imposed it. Reach limits still come from R103b alone — a moderator cannot reach an admin, so a ban on the admin remains out of reach regardless of this.
