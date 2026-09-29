@@ -28,6 +28,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from reeltalk.core.models import Status
+from reeltalk.social.models import SuspensionOrigin, User
 
 
 class Report(models.Model):
@@ -284,6 +285,54 @@ def file_report(
     return report, created
 
 
+# Mastodon's own inbound cap on a forwarded report comment is 5,000 chars
+# (``ActivityPub::Activity::Flag::COMMENT_SIZE_LIMIT``), against 1,000 for
+# a local one — a peer may be relaying text it did not write and cannot
+# shorten. This instance caps its own reporters at 500, so the inbound
+# number is the only one that can be reached here, and it is worth taking
+# from the peer rather than inventing: a moderator reading a five-thousand
+# character note is a different job from reading a five-hundred one, and
+# the queue renders it inline either way.
+INBOUND_COMMENT_MAX = 5000
+
+
+def file_remote_report(
+    sender, *, target_user=None, target_status=None, comment=""
+) -> tuple:
+    """Record a peer's report about one of our members (R104).
+
+    The inbound twin of :func:`file_report`, and a separate door rather
+    than a call to it, because the two have different trust properties and
+    a shared function would have to be written to the worse of them.
+    Everything here arrives from an unauthenticated-in-spirit peer — the
+    signature proves *who sent it* and nothing else. The caller has
+    already resolved the target against our own rows rather than trusting
+    the declared URIs, and the reporter is the **verified sender**, which
+    is the only identity this path is allowed to record.
+
+    **The category is fixed to** ``other``. The ``Flag`` wire carries no
+    category at all — Mastodon's serializer emits ``id``, ``type``,
+    ``actor``, ``content`` and ``object``, and nothing in that list says
+    *why*. Inventing a default of ``spam`` would put a word in the
+    reporting server's mouth that it never said, and the moderator would
+    triage against a label with no author. ``other`` is the honest answer:
+    somebody reported this, here is what they wrote.
+
+    The category is also why the ``known_report_category`` CHECK constraint
+    earned its place in increment 2. Nothing in this path runs a form or
+    ``full_clean()``; a ``create()`` walks straight past both. The CHECK is
+    the only thing between a malformed inbound payload and a row the queue
+    cannot render.
+    """
+    return file_report(
+        reporter=sender,
+        target_user=target_user,
+        target_status=target_status,
+        category=Report.Category.OTHER,
+        comment=(comment or "")[:INBOUND_COMMENT_MAX],
+    )
+
+
 def report_state(user, *, target_user=None, target_status=None):
     """``(may_report, already_reported)`` for a host page's report control.
 
@@ -515,3 +564,271 @@ def record_federation_outcome(report, line: str) -> int:
         row.save(update_fields=["note"])
         updated += 1
     return updated
+
+
+def record_forward_outcome(report, line: str) -> int:
+    """Append a forwarding outcome to the open rows of this pile (R104/R106).
+
+    The same need as :func:`record_federation_outcome` — "we told their
+    server, and here is whether it arrived" is a fact the record has to
+    carry — with one difference that makes it a separate function rather
+    than a flag on that one. A forward does **not** resolve the pile: the
+    moderator has not decided anything yet, only passed the complaint along,
+    and the report stays open so they can still delete the local copy or
+    dismiss it afterwards. That means the rows being written here are still
+    live decisions, whereas the rows ``record_federation_outcome`` writes
+    were closed by the very action it is reporting on.
+
+    Scoping to ``resolved_at__isnull=True`` is what keeps a forward from
+    appending a brand-new line to a decision somebody already made and
+    signed. Increment 4b refused to put an unsuspend note on a closed report
+    for exactly this reason — it rewrites a closed decision rather than
+    adding to the record — and an open pile that happens to share a target
+    with an old resolved one is the same problem in a less obvious place.
+    """
+    rows = Report.unresolved_for_target(report.target_key)
+    updated = 0
+    for row in rows:
+        row.note = f"{row.note}\n{line}".strip() if row.note else line
+        row.save(update_fields=["note"])
+        updated += 1
+    return updated
+
+
+class DomainBlock(models.Model):
+    """A remote server this instance refuses to deal with (R105).
+
+    Deliberately minimal, per R105: one fact — this host is blocked — with
+    none of Mastodon's partial severities, no ``obfuscate``, no
+    ``reject_media``, no ``reject_reports``. Those knobs exist because a
+    large instance tunes moderation per server; here the question a
+    moderator asks is binary, and a severity field with one value in use is
+    a field that advertises choices nobody can make.
+
+    **The block is a rule; the effect on accounts is suspension.** That is
+    the generalisation the owner chose for the local/remote-target question
+    §2D left open. A blocked host's existing mirrors are suspended with
+    ``suspension_origin = domain_block``, which means the *hide* half of
+    the block costs no new read-path code at all — the eight-odd dozen
+    suspension filters built in increment 4 already do it, at the feed, the
+    film page, the thread walk, the profile, the collections, the mention
+    resolver and the notification producers. A second, host-keyed filter
+    would have had to be written at every one of those sites and would have
+    been missed at some point, which is how a blocked server keeps showing
+    up in exactly one place nobody thought to check.
+
+    The cost of choosing suspension rather than a live host check is that the
+    block is a **mutation of existing rows**, not a predicate evaluated at
+    read time. That is why the door check in
+    :func:`~reeltalk.activitypub.mirrors._resolve_actor` is independent of
+    it: a mirror that somehow is not suspended — unsuspended by hand after
+    the block, created by a path that predates it — still cannot resolve.
+    The rule and the effect are two mechanisms, and both have to hold.
+    """
+
+    # Stored normalized: lowercase, no scheme, no path, no trailing dot.
+    # Normalizing at the boundary rather than at every comparison is what
+    # lets the match below be a plain suffix test.
+    domain = models.CharField(max_length=255, unique=True)
+    created = models.DateTimeField(default=timezone.now, db_index=True)
+    # SET_NULL, matching ``Report.resolved_by``: a moderator leaving the
+    # instance must not un-block the server they blocked, and must not
+    # erase the record that someone did.
+    created_by = models.ForeignKey(
+        "social.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="domain_blocks_created",
+    )
+    reason = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["domain"]
+
+    def __str__(self) -> str:
+        return self.domain
+
+
+def normalize_domain(value: str) -> str:
+    """Reduce anything a moderator pastes in to a bare lowercase host.
+
+    A moderator types ``https://Bad.Example/path``, a peer's actor URL, or
+    just ``bad.example`` — all three must land on the same stored string,
+    or the same server gets two block rows and one of them stops matching
+    when the other is removed.
+    """
+    from urllib.parse import urlparse
+
+    raw = (value or "").strip().lower()
+    if not raw:
+        return ""
+    parsed = urlparse(raw if "//" in raw else f"//{raw}")
+    host = (parsed.netloc or parsed.path).strip().strip(".")
+    # Strip any credentials a pasted URL carried; they are not a host.
+    host = host.rsplit("@", 1)[-1]
+    # And the port. Both sides of every comparison here have to agree on what
+    # a host *is*: if the stored value kept its port, a block on
+    # ``bad.example`` would miss a peer whose actor URL is written
+    # ``https://bad.example:443/...`` — the exact miss that lets a blocked
+    # server back in through the door. The cost is that a moderator cannot
+    # scope a block to one port, which is Mastodon's behaviour and the one
+    # that cannot be bypassed by a URL spelled differently. IPv6 literals
+    # keep their brackets, so the split is only outside them.
+    if "]" not in host:
+        host = host.split(":", 1)[0]
+    return host
+
+
+def account_host_candidates(user) -> set:
+    """The host strings a mirror's identity can be matched on.
+
+    Both the full netloc and the bare hostname, because a ReelTalk peer on
+    a non-default port carries the port in its actor URL (R52) and a
+    moderator blocking it needs to be able to name either form. Local users
+    have no ``actor_url`` and therefore no candidates — a domain block is
+    about somebody else's server, never our own.
+    """
+    from urllib.parse import urlparse
+
+    url = getattr(user, "actor_url", "") or ""
+    if getattr(user, "local", True) or not url:
+        return set()
+    parsed = urlparse(url)
+    hosts = set()
+    if parsed.netloc:
+        hosts.add(parsed.netloc.lower())
+    if parsed.hostname:
+        hosts.add(parsed.hostname.lower())
+    return hosts
+
+
+def blocked_domain_for(host: str, *, exclude_pk=None) -> "DomainBlock | None":
+    """The block that covers ``host``, longest match winning.
+
+    Longest-first so a moderator who blocks ``mail.bad.example`` and later
+    blocks ``bad.example`` gets the more specific rule reported for the
+    subdomain, and — the direction that matters — a block on
+    ``bad.example`` covers ``anything.bad.example``. Matching on a label
+    boundary rather than a bare ``endswith`` is not pedantry: a substring
+    match would let a block on ``e.com`` swallow ``badexample.com``,
+    which is a way to block a server nobody meant to block.
+
+    ``exclude_pk`` asks the same question with one block removed from the
+    set, which is exactly what an unblock needs to know: after this row
+    goes away, is that account still covered by something else? Without it,
+    removing an outer block would re-expose an account an inner block is
+    still holding down.
+    """
+    host = normalize_domain(host)
+    if not host:
+        return None
+    blocks = DomainBlock.objects.exclude(domain="")
+    if exclude_pk is not None:
+        blocks = blocks.exclude(pk=exclude_pk)
+    match = None
+    for block in blocks:
+        blocked = block.domain
+        if host == blocked or host.endswith(f".{blocked}"):
+            if match is None or len(blocked) > len(match.domain):
+                match = block
+    return match
+
+
+def is_domain_blocked(user) -> bool:
+    """Whether this user's home server is blocked."""
+    return any(blocked_domain_for(host) for host in account_host_candidates(user))
+
+
+def block_domain(domain: str, *, by_user=None, reason: str = "") -> tuple:
+    """Block a remote server and suspend every mirror we hold from it (R105).
+
+    Returns ``(block, suspended)`` — the block row and the list of accounts
+    this call suspended. The list is the important half: it is exactly the
+    set the matching unblock may lift, because :meth:`User.suspend` returns
+    ``False`` for an account already suspended, so a mirror someone had
+    already suspended individually keeps its own ``suspension_origin`` and
+    stays suspended after the domain is unblocked. The block does not
+    quietly absorb somebody else's decision, and it does not hand theirs
+    back when the block is removed.
+
+    One transaction: a block row with its mirrors still live is a state
+    where the rule exists and nothing enforces it for the accounts already
+    here, which is the least useful half of both.
+    """
+    normalized = normalize_domain(domain)
+    if not normalized:
+        raise ValueError("A domain block needs a host to block.")
+    with transaction.atomic():
+        block = DomainBlock.objects.create(
+            domain=normalized, created_by=by_user, reason=reason
+        )
+        suspended = []
+        for user in User.objects.filter(local=False):
+            if not any(
+                blocked_domain_for(host) is not None
+                for host in account_host_candidates(user)
+            ):
+                continue
+            note = reason or f"Blocked domain: {normalized}"
+            if user.suspend(origin=SuspensionOrigin.DOMAIN_BLOCK, reason=note):
+                suspended.append(user)
+    return block, suspended
+
+
+def unblock_domain(block, *, by_user=None) -> tuple:
+    """Remove a domain block and lift the suspensions that block imposed.
+
+    Lifts only rows whose ``suspension_origin`` is ``domain_block`` **and**
+    whose host still matches this block's domain. Both halves are needed.
+    The origin half is what keeps an unblock from restoring an account some
+    other moderator suspended on its own merits. The host half is what
+    keeps a block on ``bad.example`` from lifting a suspension that a
+    *different* block — say ``mail.bad.example`` — is still responsible
+    for.
+
+    A third check belongs here that the first two do not cover: an account
+    under this block may also sit under another block that is *staying*.
+    Lifting it because this row was removed would re-expose an account the
+    remaining rule still refuses at the door — visible here, unable to
+    federate, which is the worst of both. So the lift asks whether anything
+    else still covers the host once this block is gone, and leaves the
+    account alone if it does.
+
+    The known edge, accepted with the design: a mirror blocked first and
+    then individually refused cannot express that, because it is already
+    suspended and ``suspend()`` is a no-op — so it carries the domain's
+    origin and an unblock lifts it. Refusing one account *and* its whole
+    server at once is the one case this generalisation cannot separate, and
+    it is the price of not running a second refusal column at every read
+    site.
+    """
+    with transaction.atomic():
+        lifted = []
+        for user in User.objects.filter(
+            local=False,
+            suspension_origin=SuspensionOrigin.DOMAIN_BLOCK,
+            suspended_at__isnull=False,
+        ):
+            if not sits_under_domain(user, block.domain):
+                continue
+            if any(
+                blocked_domain_for(host, exclude_pk=block.pk) is not None
+                for host in account_host_candidates(user)
+            ):
+                continue
+            if user.unsuspend():
+                lifted.append(user)
+        DomainBlock.objects.filter(pk=block.pk).delete()
+    return block, lifted
+
+
+def sits_under_domain(user, domain: str) -> bool:
+    """Whether ``user``'s home host sits under ``domain`` by the label rule."""
+    domain = normalize_domain(domain)
+    if not domain:
+        return False
+    return any(
+        host == domain or host.endswith(f".{domain}")
+        for host in account_host_candidates(user)
+    )

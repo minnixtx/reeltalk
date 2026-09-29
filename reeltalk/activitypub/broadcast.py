@@ -38,12 +38,14 @@ from .identity import (
     absolute_uri,
     actor_path,
     actor_update_activity,
+    flag_activity,
     person_delete_activity,
 )
 from .objects import (
     create_activity,
     delete_activity,
     like_activity,
+    note_reference,
     shelf_event_activity,
     update_activity,
 )
@@ -303,6 +305,52 @@ def broadcast_person_delete(request, user, audience=None) -> list[DeliveryFailur
     if audience is None:
         audience = person_delete_audience(user)
     return _deliver_signed(request, user, activity, audience)
+
+
+def broadcast_report_flag(request, report, *, representative) -> list[DeliveryFailure]:
+    """Send one report to the reported account's home instance, as the instance (R104).
+
+    **The signer is the representative, and that is the masking.**
+    ``_deliver_signed`` derives both the signing key and the ``keyid`` from
+    the actor it is handed, so passing the representative means neither the
+    reporter's key nor the moderator's key is anywhere near this request.
+    That matters more than it looks: a peer verifies the *signature* before
+    it reads anything, so if the key were the reporter's, masking the
+    ``actor`` field would be cosmetic — the keyid would name them anyway.
+    Masking has to reach the key or it has not happened.
+
+    **One recipient, not Mastodon's fan-out.** Their ``ReportService`` also
+    posts to the inboxes of every account the target replied to, "so they
+    also have a chance to act". We do not, for two reasons. R105 asks for
+    the minimal version of cross-server moderation, and in this instance the
+    accounts a remote user replies to are overwhelmingly *ours* — a reply
+    from a mirror lands in a thread on our own posts — so the fan-out would
+    mostly be POSTing a report about a stranger back to the person they
+    were talking to. The home instance is the one that can act on their own
+    account; it gets the report.
+
+    **A suspended target is skipped by the delivery layer, silently.**
+    ``_deliver_signed`` drops a suspended recipient without recording a
+    failure, because for a broadcast that skip is correct and expected. For
+    a forward it would be the R88 shape exactly: the caller would get an
+    empty failure list back and report success having sent nothing. The
+    view therefore refuses a suspended target before calling this, rather
+    than trusting an empty list to mean "they got it".
+    """
+    target = report.target_user
+    object_uris = [target.actor_url]
+    if report.target_status_id:
+        # The reference, not our own /status/<id>/ URL: this status is
+        # theirs, and the receiving instance must resolve it to the copy it
+        # already holds rather than to a URL we minted for their post.
+        object_uris.append(note_reference(request, report.target_status))
+    activity = flag_activity(
+        representative=representative,
+        report_id=report.pk,
+        comment=report.comment,
+        object_uris=object_uris,
+    )
+    return _deliver_signed(request, representative, activity, [target])
 
 
 def broadcast_like(request, status, user, *, liked: bool) -> None:

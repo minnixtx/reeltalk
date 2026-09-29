@@ -14,9 +14,10 @@ see a superuser's post must not be able to delete it. Both are checked in
 the view, because a control hidden in a template is not an enforced rule.
 
 **This module federates as of increment 3.** A moderator delete sends a
-real ``Delete`` to the reported post author's remote followers. R104's
-``Flag`` forwarding is still increment 6, so a report about a remote user
-is recorded and read here but is not yet sent to their home instance.
+real ``Delete`` to the reported post author's remote followers. Increment
+6 adds the outward half: ``forward`` sends a ``Flag`` about a remote
+account to its home instance, signed by the instance representative so the
+member who reported never appears on the wire (R104).
 """
 
 from urllib.parse import urlparse
@@ -32,19 +33,29 @@ from django.views.decorators.http import require_POST
 from reeltalk.activitypub.broadcast import (
     broadcast_actor_update,
     broadcast_person_delete,
+    broadcast_report_flag,
     broadcast_status_delete,
 )
 from reeltalk.core.models import Status
 from reeltalk.moderation.decorators import can_act_on, moderator_required
 from reeltalk.moderation.forms import ReportForm
 from reeltalk.moderation.models import (
+    DomainBlock,
     Report,
     ban_reported_member,
     delete_reported_status,
     dismiss_report,
     file_report,
+    normalize_domain,
     record_federation_outcome,
+    record_forward_outcome,
     suspend_reported_member,
+)
+from reeltalk.moderation.models import block_domain as apply_domain_block
+from reeltalk.moderation.models import unblock_domain as lift_domain_block
+from reeltalk.moderation.representative import (
+    INSTANCE_ACTOR_LOCALNAME,
+    instance_representative,
 )
 from reeltalk.social.models import User
 from reeltalk.social.views import _resolve_profile_user
@@ -87,6 +98,15 @@ def index(request):
             "page_query": "?",
             "resolved_count": Report.objects.filter(resolved_at__isnull=False).count(),
             "banned_accounts": banned_accounts(request.user),
+            # The constant, not the row. The forward drawer names the
+            # instance actor on every render of the queue, and resolving
+            # that row means ``get_or_create`` — a write on a GET, on a
+            # page a moderator may reload repeatedly, for an identity that
+            # is fixed by a module constant anyway. The row is created by
+            # the forward POST, which is the first moment it is actually
+            # needed and the only moment it is actually used.
+            "instance_localname": INSTANCE_ACTOR_LOCALNAME,
+            "blocked_domains": DomainBlock.objects.select_related("created_by"),
         },
     )
 
@@ -188,6 +208,37 @@ def queue_cards(actor):
                 # someone already banned while hiding the ban itself.
                 "can_ban": target.local
                 and target.banned_at is None
+                and can_act_on(actor, target),
+                # Forward is the mirror image of the other four: it is the
+                # only card action aimed *outward* at a remote account, and
+                # the only one that decides nothing. The three conditions
+                # are each a different reason the button would be a lie.
+                # ``not target.local`` because a local account has no home
+                # instance to tell. ``actor_url`` because without a home
+                # actor URL there is no inbox to address — a remote mirror
+                # always has one, so this catches only a half-written row.
+                # And ``suspended_at is None`` because ``_deliver_signed``
+                # skips a suspended recipient without recording a failure:
+                # drawing the control there would mean a click that returns
+                # "forwarded" having sent nothing at all, which is R88's
+                # blindness wearing a button.
+                "can_forward": (not target.local)
+                and bool(target.actor_url)
+                and target.suspended_at is None
+                and can_act_on(actor, target),
+                # Refuse is the per-account half of the generalisation the
+                # owner chose for §2D's local/remote question: we cannot
+                # suspend a remote account at its home instance, but we
+                # can refuse it on *this* one, and refusing it is the same
+                # suspension the domain block applies — just aimed at one
+                # mirror instead of a whole host. The condition is
+                # ``can_suspend`` with ``local`` inverted, and the two must
+                # stay exact mirrors of each other: exactly one of the two
+                # controls is ever offered for any target, and a card that
+                # offered both would be a card where the moderator has to
+                # work out which verb they meant.
+                "can_refuse": (not target.local)
+                and target.suspended_at is None
                 and can_act_on(actor, target),
             }
             cards[report.target_key] = card
@@ -536,6 +587,223 @@ def ban(request, report_id):
             request,
             f"@{target.localname} banned; "
             f"{len(removed)} post{'' if len(removed) == 1 else 's'} removed.",
+        )
+    return redirect("moderation")
+
+
+@moderator_required
+@require_POST
+def forward(request, report_id):
+    """Tell a remote account's home instance that we have been told about them (R104).
+
+    The only card action that points **outward** rather than inward, and the
+    only one that decides nothing. The report stays open: forwarding is
+    passing the complaint to the one server that can act on that account,
+    not a judgment of our own, and the moderator may still delete the
+    local copy or dismiss the pile afterwards.
+
+    **The reporter is masked to the instance representative, and the
+    masking reaches the key.** ``broadcast_report_flag`` signs as
+    ``@_instance`` with ``@_instance``'s keypair, so neither the reporter's
+    identity nor the moderator's appears in the document *or* in the
+    ``keyid`` a peer verifies before it reads anything else. Masking only
+    the ``actor`` field while signing as the reporter would be worse than
+    no masking at all — it would look compliant and leak anyway.
+
+    **Four structural refusals, all ``404``, all the same posture** as the
+    delete, suspend and ban routes: a resolved report is not a live handle,
+    a local account has no home instance to tell, a mirror with no
+    ``actor_url`` has no address to forward to, and a suspended target
+    would be skipped by the delivery layer without recording a failure.
+    The last one is the important pair to the hidden control: without the
+    check, a hand-built POST against a suspended mirror would come back
+    "forwarded" having sent nothing, which is R88's blindness wearing a
+    success message.
+
+    **A 2xx here is delivery, not agreement.** Increment 5 established
+    that a peer can accept our activity and then discard it — their
+    ``ProcessAccountService`` shield refuses to undo a suspension their own
+    moderators imposed, after answering ``202``. A ``Flag`` is the same
+    shape: we are asking another server to look at something. The audit
+    line says *delivered*, never *acted on*, and the moderator's message
+    says the same.
+    """
+    report = get_object_or_404(
+        Report.objects.select_related("target_user", "target_status"), id=report_id
+    )
+    if report.resolved_at is not None:
+        raise Http404("This report has already been resolved.")
+    target = report.target_user
+    if target.local:
+        raise Http404(
+            "A report about a local account has no home server to forward to."
+        )
+    if not target.actor_url:
+        raise Http404("This account has no home server address to forward to.")
+    if target.suspended_at is not None:
+        raise Http404(
+            "This account is suspended here, so a forward would not be delivered."
+        )
+    if not can_act_on(request.user, target):
+        raise PermissionDenied
+
+    representative = instance_representative()
+    failures = broadcast_report_flag(request, report, representative=representative)
+    if failures:
+        hosts = ", ".join(
+            sorted({urlparse(f.inbox).netloc or f.inbox for f in failures})
+        )
+        reasons = ", ".join(sorted({f.reason for f in failures}))
+        record_forward_outcome(
+            report,
+            f"[federation] forward not delivered to {hosts} ({reasons})",
+        )
+        messages.error(
+            request,
+            f"The report was not delivered to {hosts}. "
+            f"It is still open here and can be retried.",
+        )
+    else:
+        record_forward_outcome(
+            report,
+            f"[federation] delivered to {target.actor_url} as "
+            f"@{representative.localname} (their server accepted it; whether it "
+            f"acted is not knowable from here)",
+        )
+        messages.success(
+            request,
+            f"Forwarded to the server that holds @{target.localname}. "
+            "They decide what to do about it — this does not resolve the report here.",
+        )
+    return redirect("moderation")
+
+
+@moderator_required
+@require_POST
+def refuse_remote(request, report_id):
+    """Refuse a remote account on this instance (R105, the generalised block).
+
+    The per-account answer to the question §2D left open: a remote user
+    cannot be suspended or banned at their home instance, so what is a
+    moderator to do when one report is not enough to send them away? The
+    answer the owner chose is that refusing them **is** a suspension — the
+    same state the domain block applies to a whole host's mirrors, aimed
+    here at one mirror of one account.
+
+    That is not a shortcut and it is not a redefinition. Suspension is the
+    only state on this instance that already means "this account is not
+    welcome here and its content must not appear", and it is enforced at
+    every one of the eight-odd dozen read sites increment 4 mapped. A
+    second, refusal-shaped state would have needed its own clause at each of
+    those sites, and the failure mode of that design is not a crash — it is
+    the blocked account still showing up on the one page nobody thought to
+    filter.
+
+    **Nothing is broadcast, and that is not an omission.** A suspension of
+    a mirror is a statement about what *we* will accept, not about the
+    account. Broadcasting an ``Update(Person)`` for it would mean signing
+    someone else's actor document with a key we do not hold — a mirror's
+    ``private_key`` is empty by construction, so the attempt would raise
+    in the delivery layer — and even if we could, telling the network that
+    another instance's user is suspended is a claim about their account we
+    are not entitled to make. The refusal is local, and it stays local.
+
+    **The lift lives on the mirror's profile**, same rule as every other
+    lift in this arc: the control sits on the surface that still shows the
+    account. A refused mirror keeps the suspended-state page increment 4b
+    built, and its unsuspend control lifts this the same way.
+    """
+    report = get_object_or_404(
+        Report.objects.select_related("target_user", "target_status"), id=report_id
+    )
+    if report.resolved_at is not None:
+        raise Http404("This report has already been resolved.")
+    target = report.target_user
+    if target.local:
+        raise Http404(
+            "This is an account on this instance — suspend or ban it, do not refuse it."
+        )
+    if not can_act_on(request.user, target):
+        raise PermissionDenied
+
+    note = request.POST.get("note", "").strip()
+    refused = target.suspend(reason=note)
+    if not refused:
+        messages.info(request, f"@{target.localname} was already refused here.")
+        return redirect("moderation")
+    messages.success(
+        request,
+        f"@{target.localname} is refused here. Their posts are hidden on this "
+        "instance and nothing they send will be accepted. Their home server is "
+        "unchanged — it does not hear about this and cannot.",
+    )
+    return redirect("moderation")
+
+
+@moderator_required
+@require_POST
+def block_domain_view(request):
+    """Block a whole remote server (R105).
+
+    Two effects, and the second is why this is cheap. The door closes: no
+    activity from that host resolves as a sender, and no new mirror from it
+    gets created. And every mirror we already hold from it is suspended,
+    which means the hiding is done by the suspension filters that already
+    exist rather than by a new host-keyed clause at each read site.
+
+    The moderator is told how many accounts the block swept, because a
+    block that silently hid forty profiles and a block that found none look
+    identical otherwise — and those are very different things to have just
+    done.
+    """
+    raw = request.POST.get("domain", "")
+    reason = request.POST.get("note", "").strip()
+    normalized = normalize_domain(raw)
+    if not normalized:
+        messages.error(request, "Enter the server to block, for example bad.example.")
+        return redirect("moderation")
+    if DomainBlock.objects.filter(domain=normalized).exists():
+        messages.error(request, f"{normalized} is already blocked.")
+        return redirect("moderation")
+
+    block, suspended = apply_domain_block(
+        normalized, by_user=request.user, reason=reason
+    )
+    messages.success(
+        request,
+        f"{block.domain} is blocked. Nothing from that server will be accepted "
+        f"here, and {len(suspended)} account{'' if len(suspended) == 1 else 's'} "
+        f"we already held from it {'is' if len(suspended) == 1 else 'are'} now hidden.",
+    )
+    return redirect("moderation")
+
+
+@moderator_required
+@require_POST
+def unblock_domain_view(request, block_id):
+    """Remove a domain block and lift the suspensions that block imposed.
+
+    Only that block's own suspensions. Accounts somebody suspended on
+    their own merits stay suspended, and accounts sitting under a *different*
+    block stay suspended too — the lift is scoped to what this action is
+    responsible for, which is the same principle that keeps an unban from
+    clearing a separate suspension.
+    """
+    block = get_object_or_404(DomainBlock, id=block_id)
+    domain = block.domain
+    _block, lifted = lift_domain_block(block, by_user=request.user)
+    if lifted:
+        messages.success(
+            request,
+            f"{domain} is no longer blocked, and the {len(lifted)} account(s) "
+            "this block hid are restored. Accounts suspended for any other "
+            "reason stay suspended.",
+        )
+    else:
+        messages.success(
+            request,
+            f"{domain} is no longer blocked. No accounts were hidden by this "
+            "block, so nothing was restored.",
         )
     return redirect("moderation")
 

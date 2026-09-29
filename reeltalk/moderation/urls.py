@@ -56,6 +56,39 @@ urlpatterns = [
         views.ban,
         name="moderation-ban",
     ),
+    # Increment 6's outward verb. It shares the card but not the direction:
+    # the other four change something *here*, this one tells another server
+    # about an account we do not control. It deliberately does not resolve
+    # the report, so it reads as a fifth verb on the same card rather than
+    # as another way of closing it.
+    path(
+        "moderate/<int:report_id>/forward/",
+        views.forward,
+        name="moderation-forward",
+    ),
+    # The per-account half of the generalised block (R105). A distinct
+    # verb from ``suspend`` because the target is different — a mirror we
+    # do not own, refused here rather than suspended there — and a card
+    # offers exactly one of the two.
+    path(
+        "moderate/<int:report_id>/refuse/",
+        views.refuse_remote,
+        name="moderation-refuse",
+    ),
+    # The whole-server half of the same mechanism. ``domains`` cannot
+    # collide with the ``<int:report_id>`` or ``<str:localname>``
+    # patterns above because those sit one segment deeper and require a
+    # trailing verb this route does not have.
+    path(
+        "moderate/domains/block/",
+        views.block_domain_view,
+        name="moderation-block-domain",
+    ),
+    path(
+        "moderate/domains/<int:block_id>/unblock/",
+        views.unblock_domain_view,
+        name="moderation-unblock-domain",
+    ),
     # Members filing a report, from the reported object's own page.
     path(
         "status/<int:status_id>/report/",

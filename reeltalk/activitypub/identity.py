@@ -270,3 +270,52 @@ def person_delete_activity(user) -> dict:
         "to": ["https://www.w3.org/ns/activitystreams#Public"],
         "object": actor,
     }
+
+
+def flag_activity(*, representative, report_id: int, comment: str, object_uris) -> dict:
+    """A ``Flag`` — an instance telling another about one of *their* accounts.
+
+    Shaped against the peer's own ``ActivityPub::FlagSerializer`` rather
+    than invented, because a ``Flag`` the receiving instance cannot parse is
+    a report that silently never happened. Their serializer emits exactly
+    ``{id, type, actor, content, object}``, where ``object`` is a **flat
+    array of URIs** — the target account's URI plus the URIs of the
+    statuses being reported — and their inbound handler walks that array
+    sorting the URIs into accounts and statuses itself. An embedded object,
+    or a single non-array ``object``, is a shape they do not read.
+
+    **The actor is the instance representative, never the reporter (R104).**
+    This is the whole reason the representative exists. R104's reason is a
+    doxxing vector: a foreign admin who can see who reported their user
+    holds a person they can retaliate against, and the reporter never
+    agreed to be introduced to another server's moderation. The reporter's
+    identity appears nowhere in this document — not in ``actor``, not in
+    ``id``, not in ``content``. What *does* cross the wire is the reporter's
+    own words, because the report is worthless without them; Mastodon sends
+    ``object.comment`` as ``content`` for exactly that reason, and masking
+    the identity has never meant masking the complaint.
+
+    **The activity id carries our report id on our own host.** Mastodon's
+    ``report_uri`` keeps the incoming ``id`` only when its host matches the
+    verified sender's, then stores it on the report row. Minting ours as
+    ``<canonical origin>/reports/<pk>/`` therefore survives the trip and
+    arrives in *their* table pointing back at *our* row — which is what
+    makes a live proof checkable from their side rather than something we
+    have to take on trust. An id on some other host would be dropped by
+    their own check.
+
+    ``object_uris`` is assembled by the caller because resolving a status to
+    the URL that identifies it *to another instance* needs the request and
+    the status's own ``remote_url`` (see
+    :func:`~reeltalk.activitypub.objects.note_reference`), and this
+    function's job is to mint the activity, not to decide which URL a
+    foreign server should be able to resolve.
+    """
+    return {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "id": absolute_uri(f"/reports/{report_id}/"),
+        "type": "Flag",
+        "actor": absolute_uri(actor_path(representative.localname)),
+        "content": comment or "",
+        "object": list(object_uris),
+    }

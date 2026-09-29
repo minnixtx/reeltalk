@@ -28,6 +28,8 @@ from functools import wraps
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 
+from reeltalk.moderation.representative import is_instance_actor
+
 
 def may_moderate(user):
     """The whole moderator rule in one predicate.
@@ -88,8 +90,29 @@ def can_act_on(actor, target) -> bool:
     account: deleting a post, suspending, banning. A moderator's reach is
     "regular users who are not me", and it does not widen for the heavier
     actions — if anything the heavier ones are where the line matters more.
+
+    **One exception, and it narrows the admin half rather than the
+    moderator half: nobody may act on the instance representative.** R103b
+    enumerates three kinds of *person*, and the representative is not one —
+    it is the instance's signing identity, a row that exists so the server
+    can make statements at all. Suspending it takes the ``Flag`` wire down;
+    banning it goes further, because the ban 410s ``/user/_instance/`` and
+    a peer that can no longer fetch that Person document can no longer
+    verify anything we sign with that key. Every future report we forward
+    would then fail at the door of every instance that had already accepted
+    us, quietly and forever. That is not a moderation target, it is the
+    moderation system, and the guard belongs in the one function every
+    destructive action passes through rather than in each caller's memory.
+
+    It is placed **before** the superuser short-circuit deliberately, so it
+    binds the site admin too. The raw override is still available in
+    Django's own admin, which does not consult this function — an admin
+    who truly means it can still reach the row, and has to go somewhere
+    else to say so.
     """
     if not actor.is_authenticated or target is None:
+        return False
+    if is_instance_actor(target):
         return False
     if actor.is_superuser:
         return True

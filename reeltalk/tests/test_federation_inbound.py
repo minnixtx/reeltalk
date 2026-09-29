@@ -160,9 +160,13 @@ def _create(note):
 # --- The registry -------------------------------------------------------------
 
 
-def test_like_accept_and_reject_are_now_registered_handlers():
-    # Before increment 6 an inbound Like was the same "ignored" as a typo,
-    # and the answer to a Follow we sent was discarded as noise.
+def test_the_handler_registry_is_exactly_what_we_mean_it_to_be():
+    # Pinned as a set rather than membership-checked so that registering a
+    # new type is a deliberate edit to this line, not a silent widening.
+    # Before increment 5 an inbound Like was the same "ignored" as a typo,
+    # and the answer to a Follow we sent was discarded as noise. Increment 6
+    # added Flag — and this test is what forced that to be a conscious call
+    # rather than a dict entry nobody looked at.
     assert set(HANDLERS) == {
         "Follow",
         "Undo",
@@ -172,6 +176,7 @@ def test_like_accept_and_reject_are_now_registered_handlers():
         "Like",
         "Accept",
         "Reject",
+        "Flag",
     }
 
 

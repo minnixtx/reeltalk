@@ -18,6 +18,7 @@ from typing import Any
 
 from django.db import transaction
 
+from .flags import handle_flag
 from .follow import handle_accept, handle_follow, handle_reject, handle_undo
 from .interactions import handle_like
 from .models import DeliveredActivity
@@ -49,6 +50,13 @@ HANDLERS: dict[str, Callable[[dict, Any, Any], "str | None"]] = {
     "Like": handle_like,
     "Accept": handle_accept,
     "Reject": handle_reject,
+    # Increment 6's inbound report. A peer's moderator forwarding a
+    # complaint about one of our members; filed into the same queue a
+    # local report lands in, keyed on the verified sender rather than the
+    # declared actor. Before this line existed the activity was ignored
+    # gracefully, which meant a report from another instance simply
+    # vanished with no trace beyond an "unhandled type" log line.
+    "Flag": handle_flag,
 }
 
 

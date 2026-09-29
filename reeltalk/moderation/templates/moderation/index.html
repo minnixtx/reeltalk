@@ -208,6 +208,83 @@
               <button type="submit" class="btn" formaction="{% url 'moderation-ban' card.latest.id %}">Ban account</button>
             </details>
           {% endif %}
+
+          {% comment %}
+          Forward (moderation increment 6) — the only action on this card
+          that points outward, and the only one that leaves the report open.
+
+          It goes in a collapsed disclosure for the same reason suspend and
+          ban do: the button takes ``.btn``, and a fourth lit control
+          rendered inline beside "Delete post" would make three different
+          severities look identical. R73 stays parked.
+
+          The drawer carries the two facts the word "forward" does not.
+          First: who goes on the wire. Not the member who reported, and not
+          the moderator clicking — the instance itself, as
+          ``@{{ instance_localname }}``. A moderator who does not know
+          that cannot answer the question their own reporter would ask if
+          the other side ever replies. Second: what the click is not. It is
+          a request to another server, and their moderators decide; the
+          report stays on this queue either way.
+          {% endcomment %}
+          {% if card.can_forward %}
+            <details class="forward-disclosure">
+              <summary>Forward to their server</summary>
+              <p class="muted">
+                Sends this report to <strong>{{ card.target_user.actor_url }}</strong>,
+                the server that owns that account. They are the only ones
+                who can act on their own user.
+              </p>
+              <p class="muted">
+                It goes <strong>as the instance</strong>, signed by
+                <strong>@{{ instance_localname }}</strong>. The member
+                who reported it is not named, and neither is the moderator
+                who clicks. Their report comment is sent, because a report
+                with no reason in it is nothing to act on.
+              </p>
+              <p class="muted">
+                This does not resolve anything here. Their server accepts the
+                report and decides for itself — accepting is not the same as
+                acting, and nothing coming back will tell us which it was.
+              </p>
+              <button type="submit" class="btn" formaction="{% url 'moderation-forward' card.latest.id %}">Forward this report</button>
+            </details>
+          {% endif %}
+
+          {% comment %}
+          Refuse (moderation increment 6) — the remote target's version of
+          Suspend, in a drawer for the same ``.btn`` reason.
+
+          The word is deliberate. "Suspend" would be a lie here: we cannot
+          suspend an account on somebody else's server, and a moderator
+          who clicked a button labelled that way would believe they had
+          acted on the home instance when they had only acted on our copy.
+          "Refuse" says what is true — this instance will not accept them.
+
+          The drawer has to carry the one thing that makes the distinction
+          matter: their server does not hear about this. Their account
+          stays exactly as it was where it lives. What changes is that
+          nothing they send here is accepted and nothing of theirs is shown
+          here.
+          {% endcomment %}
+          {% if card.can_refuse %}
+            <details class="refuse-disclosure">
+              <summary>Refuse this account here</summary>
+              <p class="muted">
+                Refusing <strong>@{{ card.target_user.localname }}</strong>
+                hides their posts, reviews and replies on this instance and
+                stops accepting anything they send to it.
+              </p>
+              <p class="muted">
+                <strong>Their own server is not told and is not changed.</strong>
+                The account over there stays exactly as it was — we can only
+                decide what happens on ours. If the whole of
+                <strong>{{ card.target_user.actor_url }}</strong> should go,
+                block the server below instead.
+              </p>
+              <button type="submit" class="btn" formaction="{% url 'moderation-refuse' card.latest.id %}">Refuse here</button>
+            </details>
+          {% endif %}
         </form>
       </li>
     {% endfor %}
@@ -279,5 +356,67 @@
     </ul>
   </section>
   {% endif %}
+
+  {% comment %}
+  Blocked servers (moderation increment 6, R105).
+
+  Outside the ``{% if cards %}`` branch for the same reason Banned accounts
+  is: a blocked server is not a report, and a drained queue with a live
+  block is the normal state. Hiding it behind "nothing to review" would
+  mean the list of servers this instance refuses to talk to was invisible
+  exactly when nobody is looking for anything else.
+
+  The block form sits above the list rather than inside a drawer. It is the
+  only place on this page that is not a reaction to something already on
+  it, and putting it in a ``<details>`` would make the proactive control
+  look like one more response to an incoming card. It takes no ``.btn``
+  either — the lit crimson control is reserved for the destructive
+  actions on a specific reported thing, and this is a form.
+  {% endcomment %}
+  <section class="blocked-domains">
+    <h2 class="pane-title">Blocked servers</h2>
+    <p class="pane-sub">
+      {% if blocked_domains %}
+        {{ blocked_domains|length }} server{{ blocked_domains|length|pluralize }}
+        this instance refuses: nothing they send is accepted, and the
+        accounts we hold from them are hidden everywhere.
+      {% else %}
+        No servers are blocked. Blocking one refuses every activity it
+        sends and hides every account from it that we already hold.
+      {% endif %}
+    </p>
+
+    <form method="post" action="{% url 'moderation-block-domain' %}" class="block-domain-form">
+      {% csrf_token %}
+      <label for="block-domain">Block a server</label>
+      <input type="text" id="block-domain" name="domain" placeholder="bad.example" maxlength="255">
+      <label for="block-domain-note">Why (kept on the record)</label>
+      <input type="text" id="block-domain-note" name="note" maxlength="500">
+      <button type="submit">Block this server</button>
+    </form>
+
+    {% if blocked_domains %}
+    <ul class="review-list">
+      {% for block in blocked_domains %}
+        <li class="review blocked-domain">
+          <div class="review-head">
+            <span class="review-author">{{ block.domain }}</span>
+            <span class="muted">blocked {{ block.created|date:"Y-m-d H:i" }}
+              {% if block.created_by %}by {{ block.created_by.localname }}{% endif %}</span>
+          </div>
+          {% if block.reason %}
+            <div class="review-body">
+              <blockquote class="report-comment">{{ block.reason }}</blockquote>
+            </div>
+          {% endif %}
+          <form method="post" action="{% url 'moderation-unblock-domain' block.id %}">
+            {% csrf_token %}
+            <button type="submit">Lift this block</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
 </section>
 {% endblock %}

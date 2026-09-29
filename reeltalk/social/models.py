@@ -58,14 +58,29 @@ class UserManager(BaseUserManager):
 class SuspensionOrigin(models.TextChoices):
     """Who decided that an account is suspended.
 
-    Only ``LOCAL`` has a producer in this increment. A suspension learned
-    from another instance is increment 6's domain-block work, and this enum
-    follows the rule increment 3 established — a value arrives together with
-    the code that writes it, never ahead of it, so the enum never advertises
-    a state nothing can create.
+    Two values, each with a live producer, per the rule increment 3 set —
+    a value arrives with the code that writes it and never ahead of it.
+
+    ``LOCAL`` is the ordinary case: this instance looked at an account and
+    suspended it. ``DOMAIN_BLOCK`` is the same decision taken at a
+    different scope — not a suspension *learned from* a peer, which is a
+    thing that does not exist on this wire (increment 4b established that
+    no inbound "a peer suspended your user" activity arrives), but a
+    suspension this instance imposed on accounts belonging to a server it
+    has blocked.
+
+    The distinction is load-bearing rather than decorative: it is what lets
+    :func:`~reeltalk.moderation.models.unblock_domain` lift exactly the
+    suspensions the block created and leave every individually-suspended
+    account alone. Without a second value there would be no way to tell
+    "this moderator suspended this person" from "this person's whole
+    server got blocked", and unblocking a domain would either restore
+    accounts somebody individually suspended or fail to restore the ones
+    the block was responsible for.
     """
 
     LOCAL = ("local", "Suspended by this instance")
+    DOMAIN_BLOCK = ("domain_block", "Suspended by a domain block")
 
 
 class User(AbstractBaseUser, PermissionsMixin):

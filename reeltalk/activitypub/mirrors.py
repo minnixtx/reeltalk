@@ -27,11 +27,30 @@ from PIL import Image
 
 from reeltalk import __version__
 from reeltalk.core.utils import sanitize_html
+from reeltalk.moderation.models import blocked_domain_for
 from reeltalk.social.models import User
 
 from .identity import LOCALNAME_RE
 
 logger = logging.getLogger(__name__)
+
+
+def host_is_blocked(url_or_host: str) -> bool:
+    """Whether a URL's (or bare host's) server is domain-blocked (R105).
+
+    A tiny wrapper rather than a call at each site, because the same
+    question is asked at two different doors and both answers have to come
+    from one place: the mirror-creation door below, and the resolution door
+    in :func:`_resolve_actor`.
+    """
+    if not url_or_host:
+        return False
+    parsed = urlparse(url_or_host if "//" in url_or_host else f"//{url_or_host}")
+    for candidate in (parsed.netloc, parsed.hostname):
+        if candidate and blocked_domain_for(candidate) is not None:
+            return True
+    return False
+
 
 REQUEST_TIMEOUT = 10
 
@@ -180,6 +199,16 @@ def mirror_user_from_person(doc: dict) -> User:
     existing = User.objects.filter(local=False, actor_url=actor_url).first()
     if existing is not None:
         return existing
+    # The creation door for a domain block (R105). Refusing here rather
+    # than only at the inbox stops a blocked server from acquiring new
+    # identities on this box through any path that mirrors — a follow
+    # attempt, a profile lookup, a first-contact delivery. An *existing*
+    # mirror is still returned untouched: the block already suspended it,
+    # and a function whose contract is "the mirror for this document" that
+    # suddenly raised for rows it had always returned would break callers
+    # that have nothing to do with federation.
+    if host_is_blocked(actor_url):
+        raise RemoteFetchError(f"{actor_url} is blocked by this instance")
     public_key = (doc.get("publicKey") or {}).get("publicKeyPem", "")
     if not public_key:
         raise RemoteFetchError("Person document carries no publicKeyPem")
@@ -359,6 +388,16 @@ def _resolve_actor(actor_url: str, request, *, fetch: bool) -> "User | None":
             localname__iexact=match.group(1),
             suspended_at__isnull=True,
         ).first()
+    # The resolution door for a domain block (R105), deliberately separate
+    # from the suspension the block also applies. Blocking a host suspends
+    # its mirrors, and the ``suspended_at__isnull`` filter below would
+    # already stop them resolving — but that couples the door to the
+    # bookkeeping. A mirror unsuspended by hand after the block, or one
+    # created by a path that predates it, still must not resolve as a
+    # sender, and this line is what makes that true without depending on
+    # anything the block remembered to do.
+    if host_is_blocked(base):
+        return None
     mirror = User.objects.filter(
         local=False, actor_url=base, suspended_at__isnull=True
     ).first()
