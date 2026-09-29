@@ -3522,6 +3522,107 @@ processor, one `COUNT`, guarded on `is_authenticated` inside itself.
   model and keeps volume sane; a digest is a later refinement.
 - **Any change to `notify()`, the notification ledger, or `Kind`.** R99 holds.
 
+### Executed — 2E is DONE, gate-verified and LIVE-PROVEN (2026-09-29)
+
+**What landed.** `social.User.report_email` (BooleanField, `default=True` written
+on the field, migration `social.0014_user_report_email`);
+`moderation/notify.py` — `staff_email_recipients`, `build_report_email`,
+`notify_staff_of_report`, `console_backend_active`; `moderation/tasks.py` —
+`enqueue_report_emails` and `send_report_email`; the
+`moderation/email/new_report.txt` template; one call site in `file_report()`
+gated on `created`; the `UserAdmin` Roles fieldset entry plus a read-only
+`report_email_status` line that says out loud whether mail will actually reach the
+account; the `reeltalk.moderation.notify` logger raised to INFO in `LOGGING`.
+
+**One call site, not several.** The notify hangs off `file_report()`, so
+`file_remote_report()` inherits it and the inbound peer `Flag` path (D-d) is
+covered without `activitypub/flags.py` knowing anything about mail. A notify at
+each filing route is N places to forget, and forgetting here is silent — the report
+still lands in the queue, only nobody is told.
+
+**R99 verified, not assumed.** `test_the_notification_ledger_is_untouched` counts
+the whole `Notification` table across a file-and-notify cycle, and
+`test_a_reporter_who_blocked_every_moderator_still_triggers_the_email` files from
+a member who has blocked both moderators and asserts both still get mail. The trap
+that motivated R99 is shown absent by construction rather than only asserted about.
+
+**Three things only measuring or only going live produced.**
+
+1. **The "how many reports on this target" field was vacuous until it was computed
+   in the right place.** Because the D-c dedup means only the *first* filing
+   notifies, that count evaluated at notify time is always 1 — a field that can
+   never say anything. Evaluated at **send** time it earns its keep: it shows how
+   many reports piled up behind the alert while it still sat in the queue.
+2. **`get_connection()` is deprecated** under Django 6.1's `MAILERS` (R2) — 50
+   `RemovedInDjango70Warning`s per suite run. Replaced with
+   `mailers.create_connection(DEFAULT_MAILER_ALIAS)`, which reads
+   `settings.MAILERS` on every call instead of caching, so the console-backend
+   check stays live under `override_settings` and the warning is gone.
+3. **The live send failed on the owner's mail server, and the audit line caught it
+   exactly as designed.** `554 5.7.1 <rcpt>: Recipient address rejected: Sender
+   is not same as SMTP authenticate username` — this box only lets a user send as
+   themselves, and `DEFAULT_FROM_EMAIL` was `admin@reeltalk.minnix.dev` while the
+   SMTP user is `minnix@minnix.dev`. No test could have found this. It surfaced
+   the way trap 6 says a task failure must: the report row read
+   `Staff email to @minnix FAILED: SMTPRecipientsRefused: …`, the django-q `Task`
+   row went `success=f`, the worker logged it, and the exception was re-raised
+   rather than swallowed — not a silent non-delivery behind a green task. Fixed by
+   `EMAIL_SENDER_DOMAIN` (R117); unset it preserves the pre-2E value exactly, and
+   no existing test asserted `DEFAULT_FROM_EMAIL`, so nothing else moved.
+
+**Verified.** Gate **`1804 passed + 5 skipped`** against a baseline of 1753 + 5 —
+**+51**, reconciled as 46 new test functions plus 5 clean-room parametrised
+instances, one per new file (`notify.py`, `tasks.py`, the email template, the
+migration, the test file). `ruff check` clean, `ruff format --check` clean,
+`makemigrations --check` reports **No changes detected**. Re-run green after the
+`EMAIL_SENDER_DOMAIN` change.
+
+**Deployed 2026-09-29.** `docker compose build` (all three images) →
+`manage.py migrate` applied `social.0014_user_report_email` to the live DB →
+`up -d --force-recreate web worker`. One deploy gotcha worth recording: `up -d`
+alone picked up the new *env* but kept running the image's *old* `settings.py`,
+because normal operation has no code bind mount — the new setting sat in the
+container environment doing nothing until the image was rebuilt.
+
+**LIVE-PROVEN against real SMTP, from the received message and the worker log —
+never from a status code.** Three proofs over the real routes as `witness` (id 124,
+plain member; session decoded server-side to `_auth_user_id=124`; anonymous
+control on every probe: `302 → /login/?next=/moderate/` with no `sessionid`):
+
+- **A — delivery.** `POST /status/24/report/` → worker logged
+  `Staff email sent to @minnix.` and `Staff email sent to @warden.` at 20:33:32;
+  **received** at `minnix@minnix.dev` (msg 1008) and `danny@minnix.dev`
+  (msg 3632) the same second. The received body carries the queue link, the
+  target, the reporter, the category and the open count, and **none** of the
+  reported post's text or the reporter's comment — trap 5 proven on the wire, not
+  only in locmem.
+- **B — the dedup.** A second reporter (`zz_dedup`) filed against the same
+  target, which already held unresolved report #25. Report #26 was created with an
+  **empty** audit note, both mailboxes stayed at 1008/3632, and the
+  `staff-report-email` task count did not move. Nothing was enqueued, which
+  demonstrates the check ran *before* the enqueue and not inside the task.
+- **C — the opt-out.** With `report_email=false` on `warden`, `witness` filed
+  against a fresh target: `minnix@` went 1008 → 1009, `danny@` stayed at 3632,
+  and report #27's note carries only `Staff email sent to @minnix.`
+
+**Mock-only vs live, stated plainly.** The suite proves the recipient set, the
+dedup, the opt-out, the reporter exclusion, the inbound `Flag` path, the
+enqueued-not-inline property and the console-backend guard — all against locmem.
+The three proofs above are the only evidence that a real mail server accepts and
+delivers what we hand it. Both exist; neither substitutes for the other.
+
+**Instance left as found.** `warden.report_email` restored to `True`; the mailbox
+credential temp file deleted; the probe reports (#24–#27) and the `zz_dedup`
+account kept, per the standing rule that moderation test accounts are deliberate.
+`witness`'s password was reset to the standing probe convention (`set_password`,
+`pbkdf2_sha256` and `check_password` verified) because its prior value was
+recorded nowhere — a deliberate choice, since only `bait` is off-limits.
+
+**Not done, and deliberately so.** One-click unsubscribe, the pending-count badge
+on `.moderation-link`, and email verification all stay out of scope per §2E. The
+unsubscribe gap remains a real compliance consideration for any deploy with real
+users, not a nice-to-have.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -3800,3 +3901,5 @@ not an optimisation.
 - **R115 — Staff report emails default ON (owner decision 2026-09-29, taken while speccing §2E).** A new `User.report_email` flag defaults `True` for every account, so a moderator added on a fresh deploy is emailed about new reports without anyone having to turn it on. **Why:** the admin already opted the person in by granting the moderator role — that grant is the consent — and a default-off flag makes a freshly deployed instance look like the feature is missing, which is the same silent-non-delivery failure §2E exists to close. Matches Mastodon exactly (`app/models/user_settings.rb:47`, `setting :report, default: true`). **How to apply:** the default lives on the field, not in the send path, so a user created by any route — signup, a management command, a fixture — gets the same value. It is reversible per user at any time, and the flag is meaningless without a non-empty `email`, which is a separate filter (see §2E trap 2). If a future increment adds signup-time notification preferences, this default is what those preferences initialise from.
 
 - **R116 — The staff report-email toggle lives in Django `UserAdmin`, not a self-service preferences page (owner decision 2026-09-29, taken while speccing §2E).** The admin sets and clears it in the same `UserAdmin` Roles fieldset where they grant `is_moderator`. **Why:** R100 already established that the site admin grants moderation there and that a moderator cannot reach that form at all, so putting the notification behaviour beside the grant keeps one place where a moderator's whole capability is visible and auditable — and this instance has no notification-preferences page, so the alternative was a new page rather than a move. **What it means in practice:** a moderator who wants to stop receiving report emails asks the site admin. **How to apply:** this is a scoping decision, not a statement that self-service is wrong. Mastodon renders the toggle in `/settings/preferences/notifications` gated on `can?(:manage_reports)`, and if staff ever need to opt themselves out without asking, that is a legitimate later increment — but it must not be treated as missing from this one. Do not solve the self-service question by loosening who can reach `UserAdmin`; that reverses R100 for a convenience.
+
+- **R117 — Staff report mail is sent as the site admin's own mail address, not a role address (owner decision 2026-09-29, taken when the first live send was refused).** `DEFAULT_FROM_EMAIL` is `minnix@minnix.dev`, deliberately equal to `EMAIL_HOST_USER`, minted by the new `EMAIL_SENDER_NAME` + `EMAIL_SENDER_DOMAIN` pair. **Why:** the owner's mail server enforces `554 5.7.1 Sender is not same as SMTP authenticate username`, so the From address and the authenticated SMTP user must agree — and the instance's own host is not the mail account's domain (`reeltalk.minnix.dev` vs `minnix.dev`), which made the pre-2E `admin@<instance host>` unsendable here. Given the choice between sending as himself, creating a role alias on the mail server, and provisioning a dedicated app SMTP account, the owner took the one needing no mail-server work. **How to apply:** those two env keys are the whole mechanism, and a role address later is a mail-server task, not a code task — add `reeltalk@minnix.dev` (or `moderation@…`) as an alias of the admin's existing account and point the two keys at it. `EMAIL_SENDER_DOMAIN` unset falls back to `DOMAIN_HOST`, which reproduces the pre-2E value byte for byte, so an operator on a server with no anti-spoof rule sets nothing and sees no change. Do not reintroduce a hardcoded `admin@` sender: on any host that authenticates and enforces the sender match it fails every send, and it fails in the worker, where it reads as a broken task instead of a missing setting.
