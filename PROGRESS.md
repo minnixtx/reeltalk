@@ -2892,6 +2892,258 @@ Note also that `activity/delete.rb` carries **no** suspended-actor guard —
 installed file rather than inferred, because a guard there would have made the
 whole round trip silently no-op while every mock still passed.
 
+### Increment 6 execution record — `Flag` both directions and the domain block (executed 2026-09-29)
+
+**What landed.** `moderation/representative.py` (the instance actor);
+`flag_activity()` in `activitypub/identity.py` and `broadcast_report_flag()`
+in `broadcast.py`; `record_forward_outcome()` in `moderation/models.py`; the
+`forward` route and its card disclosure; `activitypub/flags.py` with
+`handle_flag` registered in `inbox.HANDLERS`, filing through
+`file_remote_report()`; `DomainBlock` with `moderation.0005`;
+`SuspensionOrigin.DOMAIN_BLOCK` with `social.0013`; `mirrors.host_is_blocked()`
+wired into both resolver doors; and the three moderator routes `refuse`,
+`block domain`, `unblock domain` with their template sections.
+
+**The local/remote-target question §2D left open is settled: one mechanism, not
+two columns (R110).** Asked what "blocking" a remote mirror should mean when a
+local account cannot be blocked at all, the owner chose **generalise via
+suspension**. A domain block suspends the host's existing mirrors under a new
+`SuspensionOrigin.DOMAIN_BLOCK` and refuses new ones at the resolver door;
+refusing one remote account is the same call on one mirror. The reason to
+choose it is not elegance, it is the map 4a drew: **86 read sites already
+filter on `suspended_at`**, so hiding a blocked server's accounts costs zero
+new read-path code. The alternative — a `blocked` column — would have meant
+touching all 86 again, and every future read site would have to know about both.
+**What this closes off:** a third severity, and any per-account block state that
+is not the suspension state.
+
+**The instance representative is reserved by the signup charset, not by a
+denylist (R111).** Mastodon masks its reporters behind
+`Account.representative` (`mastodon.internal`, `actor_type: Application`); we
+have no Application model, so the representative is a real local `User` with
+localname `_instance`. The leading underscore is already invalid at signup
+under R12's `^[a-zA-Z0-9][a-zA-Z0-9._-]*$`, so **nobody can register the name
+we are using** — the reservation is structural rather than a list someone has
+to remember to extend. It carries no `is_staff`, no `is_moderator`, and an
+unusable password. `validate_instance_localname()` exists as a belt but is
+**deliberately not wired into `SignupForm`**: the charset rule already refuses
+it, and a second check that duplicates the first is a thing to forget to keep in
+step.
+
+**A `get_or_create(defaults=…)` with a password field in it leaves the password
+set to the empty string, and Django reads the empty string as usable.** The
+first cut of `instance_representative()` was
+`get_or_create(localname="_instance", defaults={..., "password": None})`;
+`defaults` go through the plain manager's `create()`, which never calls
+`set_password`, so the column stayed `''` — and `is_password_usable('')` is
+**True**, because Django only rejects `None` and a `!`-prefixed hash. Caught by
+`assert not rep.has_usable_password()`. The function now uses
+`create_user(..., password=None)` (which routes through `make_password(None)`
+and produces a real unusable hash), with an `IntegrityError` re-read and
+`_ensure_unusable()` re-applied on every call. **This is the standing
+`create_user()` rule biting again on a row nobody signs in with** — the shape
+looks harmless precisely because there is no human behind it.
+
+**Masking the reporter has to reach the key, not just the `actor` field
+(R112).** `broadcast_report_flag` signs as `@_instance` with `@_instance`'s
+keypair. A test asserts the `keyid` is `.../user/_instance/#main-key` and that
+the reporter's `/user/<localname>/` appears **nowhere in the serialised body**
+— not merely not in `actor`. Signing as the reporter while naming the instance
+in `actor` would look compliant in exactly the field a reviewer checks and leak
+through the one field every peer reads first. The same test asserts the
+moderator's localname is absent too: the person who clicked is not on the wire
+either.
+
+**The `Flag` id carries our report pk on our own host, which is what makes the
+proof readable from their side.** `id = https://<our origin>/reports/<pk>/`.
+Their `Activity::Flag` keeps `@json['id']` into `reports.uri` when the host
+matches the verified sender, so their row points back at our row. An opaque
+uuid would have made the round trip unverifiable without asking them to correlate
+on timing.
+
+**The domain block has two doors and one sweep, and each is tested without the
+other.** The sweep (`block_domain`) suspends the mirrors we already hold. The
+doors are `_resolve_actor` (returns `None` for a blocked host **before** the
+mirror lookup) and `mirror_user_from_person` (raises `RemoteFetchError`, so a
+block stops us taking in a *new* mirror of that host). The ordering matters and
+is pinned: `test_blocking_a_domain_refuses_resolution_even_if_the_account_is_
+not_suspended` hand-clears the suspension on a blocked mirror and the door
+still refuses. If the door only worked through the suspension, a hand-unsuspend
+would reopen a blocked server — the worst failure mode available, because it
+looks like the block is enforced.
+
+**The lift is scoped three ways, and the third was found by writing the test
+that contradicted its own name.** An unblock lifts a row only if (1) its
+`suspension_origin` is `DOMAIN_BLOCK` — so an individually-suspended account is
+not restored by somebody else's domain decision; (2) its host matches the
+block being removed — so a block on `bad.example` cannot lift what
+`mail.bad.example` is responsible for; and (3) **no block that is staying still
+covers it**. The first two were designed; the third appeared when a test with
+overlapping blocks showed that removing the outer block re-exposed an account
+the inner block still refused at the door — visible here, unable to federate,
+the worst of both. `blocked_domain_for()` gained `exclude_pk` for exactly this
+question. **The accepted edge, unchanged:** a mirror blocked first and then
+individually refused cannot express that, because `suspend()` no-ops on an
+already-suspended row and the origin stays `DOMAIN_BLOCK`, so the unblock lifts
+it. Refusing one account *and* its whole server at once is the one case this
+generalisation cannot separate, and it is the price of not running a second
+column at 86 read sites.
+
+**Refusing a remote account broadcasts nothing, and that is the whole
+difference between this and a ban.** A mirror has no private key, so we cannot
+re-issue its actor document; and we have no authority to declare another
+instance's user suspended. `test_refusing_broadcasts_nothing` asserts zero
+outbound calls. The control's wording is **"Refuse"**, not "Suspend", and its
+disclosure says *"Their own server is not told and is not changed"* — because a
+moderator who reads "suspend" on a remote account will reasonably assume their
+server heard about it.
+
+**Inbound: the reporter we can record is the server, not the person, and that
+is symmetric rather than a gap.** Mastodon masks its reporters exactly as R104
+requires us to mask ours, so what arrives is signed by *their* instance actor;
+the human who filed it is unknowable here. Attribution is the **verified
+sender**, never `activity["actor"]` — a `Flag` is the one activity whose whole
+purpose is to make this instance write down an accusation, so a handler that
+read the declared field would let any peer write a report against anyone as
+anyone. Pinned by a test that forges the `actor` and asserts the row still
+carries the sender. **Consequences now recorded rather than discovered later:**
+inbound category is always `other` (the wire carries none); a `Flag` naming
+both a status and its author files **one** report, the status winning, because
+the status row already carries the author; a `Flag` about a remote account is
+dropped as addressed to the wrong server; a `Flag` about a **banned** member is
+skipped explicitly; and a `Flag` about an account this instance has **already
+suspended** does not land at all — `resolve_known_actor` refuses suspended
+accounts on either branch, and this handler inherits that posture rather than
+working around it. **That last one is a real consequence: peers cannot report
+our suspended users to us.** Accepted — the queue is for things we can act on,
+and we already have the account.
+
+**We do not copy Mastodon's forward fan-out.** Their `ReportService` posts the
+`Flag` to the target's inbox *and* to the inboxes of everyone the reported
+status replied to. We send to the target's home inbox only. Their fan-out
+exists because on a large instance the reported post's repliers may be on
+servers that never see the target's timeline; here the mirror's replies are
+mostly to *our* posts, and every extra recipient is another synchronous POST
+inside a moderator's request with no retry queue behind it.
+
+**A 2xx on a forward is delivery, not agreement — and the audit line says so
+in those words.** Increment 5's shield finding applies directly: a peer can
+accept our activity and then discard it. The success line reads
+`delivered to <inbox> as @_instance (their server accepted it; whether it
+acted is not knowable from here)`, and the moderator's flash message says
+*"They decide what to do about it — this does not resolve the report here."*
+R108's loudness covers the transport; nothing we can build sees their policy.
+
+**Forwarding resolves nothing, and four structural refusals run before any
+network call.** A resolved report, a local target (no home server to tell), a
+mirror with no `actor_url` (no address), and a suspended target all `404`
+before `broadcast_report_flag` is reached. The suspended case is the pair to
+the hidden control: without the check, a hand-built POST against a suspended
+mirror would come back "forwarded" having sent nothing, which is R88's
+blindness wearing a success message. A test asserts **zero outbound calls** on
+that path.
+
+**A forward cannot append to a closed decision.** `record_forward_outcome()` is
+scoped to `Report.unresolved_for_target()`, not to the whole pile — so a
+forward on a fresh report cannot rewrite the notes of an already-resolved row
+sharing the same target. Pinned by a test that resolves one row with
+`CLOSED_AGE_AGO` in its note, forwards a second report on the same target from
+a different member, and asserts the old note is untouched. (Filing the second
+report from the *same* member dedups to the resolved row under R107's
+`nulls_distinct=False`, so the test needs two reporters to make two rows — a
+trap worth naming.)
+
+**`can_act_on` gained a shield that NARROWS R103b, and the owner has not
+signed off on it.** `is_instance_actor(target)` now returns `False` from
+`can_act_on` **before** the superuser short-circuit, so nobody — not the site
+admin — can suspend or ban `@_instance`. The reason is operational, not
+political: banning `_instance` 410s `/user/_instance/`, after which peers
+cannot verify anything we sign with that key, which breaks outbound federation
+for every report and every future activity that uses the representative. It is
+placed before the superuser branch deliberately, so the admin's "may act on
+anyone" is the thing being narrowed rather than a moderator's reach. **Flagged
+for the owner's explicit yes-or-no; it is the one place this increment changed
+a settled rule rather than adding to it.**
+
+**Mock-only, stated plainly.** Everything above is proven against `responses`
+mocks and the local test DB: the payload shape, the key identity, the reporter
+masking, both doors, the sweep, the three-way lift scoping, all four forward
+refusals, and every permission boundary. **Nothing in this increment has been
+sent to a real peer yet.** The live proof below is handed to the owner because
+it writes into their instance.
+
+**The live test the owner should run, and what to look for on their side.**
+The asset already exists — four live mirrored remote statuses
+(`22`, `24`, `26`, `31`), all `user_id=20` =
+`minnix@upallnight.minnix.dev`, `deleted=false`, content intact. No third-party
+account is involved. Steps: as a non-admin member, report one of those posts
+from its post page; open `/moderate/`; expand the **Forward** disclosure on the
+card; press it. Then read **their** database rather than our status code (R88):
+
+```
+SELECT id, uri, comment, created_at FROM reports ORDER BY id DESC LIMIT 1;
+SELECT a.acct FROM reports r
+  JOIN accounts a ON a.id = r.account_id        -- the reporter
+ WHERE r.id = <that id>;
+SELECT a.acct FROM reports r
+  JOIN accounts a ON a.id = r.target_account_id
+ WHERE r.id = <that id>;
+```
+
+Expected: `uri = https://reeltalk.minnix.dev/reports/<our report pk>/` — their
+row pointing back at ours; `account` = **`_instance@reeltalk.minnix.dev`**
+(our representative as their mirror), and **not** the reporting member;
+`target_account` = `minnix@upallnight.minnix.dev`; `comment` = the reporter's
+text verbatim. If `account` is the member rather than `_instance`, the masking
+failed on the wire and that is the bug to report. Their own
+`skip_reports?` / `DomainBlock.reject_reports?` and the
+`!target_account.local? && replied_to_accounts.none?` branch are the two places
+their handler can drop it — the target *is* local on their side, so neither
+should fire.
+
+**A pre-existing test caught the registration, and that is worth recording
+because it did its job.** `test_federation_inbound.py` pinned the inbound
+handler set as an exact `set(HANDLERS) ==` literal. Adding `"Flag"` turned it
+red on the full gate — not a broken test but a **pin firing**, the mechanism
+that makes registering a new inbound activity a deliberate act rather than a
+dict entry nobody looked at. It was updated rather than loosened, and renamed
+from `test_like_accept_and_reject_are_now_registered_handlers` to
+`test_the_handler_registry_is_exactly_what_we_mean_it_to_be`, because the old
+name described a set that was no longer true of it. **A future session adding a
+handler should expect this test to fail first and should treat that as the
+intended review step.**
+
+**The gate: `1740 passed + 5 skipped`.** Reconciled against increment 5's
+`1662 + 5`: **72 new tests** (28 in `test_flag_outbound.py`, 44 in
+`test_flag_inbound_and_domain_block.py`) **+ 6 clean-room params** for the six
+new files (`moderation/representative.py`, `activitypub/flags.py`,
+`moderation/0005_domainblock.py`, `social/0013_alter_user_suspension_origin.py`,
+and the two test files) `= 1740 exactly`. `ruff check` and
+`ruff format --check` clean; `makemigrations --check` clean. No pre-existing
+test's assertions were weakened — the one existing test that changed
+(`test_the_handler_registry_is_exactly_what_we_mean_it_to_be`) gained a member
+of the set it pins, which is the pin working, not a guard being relaxed. The
+ban and suspension suites pass untouched, which is itself the check that the
+new `SuspensionOrigin` member and the `can_act_on` shield did not disturb them.
+
+**One process note earned this round: a gate started before a migration file
+exists reports the wrong clean-room count.** The first full run started at
+14:30 and `social/0013` was generated at 14:34, so that run collected
+`1739 + 1 failed` — one short of the true total, because the clean-room guard
+enumerates FILES at collection time. The authoritative number is from a run
+started after every file was final. **Re-run the gate after the last file is
+written, not before.**
+
+**Flagged, not decided — both touched by this increment.** (1) `has_admin()` is
+`filter(is_superuser=True).exists()`, so a banned or suspended admin leaves the
+instance reading as *configured* with nobody able to sign in. This increment
+made that reachable in one more way: `can_act_on` now shields `_instance`, but
+nothing shields the admin from themselves, and no code prevents suspending the
+only admin. (2) The **post-lift divergence check** increment 5's shield finding
+suggests is now worth more than it was: the domain block's lift is also a
+request, and if a peer refuses to unsuspend our mirror of their account we have
+no way to see it. Neither was decided here.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -3153,3 +3405,9 @@ New owner decisions for the rewrite are recorded here, numbered R1, R2, … The 
 - **R108 — ActivityPub identity is minted from a canonical origin, never from the request; and a moderation action that fails to federate is loud (owner decisions 2026-09-28, taken during increment 4a).** Two questions came up in the same increment and the owner settled both by direct choice rather than by the agent picking. **(1) Identity origin.** `absolute_uri()` was `f"{request.scheme}://{request.get_host()}{path}"`, so every outbound ActivityPub identifier — the signing `keyid`, the activity `id`, the object `id`, `actor`, `attributedTo`, and the collection URLs inside a pushed document — depended on which host and scheme the acting browser happened to use. A moderator working from `http://192.168.1.138:3030` (in both `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` by design, per the owner's standing LAN-access decision) minted identities on an address no internet peer can resolve. The owner was offered canonical-everywhere, canonical-outbound-only, and a host guard, and chose **canonical everywhere**: all ActivityPub URIs come from `settings.CANONICAL_ORIGIN`, derived from `DOMAIN` and overridable. **This narrows R40's "Document URLs use the host as sent" to nothing for identity**, which is why it is recorded as its own decision rather than folded into R40 — R40 as written permits request-derived documents. What R40 keeps: the webfinger `domain must be DOMAIN` rule, case-insensitive localname matching, and the fixed collection URL shapes. What came with the choice: a multi-hostname deploy collapses to one actor id, which is what ActivityPub wants; and a spoofed `X-Forwarded-Proto` can no longer move a published identity **at all**, from any peer, trusted or not — a strictly stronger property than R74's gate, because the document no longer reads the transport. **R74 itself is untouched and still necessary**: it governs `request.is_secure()` and the cookie flags, which is where the transport genuinely matters. The owner's framing of the distinction worth keeping: *being allowed to serve a host is not the same as being allowed to be published as it.* **(2) Loudness.** Asked whether a moderation action that fails to federate should be loud, the owner chose **loud and non-blocking** over blocking the action or a queue-surface-only record. Delivery failures are returned to the caller and surfaced to the moderator inline, with the outcome written to the audit record; the local action still commits and still counts. Rejected: refusing the action on a delivery failure, which couples local correctness to remote availability and would make one dead follower instance undrainable. **What this closes off:** request-derived identity fragments (the same actor described under two ids depending on who asked), a moderator being told an action succeeded when the remote copy is still up, and a spoofed scheme reaching a published identifier. **What it deliberately does not claim:** that any given peer honours an inbound suspension flag — that is the peer's business, and the `toot:suspended` finding above is about vocabulary existing, not about it being obeyed.
 
 - **R109 — A moderator may both impose and lift a ban; R102's lift clause is amended (owner decision 2026-09-28, taken during increment 5 before any code was written).** §2D specified an "admin-only **lift**" and never said who may *impose* a ban. Read literally alongside R103b — under which a moderator may already act on a regular member — that is an asymmetric power: a moderator could permanently destroy another member's content while only the site admin could undo it. The owner chose symmetry in the other direction rather than restricting the ban: **whoever may impose a ban may lift it, and nobody else may do either.** Both verbs use the existing `can_act_on` reach guard byte-identical, so the decision adds no second guard, no severity-specific rule, and nothing able to drift out of step with the rest of the moderation surface. **Why:** a ban the actor who imposed it cannot lift is the worst of both — the irreversibility of the heavy action with none of the accountability of holding it, and a queue where a moderator can see a decision they are forbidden to reverse. **How to apply:** the pairing is the invariant. If a future change restricts who may ban, it must restrict the lift identically in the same commit, or the asymmetry returns by accident. R102's "liftable by the site admin only" is superseded for bans; it still governs nothing else, since suspension was always liftable by whoever imposed it. Reach limits still come from R103b alone — a moderator cannot reach an admin, so a ban on the admin remains out of reach regardless of this.
+
+- **R110 — Blocking a remote server is the suspension mechanism, not a second visibility state (owner decision 2026-09-29, taken during increment 6; settles the local/remote-target question §2D left open under Shape).** The question was what "blocked" means for an account when a *local* account cannot be blocked at all, and the owner chose **generalise via suspension**: a domain block suspends the host's existing mirrors under a new `SuspensionOrigin.DOMAIN_BLOCK` and refuses new ones at the resolver door, and refusing a single remote account is the same call on one mirror. **Why:** increment 4a's map found **86 read sites** already filtering on `suspended_at`, so a blocked server's accounts disappear from every surface for free. A separate `blocked` column would have meant touching all 86 again, plus every read site written from now on needing to know about both states — two sources of truth in the exact shape R93 and R97 exist to prevent. The new `SuspensionOrigin` member is what makes the lift safe rather than a bare boolean: it records *which* decision suspended the row, so `unblock_domain` lifts exactly the block's own suspensions and leaves individually-suspended accounts standing. **What it closes off:** a third severity between suspend and ban, and any per-account block state that is not the suspension state. **The accepted edge, priced in:** a mirror blocked first and then individually refused cannot express that, because `suspend()` no-ops on an already-suspended row and the origin stays `DOMAIN_BLOCK`, so lifting the domain lifts it too. Refusing one account *and* its whole server at once is the one case this cannot separate.
+
+- **R111 — The instance representative is a dedicated non-human local actor whose name is reserved by the signup charset (owner decision 2026-09-29, taken during increment 6).** Mastodon masks its reporters behind `Account.representative` — `mastodon.internal`, `actor_type: Application`. We have no Application model, and the owner chose the closest honest equivalent over the alternatives (signing as the moderator, or a config-only key with no actor): a real local `User` with localname **`_instance`**, display name "Instance representative", no `is_staff`, no `is_moderator`, unusable password. **Why the reservation is structural:** R12's signup charset is `^[a-zA-Z0-9][a-zA-Z0-9._-]*$`, so a leading underscore is already invalid — nobody can register the name we are using, and the reservation cannot drift out of step with a denylist somebody forgets to extend. `validate_instance_localname()` exists as a belt and is **deliberately not wired into `SignupForm`**, because a second check that only restates the first is a thing to forget to keep in step. **How to apply:** anything that lists, counts or displays accounts must decide whether `@_instance` belongs; it is not a member and must not appear in member lists. Its row is created lazily by `instance_representative()` and never by a GET.
+
+- **R112 — Outbound forwarding is a moderator click and resolves nothing (owner decision 2026-09-29, taken during increment 6).** The alternatives were auto-forward on filing and forward-on-resolve; the owner chose **the moderator presses Forward**, so nothing leaves the box until a human decides. **Why:** a `Flag` is a statement to another instance's staff about one of *their* users, made in our instance's name by our representative — an automatic forward would let any member's report become a cross-server accusation with no human in the loop, and would make report-filing a way to attack another instance's members. **And forwarding must not resolve the report:** passing a complaint to the one server that can act on that account is not a judgment of our own. The moderator may still delete the local copy, refuse the mirror, or dismiss the pile afterwards, and the card's disclosure says so. **How to apply:** the forward verb never writes `resolved_at` and never writes `Report.Action`; it writes only a `[federation]` outcome line. A future "auto-forward remote reports" would reverse this decision and needs the owner, not an optimisation.
