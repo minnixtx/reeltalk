@@ -2432,7 +2432,17 @@ Each sized for one session, ending committed and gate-verified. **Baseline is `1
 - **Report assignment** — Mastodon's `assigned_account_id` (this moderator owns this report). Meaningful with a large mod team; deferred.
 - **Sensitive-content marking** — Mastodon's `mark_statuses_as_sensitive` / `sensitive` actions. Deferred.
 - **The `legal` category and DMCA handling.**
-- **Email notification to staff** — Mastodon's `AdminMailer.new_report` gated on `allows_report_emails`. There is no email infrastructure here until the unbuilt 2FA / email-verification work lands.
+- **Email notification to staff** — ~~deferred pending email infrastructure~~
+  **Superseded 2026-09-29: this line was wrong, and the feature is now specced as
+  §2E.** Two errors in it, both corrected against the live tree rather than by
+  re-reading the note: the transport already exists (`settings.py:278-296` builds
+  `MAILERS` — SMTP when `EMAIL_HOST` is set, `console.EmailBackend` otherwise),
+  so nothing was blocked on a build; and Mastodon's gate is a **per-user** setting
+  read in the **service** (`report_service.rb:51` → `allows_report_emails?` →
+  `settings['notification_emails.report']`, default `true`), not a global switch
+  on the mailer — `AdminMailer.new_report` itself has no gate at all. Email
+  *verification* of member addresses is still unbuilt and is a different feature
+  with different reasons; conflating the two is what made this look blocked.
 - **A transfer-of-ownership flow** for the single-site-admin convention.
 - **A separate audit-log table** — the note on the report row is the record (R106).
 - **The parked R73 visual treatment** of `/moderate/`, including how Ban and Suspend should look.
@@ -3321,6 +3331,188 @@ site admin proves nothing about R103b, since the admin reaches everything.
 is the signing identity for every outbound `Flag`. `bait` (id 122) was left
 untouched throughout; resetting its password would have broken the owner's own
 use of it.
+
+## 2E. Forward plan — staff notification for new reports (email)
+
+### The finding that sets the scope
+
+**Nobody tells a moderator that a report exists.** Verified in code, not recalled:
+`file_report()` (`reeltalk/moderation/models.py:254`) is a bare `get_or_create`
+and return, and `file_remote_report()` delegates to it — so neither a locally-filed
+report nor an inbound peer `Flag` notifies anyone. The moderator header link is a
+static `<a class="moderation-link">Moderate</a>` with no count, while the member's
+badge beside it reads `{{ unread_notifications }} unread`. A report reaches staff
+only if somebody opens `/moderate/`.
+
+**This is not R99 being incomplete — it is R99's scope, and email sits outside
+it.** R99 forbids routing reports through `notify()`, because `notify()`'s third
+guard (`recipient.blocks.filter(pk=actor.pk)`) would let a member mute the whole
+moderation queue by blocking every moderator. An email path computes its own
+recipient set and sends to addresses; blocking a moderator changes nothing about
+it. **The trap is absent from the email path structurally, for the same reason it
+is absent from a count query.** Nothing here reopens R99, and `notify()` stays
+untouched.
+
+**Why this matters at the project's real scale, not this instance's.** The live
+instance is throwaway test data. The *code* is meant to be deployed by other
+people on their own infrastructure with hundreds or thousands of users — at which
+point "a moderator has to think to poll the queue" stops being a minor inconvenience
+and becomes the reason reports sit unanswered.
+
+### What Mastodon 4.7.2 actually does (read off the live tree at `/home/mastodon/live`, 2026-09-29 — not recalled, not read from a tag)
+
+`app/services/report_service.rb:46-53`:
+
+```ruby
+def notify_staff!
+  return if @report.unresolved_siblings?
+
+  User.those_who_can(:manage_reports).includes(:account).find_each do |u|
+    LocalNotificationWorker.perform_async(u.account_id, @report.id, 'Report', 'admin.report')
+    AdminMailer.with(recipient: u.account).new_report(@report).deliver_later if u.allows_report_emails?
+  end
+end
+```
+
+Five things that block reads straight off those eight lines:
+
+1. **Both channels, not either/or.** An in-app local notification **and** an
+   email. Mastodon does not make staff choose.
+2. **The dedup gates the whole block, both channels alike.**
+   `return if @report.unresolved_siblings?` — if the target already has an
+   unresolved report, staff are told nothing new. So N members reporting one
+   spammer produce **one** staff notification, not N.
+3. **The recipient set is permission-derived** — `User.those_who_can(:manage_reports)`.
+   There is no separate mailing list to drift out of step with the role.
+4. **Both are async.** `perform_async` / `deliver_later`. Nothing about sending
+   email happens inside the request that filed the report.
+5. **The email is per-staff opt-in, and defaults ON.**
+   `allows_report_emails?` → `settings['notification_emails.report']`
+   (`app/models/concerns/user/has_settings.rb:130`), declared
+   `setting :report, default: true` (`app/models/user_settings.rb:47`), surfaced
+   as a checkbox in `/settings/preferences/notifications` **rendered only
+   `if current_user.can?(:manage_reports)`**
+   (`app/views/settings/preferences/notifications/show.html.haml:30`).
+
+**A correction to our own record.** `PROGRESS.md:2435` currently says Mastodon's
+`AdminMailer.new_report` is "gated on `allows_report_emails`". Wrong in two ways:
+the gate is in the **service**, not the mailer (`app/mailers/admin_mailer.rb:18`
+has no gate at all), and `allows_report_emails` is a **per-user setting**, not a
+global one. Worth fixing so nobody reads the global-setting implication into it.
+
+Mastodon also ships one-click unsubscribe (`app/views/unsubscriptions/`), which
+this spec deliberately does **not** include — see Out of scope.
+
+### What exists on our side (verified 2026-09-29)
+
+- **Transport is already wired.** `settings.py:278-296` builds `MAILERS` from the
+  env — SMTP when `EMAIL_HOST` is set, `console.EmailBackend` otherwise, with
+  `DEFAULT_FROM_EMAIL` derived from the domain. The live container reports
+  `console.EmailBackend` and `.env` carries no `EMAIL_*` keys. **So this needs a
+  config value, not a feature.**
+- **A worker exists.** `core/tasks.py:11` imports `async_task` from django-q2;
+  the worker service has been live since M2 increment 3.
+- **`may_moderate()`** (`moderation/decorators.py`) already defines who can act
+  on reports: `is_moderator or is_staff or is_superuser`.
+- **`Report.unresolved_for_target(target_key)`** already exists — it is what
+  `record_forward_outcome` scopes to — and is the dedup primitive.
+- **`email` is optional and NOT unique**: `email = models.EmailField(blank=True)`
+  (`social/models.py:119`), with the in-code comment pinning why ("two users with
+  no email must be possible until then"). Both facts are load-bearing here.
+
+### The decisions — to be settled by the owner before any code is written
+
+- **D-a — Default for the staff email toggle: ON.** Matches Mastodon
+  (`default: true`). **Why:** the admin already opted the person in by granting
+  the moderator role, and a default-off deploy produces exactly the failure this
+  increment exists to prevent — a feature that looks absent. Reversible per user.
+- **D-b — The toggle lives in Django `UserAdmin`, not a new preferences page.**
+  Consistent with R100: the admin grants moderation in `UserAdmin`'s Roles
+  fieldset, so they set its notification behaviour in the same place. This
+  instance has **no** notification-preferences page today; building one is its own
+  increment and is not required to make the feature work.
+- **D-c — Dedup skips the whole notify, both channels, exactly as
+  `unresolved_siblings?` does.** Notify only when this filing is the first
+  unresolved report on that target key. **And check it before enqueueing, not
+  inside the task** — a burst of reports would otherwise enqueue N emails before
+  any of them are resolved.
+- **D-d — An inbound peer `Flag` notifies too.** Same queue, same urgency, and
+  it is the case where nobody is watching is worst.
+- **D-e — Delivery is enqueued, never inline.** Via `async_task`. This gives
+  R108's loud-and-non-blocking property **structurally** rather than by
+  hand-wrapping a try/except: a dead SMTP cannot roll back a report or slow the
+  submit, because the send is not in the request at all.
+- **D-f — Recipients come from `may_moderate()`**, filtered to
+  `report_email=True` and a non-empty address. No second "who is staff" list.
+
+### Traps to design around, not discover late
+
+1. **The console backend reports success.** Printing to stdout *is* a successful
+   send as far as Django is concerned, so the queued task goes green while
+   delivering nothing — invisible even in the worker. Needs an explicit loud
+   diagnostic when the backend is console and staff email is enabled. This is the
+   R88 "`202 Accepted` is not delivery" lesson in a new costume, and it is the
+   single most important thing in this increment to get right, because an operator
+   who forgets `EMAIL_HOST` will otherwise never find out.
+2. **A staff member with no email silently gets nothing.** `email` is
+   `blank=True`. The recipient query must skip empty addresses, and the skip must
+   be *visible* — surfaced in the admin next to the toggle, not swallowed.
+3. **Email is not unique.** Two staff can share an address, and nothing prevents
+   it today. Do not assume one user per address, and do not let this increment
+   make uniqueness a de facto requirement.
+4. **Never email the reporter.** Obvious in hindsight, and exactly the kind of
+   thing a recipient-set helper gets wrong.
+5. **Keep the email short — a pointer, not a mirror of the queue.** Link, target,
+   category, count of reports on that target. Repeating the full reported body
+   and comment into an email widens the leak surface for something that may be
+   forwarded, and staff can see the whole thing in the queue.
+6. **Task failure must be visible.** Consistent with the broadcast pattern: the
+   worker log plus a line on the report's audit row, so "reported and nobody was
+   told" is a recorded fact rather than a missing row.
+
+### Verification plan
+
+**Suite (no credentials needed).** `django.core.mail.outbox` assertions: the
+recipient set is exactly staff-who-may-moderate with the flag on and an address;
+the reporter is never a recipient; opting one moderator out removes only them;
+the second report on the same target sends nothing; the inbound `Flag` path
+sends; the task is **enqueued** rather than run inline (assert the queue, not the
+outbox, from the filing request); the console-backend guard fires.
+
+**Live (needs credentials from the owner).** Put a real SMTP host in `.env`
+(gitignored — never in a tracked file or git history), file a report through the
+real route as `witness`, and prove it from the **received message** and the
+worker's log line — not from a status code. Then flip the toggle off for one
+moderator and prove the second report reaches only the other. **Until those
+credentials land, the live path is mock-only and gets labelled that way.**
+
+### Increments
+
+**One increment, session-sized.** `User.report_email` + migration;
+`moderation/notify.py` with `notify_staff_of_report(report)` doing the dedup,
+recipient resolution and enqueue; a task wrapper following the `core/tasks.py`
+pattern; call sites in `file_report` and `file_remote_report`; the email
+template; the console-backend guard; the `UserAdmin` fieldset entry; tests.
+
+**Optional follow-on, separate and small:** the pending-report count on
+`.moderation-link`. It is complementary, not a substitute — the email is the
+alert that finds you, the badge is the accurate live count for when you are
+already here, and unlike the email it cannot go stale when someone else clears
+the queue. Same shape as the notifications badge increment 4 built: a context
+processor, one `COUNT`, guarded on `is_authenticated` inside itself.
+
+### Out of scope here
+
+- **Email verification of member addresses.** A separate feature, and the reason
+  `email` is non-unique is explicitly deferred to it. Nothing here should make
+  that harder.
+- **Password reset.** Same dependency.
+- **One-click unsubscribe in the email.** Mastodon has it and a public deploy
+  eventually needs it; it requires a token route of its own. **Flagged as a real
+  compliance consideration for any deployment with real users**, not a nice-to-have.
+- **Digest batching.** Per-event with the unresolved-target dedup is the Mastodon
+  model and keeps volume sane; a digest is a later refinement.
+- **Any change to `notify()`, the notification ledger, or `Kind`.** R99 holds.
 
 ## 3. Host facts (this box)
 
