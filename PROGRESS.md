@@ -3079,41 +3079,67 @@ healthy, `/` serving 200 and `/moderate/` returning the anonymous 302.
 minted** — confirming the lazy-create: the representative row appears on the
 first forward, not on a GET, so browsing the queue never writes.
 
-**Mock-only, stated plainly.** Everything above is proven against `responses`
-mocks and the local test DB: the payload shape, the key identity, the reporter
-masking, both doors, the sweep, the three-way lift scoping, all four forward
-refusals, and every permission boundary. **Nothing has been sent to a real peer
-yet.** The live proof below is handed to the owner because it writes into their
-instance.
+**✅ PROVEN LIVE (owner, in a browser, against the real Mastodon 4.7.2 peer,
+2026-09-29 16:18 UTC) — corroborated in both databases, read off their rows
+rather than our status code (R88).** The test was deliberately run with **two
+accounts so the masking means something**: `witness` (a plain member — no
+`is_staff`, no `is_moderator`, no `is_superuser`) filed the report, and
+`warden` (a moderator, also not the site admin) pressed Forward. Neither was
+the owner's own account.
 
-**The live test the owner should run, and what to look for on their side.**
-The asset already exists — four live mirrored remote statuses
-(`22`, `24`, `26`, `31`), all `user_id=20` =
-`minnix@upallnight.minnix.dev`, `deleted=false`, content intact. No third-party
-account is involved. Steps: as a non-admin member, report one of those posts
-from its post page; open `/moderate/`; expand the **Forward** disclosure on the
-card; press it. Then read **their** database rather than our status code (R88):
+- **Our side** — `Report #23`: `reporter=witness`, `target_user=20`
+  (`minnix@upallnight.minnix.dev`), `target_status=22`, `category='spam'`,
+  **`action=''` and `resolved_at IS NULL`** — forwarding resolved nothing,
+  exactly as R112 requires. Audit line on the row:
+  `[federation] delivered to https://upallnight.minnix.dev/users/minnix as @_instance (their server accepted it; whether it acted is not knowable from here)`.
+- **Their side, `reports` row 5** — `uri =
+  https://reeltalk.minnix.dev/reports/23/`. **Their row points back at ours**,
+  which is the whole reason the `Flag` id carries our report pk on our own
+  host. `target` = their local `minnix`. `comment` = the reporter's text
+  verbatim. `category = 0`, `forwarded = f`.
+- **The reporter on their side is `_instance@reeltalk.minnix.dev`** — not
+  `witness`. The masking held on the wire, not just in our own payload.
+- **The status reference resolved on their side too**: `status_ids =
+  {117321900851623055}`, whose `uri` is
+  `https://upallnight.minnix.dev/users/minnix/statuses/117321900851623055`.
+  Their inbound handler walked our `object` array and sorted the note reference
+  into a **status**, not merely an account — which is the shape
+  `flag_activity()` was written against their `FlagSerializer` to produce.
+- **The decisive negative check.** Every account they hold with
+  `domain = 'reeltalk.minnix.dev'`: `bait`, `_instance`, `minnix`, `probea`,
+  `wireprobe`. **There is no `witness`.** The reporting member's identity did
+  not arrive and get relabelled — **it never reached their instance at all.**
+  `_instance` is present only because they fetched our representative's actor
+  document to verify the signature. That is the anti-doxxing property R104
+  asks for, proven by absence rather than by a field reading correctly.
+- **`reporter_actor_type = Person` on their side**, where their own
+  representative is an `Application`. Their inbound handler accepts the
+  Person-shaped actor without complaint, so the difference between our
+  representative's type and theirs is benign — worth recording because a future
+  peer that *did* type-check could reject us, and this says 4.7.2 does not.
 
+**How to re-read this proof** (the queries are not obvious — `acct` is a Rails
+virtual attribute and there is no `target_status_id`):
+
+```sql
+SELECT r.id, r.uri, r.category, r.forwarded, r.comment,
+       a.username || '@' || coalesce(a.domain,'local') AS reporter_actor,
+       t.username || '@' || coalesce(t.domain,'local') AS target,
+       (SELECT array_agg(s.uri) FROM statuses s WHERE s.id = ANY(r.status_ids)) AS status_uris
+  FROM reports r
+  LEFT JOIN accounts a ON a.id = r.account_id
+  LEFT JOIN accounts t ON t.id = r.target_account_id
+ ORDER BY r.id DESC LIMIT 3;
+
+-- the negative check: who from our host do they actually hold?
+SELECT username, domain, actor_type FROM accounts
+ WHERE domain = 'reeltalk.minnix.dev' ORDER BY username;
 ```
-SELECT id, uri, comment, created_at FROM reports ORDER BY id DESC LIMIT 1;
-SELECT a.acct FROM reports r
-  JOIN accounts a ON a.id = r.account_id        -- the reporter
- WHERE r.id = <that id>;
-SELECT a.acct FROM reports r
-  JOIN accounts a ON a.id = r.target_account_id
- WHERE r.id = <that id>;
-```
 
-Expected: `uri = https://reeltalk.minnix.dev/reports/<our report pk>/` — their
-row pointing back at ours; `account` = **`_instance@reeltalk.minnix.dev`**
-(our representative as their mirror), and **not** the reporting member;
-`target_account` = `minnix@upallnight.minnix.dev`; `comment` = the reporter's
-text verbatim. If `account` is the member rather than `_instance`, the masking
-failed on the wire and that is the bug to report. Their own
-`skip_reports?` / `DomainBlock.reject_reports?` and the
-`!target_account.local? && replied_to_accounts.none?` branch are the two places
-their handler can drop it — the target *is* local on their side, so neither
-should fire.
+**Their own drop paths did not fire**, as predicted: `skip_reports?`
+(`DomainBlock.reject_reports?`) needs a domain block on us, and
+`!target_account.local? && replied_to_accounts.none?` needs a non-local target.
+The target was local on their side, so neither applied.
 
 **A pre-existing test caught the registration, and that is worth recording
 because it did its job.** `test_federation_inbound.py` pinned the inbound
@@ -3157,6 +3183,15 @@ only admin. (2) The **post-lift divergence check** increment 5's shield finding
 suggests is now worth more than it was: the domain block's lift is also a
 request, and if a peer refuses to unsuspend our mirror of their account we have
 no way to see it. Neither was decided here.
+
+**What is still mock-only after this round trip.** The **outbound** `Flag` is
+live-proven end to end. The **inbound** `Flag` handler, the domain block's two
+doors, the sweep and the three-way lift scoping remain mock-only — there is no
+live path that exercises them without blocking a real server or having a peer
+forward us a report, and neither was done to the owner's peer. They are covered
+by the 44 tests in `test_flag_inbound_and_domain_block.py`; if a future session
+wants them live, the honest route is a second peer instance rather than blocking
+the owner's.
 
 ## 3. Host facts (this box)
 
