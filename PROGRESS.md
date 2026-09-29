@@ -3310,6 +3310,18 @@ is live: `can_act_on(admin, admin) = True` while
 **No browser test was needed and none was asked of the owner** — nothing in this
 change federates, so no write could reach the owner's Mastodon.
 
+**Test accounts retained on purpose (owner, 2026-09-29).** `witness` (id 124,
+plain member) and `warden` (id 125, `is_moderator=True`, `is_staff=False`) stay
+live — the owner wants them for further moderation testing rather than tearing
+them down after the proof. **Keep them in this shape**: a plain member who can
+file and a moderator who can act but holds no `is_staff`, because that pair is
+what makes a masking or reach test mean something. A test run entirely by the
+site admin proves nothing about R103b, since the admin reaches everything.
+`@_instance` (id 126) is **not** a test account and must never be removed — it
+is the signing identity for every outbound `Flag`. `bait` (id 122) was left
+untouched throughout; resetting its password would have broken the owner's own
+use of it.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
