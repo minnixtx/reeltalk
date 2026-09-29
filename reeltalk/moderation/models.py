@@ -282,6 +282,24 @@ def file_report(
         target_status=target_status,
         defaults={"category": category, "comment": comment},
     )
+    if created:
+        # The one staff-notification call site, and deliberately here rather
+        # than at each of the routes that file reports: a notification hung
+        # off N call sites is N places to forget, and the failure mode of
+        # forgetting is silent. Because ``file_remote_report`` delegates
+        # here, this single line also covers the inbound peer ``Flag`` path
+        # (2E D-d) without ``activitypub/flags.py`` knowing anything about
+        # mail.
+        #
+        # Only on ``created``. A deduped re-submit is not new information
+        # for staff, and notifying on it would turn every double-clicked
+        # button into an alert.
+        #
+        # Imported lazily: ``notify`` imports ``Report`` from this module,
+        # so a top-level import here would be a cycle.
+        from reeltalk.moderation.notify import notify_staff_of_report
+
+        notify_staff_of_report(report)
     return report, created
 
 
@@ -538,6 +556,45 @@ def ban_reported_member(report, *, by_user, note=""):
     return target, banned, count, (live_before if banned else [])
 
 
+def _append_note(rows, line: str) -> int:
+    """Append one system line to ``line`` on each row in ``rows``.
+
+    The shared tail of the three ``record_*_outcome`` writers. Appended
+    rather than replacing because the moderator's own note is theirs — these
+    lines are the system reporting what it managed to do.
+    """
+    updated = 0
+    for row in rows:
+        row.note = f"{row.note}\n{line}".strip() if row.note else line
+        row.save(update_fields=["note"])
+        updated += 1
+    return updated
+
+
+def record_staff_notification_outcome(report, line: str) -> int:
+    """Append a staff-notification outcome to the open rows of this pile (2E).
+
+    The third writer of this shape, beside :func:`record_forward_outcome`
+    and :func:`record_federation_outcome`, and it exists for the reason
+    §2E's trap 6 gives: **"a report was filed and nobody was told" has to
+    be a recorded fact rather than an absence.** Without a line on the row,
+    a failed notification is indistinguishable from a feature that was
+    never wired up, which is the exact class of silent non-delivery this
+    increment was written to close.
+
+    Scoped to the **open** rows for the same reason :func:`record_forward_outcome`
+    is and for the same reason the third one is not: a notification is not
+    a decision. Nobody has decided anything by being emailed, so the rows
+    it writes to are still live work, and appending "emailed staff" to a
+    decision somebody already signed and closed would rewrite that decision.
+
+    Called from the worker, not from the request — the request only knows it
+    enqueued something, and "we queued an email" is not the fact worth
+    keeping. What the worker knows is whether the send came off.
+    """
+    return _append_note(Report.unresolved_for_target(report.target_key), line)
+
+
 def record_federation_outcome(report, line: str) -> int:
     """Append a federation outcome to every row in this report's pile (R106).
 
@@ -548,22 +605,17 @@ def record_federation_outcome(report, line: str) -> int:
     otherwise — the local write and the broadcast are deliberately separate
     transactions, so the delete succeeding says nothing about delivery.
 
-    Appended rather than replacing because the moderator's own note is
-    theirs; this line is the system reporting what it managed to do.
     Target-scoped for the same reason ``dismiss_report`` and
     :func:`delete_reported_status` are — the pile is the unit of work, so
     every row in it carries the same decision and the same outcome.
     """
-    rows = Report.objects.filter(
-        target_user_id=report.target_user_id,
-        target_status_id=report.target_status_id,
+    return _append_note(
+        Report.objects.filter(
+            target_user_id=report.target_user_id,
+            target_status_id=report.target_status_id,
+        ),
+        line,
     )
-    updated = 0
-    for row in rows:
-        row.note = f"{row.note}\n{line}".strip() if row.note else line
-        row.save(update_fields=["note"])
-        updated += 1
-    return updated
 
 
 def record_forward_outcome(report, line: str) -> int:
@@ -586,13 +638,7 @@ def record_forward_outcome(report, line: str) -> int:
     adding to the record — and an open pile that happens to share a target
     with an old resolved one is the same problem in a less obvious place.
     """
-    rows = Report.unresolved_for_target(report.target_key)
-    updated = 0
-    for row in rows:
-        row.note = f"{row.note}\n{line}".strip() if row.note else line
-        row.save(update_fields=["note"])
-        updated += 1
-    return updated
+    return _append_note(Report.unresolved_for_target(report.target_key), line)
 
 
 class DomainBlock(models.Model):

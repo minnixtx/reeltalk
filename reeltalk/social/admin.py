@@ -18,6 +18,7 @@ from django import forms
 from django.contrib import admin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.core.exceptions import ValidationError
+from django.utils.html import format_html
 
 from .forms import LOCALNAME_RE
 from .models import Invite, LinkDomain, SiteSettings, User
@@ -81,6 +82,7 @@ class AdminUserChangeForm(UserChangeForm):
             # off the page. This entry is what makes AdminUserChangeForm correct
             # for anyone using the form directly.
             "is_moderator",
+            "report_email",
         )
 
 
@@ -102,11 +104,26 @@ class UserAdmin(admin.ModelAdmin):
         "public_key",
         "date_joined",
         "last_login",
+        "report_email_status",
     ]
     fieldsets = [
         (None, {"fields": ("localname", "password")}),
         ("Profile", {"fields": ("display_name", "email", "avatar")}),
-        ("Roles", {"fields": ("is_staff", "is_superuser", "is_moderator")}),
+        (
+            "Roles",
+            {
+                "fields": (
+                    "is_staff",
+                    "is_superuser",
+                    "is_moderator",
+                    # The notification behaviour sits beside the grant that
+                    # causes it, so one screen shows a moderator's whole
+                    # capability (R116).
+                    "report_email",
+                    "report_email_status",
+                )
+            },
+        ),
         (
             "Federation (read-only)",
             {
@@ -158,6 +175,33 @@ class UserAdmin(admin.ModelAdmin):
             # other instances hold. Editable only when creating.
             readonly.append("localname")
         return readonly
+
+    @admin.display(description="Report email delivery")
+    def report_email_status(self, obj):
+        """Say out loud whether the toggle above can actually do anything.
+
+        ``email`` is ``blank=True`` and not unique, so a moderator with the
+        ``report_email`` box ticked and no address on file receives nothing
+        — and the recipient query skips them silently, because skipping is
+        the only correct thing it can do. 2E trap 2's requirement is that
+        the skip be **visible**: without this line the admin ticks a box,
+        sees it saved, and has no way to know the mail will never go out.
+        The toggle is not lying, but the screen would be incomplete.
+        """
+        if not obj.email:
+            return format_html(
+                '<span style="color:#b3261e;font-weight:600;">{}</span>',
+                "Nothing will be sent — this account has no email address.",
+            )
+        if not obj.report_email:
+            return format_html(
+                '<span class="help-text">Opted out. Nothing is sent to {}.</span>',
+                obj.email,
+            )
+        return format_html(
+            '<span style="color:#237a4b;">Will be sent to <strong>{}</strong>.</span>',
+            obj.email,
+        )
 
 
 @admin.register(SiteSettings)

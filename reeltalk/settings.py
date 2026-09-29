@@ -297,7 +297,26 @@ else:
     MAILERS = {"default": {"BACKEND": "django.core.mail.backends.console.EmailBackend"}}
 
 # The From address needs a bare domain — no port (R52).
-DEFAULT_FROM_EMAIL = f"{env.str('EMAIL_SENDER_NAME', default='admin')}@{DOMAIN_HOST}"
+#
+# ``EMAIL_SENDER_DOMAIN`` overrides the domain the From address is minted on,
+# falling back to the instance's own host. The override is not cosmetic. A
+# mail server that authenticates a user and then refuses any envelope sender
+# which is not that user — the anti-spoofing rule YunoHost/Postfix enforce
+# as ``554 5.7.1 <rcpt>: Recipient address rejected: Sender is not same as
+# SMTP authenticate username`` — forces the From address and
+# ``EMAIL_HOST_USER`` to agree, and the instance's own host is frequently
+# not the mail account's domain (this instance is ``reeltalk.minnix.dev``,
+# the mail account is on ``minnix.dev``). With no knob here there is no way
+# to express that from ``.env``, so every send fails at the server however
+# correctly everything else is configured — and because the failure happens
+# in the worker it would show up as a failed task rather than a
+# misconfiguration someone could spot.
+#
+# Unset preserves the previous behaviour exactly: ``admin@<instance host>``.
+DEFAULT_FROM_EMAIL = (
+    f"{env.str('EMAIL_SENDER_NAME', default='admin')}"
+    f"@{env.str('EMAIL_SENDER_DOMAIN', default='') or DOMAIN_HOST}"
+)
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
 
 # Logging. With no LOGGING setting every app logger falls through to
@@ -338,6 +357,19 @@ LOGGING = {
         "reeltalk.activitypub.inbox": {
             "handlers": ["console"],
             "level": env.str("INBOX_LOG_LEVEL", default="INFO"),
+            "propagate": False,
+        },
+        # The staff report email's delivery line (2E). Raised to INFO on its
+        # own for the same reason the two above are: root stays at WARNING,
+        # so without this the "Staff email sent to @warden" line — the only
+        # record that a notification actually went out — never reached
+        # ``docker logs``, and an undelivered staff alert would look exactly
+        # like one that was never queued. The console-backend warning rides
+        # the same logger and would show either way; it is the success line
+        # that needs the level raised.
+        "reeltalk.moderation.notify": {
+            "handlers": ["console"],
+            "level": env.str("STAFF_EMAIL_LOG_LEVEL", default="INFO"),
             "propagate": False,
         },
     },

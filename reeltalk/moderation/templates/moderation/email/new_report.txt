@@ -1,0 +1,13 @@
+A new report was filed on {{ site_name }}.
+
+Reported account            : {{ target_label }}
+Filed by                    : {{ reporter_label }}
+Category                    : {{ category_label }}
+Open reports on this target : {{ open_count }}
+Filed at                    : {{ filed_at }}
+
+Review the queue            : {{ queue_url }}
+
+This notice carries the pointer only. The reported post and the reporter's
+full comment are not repeated here — they are in the queue, and this mail
+may be forwarded somewhere that should not be carrying them.

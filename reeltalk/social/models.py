@@ -162,6 +162,35 @@ class User(AbstractBaseUser, PermissionsMixin):
             "moderator can moderate /moderate/ and cannot open the admin."
         ),
     )
+    # Whether this account gets the staff email about newly filed reports
+    # (2E, R115). **Default ON**, and the default lives *here* rather than
+    # in the send path so that every creation route — signup, the setup
+    # wizard, the admin's create-user form, a fixture, a management
+    # command — lands on the same value. A default set in the sender would
+    # only cover the routes that happen to go through it.
+    #
+    # The rationale for ON is that the admin already opted this person in
+    # by granting the moderator role; that grant *is* the consent. A
+    # default-off flag makes a freshly deployed instance look like the
+    # feature is missing, which is the same silent-non-delivery failure
+    # this increment exists to close.
+    #
+    # Meaningless without a non-empty ``email``, which is a separate filter
+    # at the recipient query (2E trap 2) and is deliberately not folded in
+    # here: this field says "this person wants the mail", the address says
+    # whether we can actually send it, and conflating them would hide which
+    # of the two is missing.
+    #
+    # Set and cleared by the site admin in ``UserAdmin``'s Roles fieldset,
+    # beside the ``is_moderator`` grant (R116) — not self-service.
+    report_email = models.BooleanField(
+        default=True,
+        help_text=(
+            "Email this account when a new report is filed. Set by the site "
+            "admin beside the moderator grant; has no effect unless an "
+            "email address is on file."
+        ),
+    )
     # Suspension is a *state of the account*, not a Moderation row (R102's
     # shape): the code that has to answer "may this user act" runs on every
     # request and must not join across apps to do it. The audit trail of who
