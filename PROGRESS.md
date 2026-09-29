@@ -3174,12 +3174,19 @@ enumerates FILES at collection time. The authoritative number is from a run
 started after every file was final. **Re-run the gate after the last file is
 written, not before.**
 
-**Flagged, not decided — both touched by this increment.** (1) `has_admin()` is
+**Flagged, not decided — both touched by this increment.** (1) **RESOLVED by
+R114 (owner, 2026-09-29, after this increment went live).** `has_admin()` is
 `filter(is_superuser=True).exists()`, so a banned or suspended admin leaves the
 instance reading as *configured* with nobody able to sign in. This increment
 made that reachable in one more way: `can_act_on` now shields `_instance`, but
 nothing shields the admin from themselves, and no code prevents suspending the
-only admin.
+only admin. The owner settled it by **removing the premise rather than picking
+between the candidate fixes**: the admin can never be banned or suspended, so
+no code path reaches the state. `has_admin()` itself is deliberately unchanged
+— see R114 for the two-layer shape (`AdminImmunityError` in the model,
+`can_impose_severity` in the view) and for why the rule did *not* go into
+`can_act_on`. The owner's second clause — only an admin may act on a moderator
+— was already enforced by R103b's bottom line and needed no code.
 
 (2) The **post-lift divergence check** increment 5's shield finding suggests.
 **Checked while writing this and the increment-6 half of my own framing was
@@ -3211,6 +3218,71 @@ forward us a report, and neither was done to the owner's peer. They are covered
 by the 44 tests in `test_flag_inbound_and_domain_block.py`; if a future session
 wants them live, the honest route is a second peer instance rather than blocking
 the owner's.
+
+### R114 follow-up — the admin is immune to both severities (executed 2026-09-29, same day as increment 6)
+
+The owner's instruction after the increment-6 deploy: *"The admin should never be
+able to be banned or suspended. Having this rule in place would prevent some kind
+of scenario where that is possible. As far as moderators go, only an admin can
+act on a moderator."* Recorded as **R114**; it closes increment 4b's flagged
+`has_admin()` item.
+
+**Half of it was already true.** "Only an admin can act on a moderator" is
+`can_act_on`'s bottom line under R103b — a moderator's target must hold none of
+`is_superuser`/`is_moderator`/`is_staff`. No code changed for that clause; the
+new tests only pin that it still holds under the heavier verb.
+
+**The other half was a live gap.** `if actor.is_superuser: return True` runs
+*before* every shield in `can_act_on`, so the admin could suspend and ban
+themselves — and increment 5's live round trip did exactly that and had to be
+reversed by hand. Because `has_admin()` reads only `is_superuser`, a self-banned
+sole admin leaves the instance reading as configured with nobody able to sign in
+and `/setup/` refusing to run.
+
+**Two layers, deliberately.** `AdminImmunityError` (a `ValueError`) is raised at
+the top of `User.suspend()` and `User.ban()` — the two state writers — so the
+invariant binds callers that do not exist yet (a management command, an import
+hook, a bulk tool), the same single-writer lesson increment 5 learned from the
+half-ban. `can_impose_severity()` is the view-level guard, so a request gets
+`403` and the template hides the drawer instead of crashing. Raising rather
+than returning `False` is deliberate: both writers already use `False` for
+"already in that state", and overloading it would make a refusal
+indistinguishable from a replay.
+
+**A second predicate, not a widened one.** Folding the immunity into
+`can_act_on` would have silently removed the admin's own reported posts from the
+queue and stopped them forwarding — not what was asked. `can_act_on` is
+**unchanged**; `can_impose_severity` is `can_act_on` plus one refusal, used by
+`suspend`, `ban` and `refuse_remote` and by the `can_suspend`/`can_ban` card
+flags. `delete_status`, `unsuspend`, `forward`, `block_domain` and
+`unblock_domain` stay on `can_act_on`. `has_admin()` is left exactly as it was —
+it is no longer load-bearing for reachability, because reachability is now
+guaranteed upstream of it.
+
+**`block_domain`'s sweep filters `is_superuser=False` explicitly** rather than
+relying on the backstop: a sweep that raises halfway leaves the moderator a
+block row, a half-completed sweep and a traceback. `local=False` with
+`is_superuser=True` is nonsense the schema does not prevent.
+
+**Three existing tests inverted rather than deleted** — they pinned the old rule
+as a deliberate decision, so reversing them is the change being visible rather
+than silent drift: `test_the_site_admin_may_suspend_themselves` →
+`..._cannot_suspend_themselves`; the two `has_admin_still_counts_a_{banned,
+suspended}_only_admin_flagged_not_fixed` pins → a `pytest.raises` test for the
+reachable path plus a hand-written-row defense-in-depth test. The defense-in-depth
+half matters because `has_admin()`'s semantics did *not* change: a row can still
+get that way by a direct database edit on the host, and the tests now show what
+the instance will do (reads as configured, that admin cannot authenticate).
+
+**Verified.** Gate `1753 passed + 5 skipped` (baseline 1740, **+13** net: 16
+test functions added, 3 removed by the inversions; no new files, so no
+clean-room param delta). `ruff check` clean, `ruff format --check` 121 files
+formatted, `makemigrations --check` **No changes detected** — behaviour only,
+no model field moved. **Nothing here touches federation**, so no write could
+reach the owner's Mastodon and no browser test was needed.
+
+**Not deployed as of this record** — the change is local and gate-verified; the
+owner decides when it goes out.
 
 ## 3. Host facts (this box)
 
@@ -3484,3 +3556,5 @@ New owner decisions for the rewrite are recorded here, numbered R1, R2, … The 
 not an optimisation.
 
 - **R113 — Nobody may act on the instance representative, not even the site admin; this narrows R103b (owner decision 2026-09-29, taken during increment 6 after the shield was surfaced for sign-off).** `can_act_on` returns `False` for `is_instance_actor(target)` **before** the superuser short-circuit, so `_instance` cannot be suspended or banned by anyone. This is the only place increment 6 changed a settled rule rather than adding to one, which is why it was surfaced rather than shipped silently. **Why:** banning `_instance` makes `/user/_instance/` return `410 Gone`, after which no peer can verify anything we sign with that key — every forwarded report and every future activity using the representative breaks at the signature check, and it breaks on *their* side, where our own logs look perfectly green. The placement before the superuser branch is the substance: it is the admin's reach being narrowed, not a moderator's. **How to apply:** R103b's "the admin may act on anyone" now reads "…anyone except the instance representative." When any future actor is infrastructure rather than a member, the test for shielding it is *would acting on this break the instance's own ability to be verified* — not *is this account important enough to protect*. The first question is about the system and has an answer; the second is about status and does not.
+
+- **R114 — The site admin can never be banned or suspended, by anyone including themselves; this resolves increment 4b's flagged `has_admin()` item by removing its premise (owner decision 2026-09-29, taken after increment 6 went live).** Two rules in one instruction: **the admin is immune to both account severities**, and **only an admin may act on a moderator**. The second was already enforced — `can_act_on`'s bottom line refuses a moderator any target holding `is_superuser`, `is_moderator`, or `is_staff`, so R103b had it and no code was needed. The first was a real gap: `if actor.is_superuser: return True` runs *before* every shield, so the admin could suspend and ban themselves, and increment 5's live round trip actually did both and had to be reversed by hand. **Why prevention rather than a repair:** `has_admin()` is `filter(is_superuser=True).exists()` and reads nothing about `banned_at`/`suspended_at`, so a self-banned sole admin leaves the instance reading as fully configured with nobody able to sign in and the setup wizard refusing to run — a lockout with no self-service exit. The flagged candidate fixes (make `has_admin()` severity-aware, or leave it) were both bad; making the state unreachable makes the choice unnecessary. **`has_admin()` is deliberately unchanged** — it is no longer load-bearing for reachability, because reachability is guaranteed upstream of it. **Shape — two layers, because they answer different callers.** The model raises `AdminImmunityError` (a `ValueError`) at the top of `User.suspend()` and `User.ban()`, so the invariant holds for callers that do not exist yet: a management command, an import hook, a bulk tool. Raising rather than returning `False` is deliberate — both writers already use `False` for "already in that state", and overloading it with "refused" would make a refusal indistinguishable from a replay. The view answers with `can_impose_severity()`, so a request gets `403` and the template hides the drawer instead of crashing on an exception. **Why a second predicate rather than a change to `can_act_on`:** the two rules have different scopes. The admin's answer to "may you moderate this account" stays **yes** — they delete reported posts, forward reports, block servers. Folding immunity into the shared reach predicate would have silently taken the admin's own reported posts out of the queue, which is not what was asked. `can_act_on` is untouched; `can_impose_severity` is `can_act_on` plus the one extra refusal. **`block_domain`'s sweep filters `is_superuser=False` explicitly** rather than relying on the backstop, because a sweep that raises halfway leaves the moderator a block row, a half-completed sweep and a traceback; `local=False` with `is_superuser=True` is nonsense the schema does not prevent. **How to apply:** the immunity is absolute and has no escape hatch in application code — a Django-admin edit is not one either, since `UserAdmin` exposes no `banned_at`/`suspended_at`/`suspension_origin` fieldset, so there is no second door to these states. If a future rule ever needs to suspend an admin, it needs the owner and it needs to name the recovery path first. Defense-in-depth tests pin that a hand-written banned/suspended superuser row still counts as `has_admin()` and still cannot authenticate, so anyone who creates one by hand on the host can see what the instance will do.
