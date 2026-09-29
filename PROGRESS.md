@@ -3174,8 +3174,8 @@ enumerates FILES at collection time. The authoritative number is from a run
 started after every file was final. **Re-run the gate after the last file is
 written, not before.**
 
-**Flagged, not decided — both touched by this increment.** (1) **RESOLVED by
-R114 (owner, 2026-09-29, after this increment went live).** `has_admin()` is
+**Both items this increment flagged are now closed** (owner, 2026-09-29). (1)
+**RESOLVED by R114.** `has_admin()` is
 `filter(is_superuser=True).exists()`, so a banned or suspended admin leaves the
 instance reading as *configured* with nobody able to sign in. This increment
 made that reachable in one more way: `can_act_on` now shields `_instance`, but
@@ -3209,6 +3209,18 @@ suspended, tell the moderator *"they have not lifted their side"* instead of
 letting the success message stand. The honest alternative — already defensible
 — is to accept the limit as documented, since a peer refusing to undo its own
 moderation is correct behaviour and we are not going to override it.
+
+**RESOLVED 2026-09-29 — the owner chose to accept the limit as documented.**
+The check stays unbuilt. **Why this is a decision rather than a deferral:** a
+peer that keeps its own suspension in place after we lifted ours is doing
+something defensible — it is moderating its own instance, and R108's loudness
+was always about *delivery* failure, not about compelling agreement. Building
+the check would buy a more precise error message for a state we could not act
+on anyway, at the cost of a synchronous fetch of a remote document on every
+unsuspend — a new timeout, a new failure mode, and a new thing to get wrong on
+the path that restores somebody's account. The limit stays written down here and
+in R108's scope note; if it ever bites in practice, that is the trigger to
+revisit, not the anticipation of it.
 
 **What is still mock-only after this round trip.** The **outbound** `Flag` is
 live-proven end to end. The **inbound** `Flag` handler, the domain block's two
@@ -3281,8 +3293,22 @@ formatted, `makemigrations --check` **No changes detected** — behaviour only,
 no model field moved. **Nothing here touches federation**, so no write could
 reach the owner's Mastodon and no browser test was needed.
 
-**Not deployed as of this record** — the change is local and gate-verified; the
-owner decides when it goes out.
+**Deployed 2026-09-29** after a restore point (`reeltalk-20260929T173752Z.dump`,
+728,238 bytes, via `manage.py backup_database`). `docker compose build && up -d`
+clean; all four services up, `web` healthy, `/` 200, `/moderate/` anonymous
+`302 → /login/?next=/moderate/`. **No migrations to apply** — behaviour only.
+
+**Live proof off the running code, not the local tree.** Called both writers on
+the real live admin (`minnix`, pk 1) in a `manage.py shell` inside the deployed
+image: `suspend` raised `@minnix is the site admin and cannot be suspended
+(R114).` and `ban` raised the ban equivalent. Re-read after the probe:
+`banned_at=None, suspended_at=None` — the guard fires *before* any write, so the
+probe was non-destructive and needed no rollback. Same shell confirmed the split
+is live: `can_act_on(admin, admin) = True` while
+`can_impose_severity(admin, admin) = False`.
+
+**No browser test was needed and none was asked of the owner** — nothing in this
+change federates, so no write could reach the owner's Mastodon.
 
 ## 3. Host facts (this box)
 
