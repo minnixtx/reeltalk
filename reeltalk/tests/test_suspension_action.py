@@ -276,11 +276,21 @@ def test_a_moderator_cannot_suspend_themselves(dune):
     assert actor.suspended_at is None
 
 
-def test_the_site_admin_may_suspend_themselves(dune, siteadmin):
-    """R103b checks the admin *before* every shield, so the admin's reach
-    includes themselves. Pinned because that ordering is load-bearing:
-    swap the superuser check and the self check and this is the case that
-    changes."""
+def test_the_site_admin_cannot_suspend_themselves(dune, siteadmin):
+    """R114 — the admin can never be suspended, by anyone including themselves.
+
+    This **inverts** the R103b reading that the admin's reach includes
+    themselves, and the reason is not modesty about self-moderation.
+    ``has_admin()`` reads only ``is_superuser``, so a self-suspended sole
+    admin leaves the instance reading as fully configured with nobody able
+    to sign in and the setup wizard refusing to run — a lockout with no
+    self-service exit. Increment 5's live round trip walked into exactly
+    that shape and had to be reversed by hand.
+
+    Pinned at the view (``403``) rather than only at the model, because the
+    view is where the refusal has to be *said*. The model-level backstop is
+    ``AdminImmunityError``.
+    """
     other = User.objects.create_user(localname="filer2", password=PASSWORD)
     status = Status.objects.create(
         user=siteadmin,
@@ -290,9 +300,9 @@ def test_the_site_admin_may_suspend_themselves(dune, siteadmin):
         raw_content="mine",
     )
     report = report_a_post(other, status)
-    assert logged_in(siteadmin).post(suspend_url(report), {}).status_code == 302
+    assert logged_in(siteadmin).post(suspend_url(report), {}).status_code == 403
     siteadmin.refresh_from_db()
-    assert siteadmin.suspended_at is not None
+    assert siteadmin.suspended_at is None
 
 
 # --- the audit record (R106) ----------------------------------------
@@ -423,6 +433,66 @@ def test_no_disclosure_for_an_already_suspended_target(alice, bob, review, mod):
     report_a_member(bob, alice)
     page = body(logged_in(mod).get(reverse("moderation")))
     assert "Suspend this account" not in page
+
+
+# --- the admin's own card shows no severity (R114) --------------------
+
+
+def test_the_admin_sees_no_suspend_control_on_their_own_card(bob, siteadmin, dune):
+    """R114 said the control must not be offered, not merely refused.
+
+    The admin *can* open the queue and *does* see reports about their own
+    posts — ``can_act_on`` still says yes — so the only thing separating
+    this card from a reachable one is the severity drawer. Asserted from
+    the admin's own session on purpose: a moderator never saw this card
+    anyway (R103b), so a moderator-view test would pass even if the admin
+    were handed the button back.
+    """
+    status = Status.objects.create(
+        user=siteadmin,
+        film=dune,
+        status_type="review",
+        content="<p>admin review</p>",
+        raw_content="admin review",
+    )
+    report_a_post(bob, status)
+    page = body(logged_in(siteadmin).get(reverse("moderation")))
+    assert "Suspend this account" not in page
+    assert "Ban this account" not in page
+
+
+def test_the_admin_can_still_delete_their_own_reported_post(bob, siteadmin, dune):
+    """The over-reach check: R114 must not have touched ``can_act_on``.
+
+    Folding the immunity into the shared reach predicate would have made
+    the admin's reported posts unmodifiable by the admin — the post
+    control, the queue entry, everything. This asserts the light action
+    still lands on the same target the heavy ones were withdrawn from.
+    """
+    status = Status.objects.create(
+        user=siteadmin,
+        film=dune,
+        status_type="review",
+        content="<p>admin review</p>",
+        raw_content="admin review",
+    )
+    report = report_a_post(bob, status)
+    resp = logged_in(siteadmin).post(
+        reverse("moderation-delete-status", args=[report.id]), {}
+    )
+    assert resp.status_code == 302
+    status.refresh_from_db()
+    assert status.deleted is True
+
+
+def test_a_moderator_still_sees_the_suspend_control_on_a_regular_target(
+    alice, bob, review, mod
+):
+    """Counterpart to the admin's hidden drawer: the control did not go
+    away globally, only for the one immune target."""
+    report_a_post(bob, review)
+    page = body(logged_in(mod).get(reverse("moderation")))
+    assert "Suspend this account" in page
 
 
 # --- the broadcast -------------------------------------------------

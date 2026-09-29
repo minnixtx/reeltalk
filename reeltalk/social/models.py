@@ -28,6 +28,27 @@ from reeltalk.core.models import Film, Shelf, ShelfFilm, Status
 INVITE_TTL_DAYS = 7
 
 
+class AdminImmunityError(ValueError):
+    """Raised when a ban or suspension is aimed at the site admin (R114).
+
+    The owner's rule is absolute: **the admin can never be banned or
+    suspended.** It lives here, in the two writers of those states, rather
+    than only in the view guard, because "never" has to hold for callers
+    that do not exist yet — a management command, an import hook, a bulk
+    tool. Increment 5 learned that the hard way from the opposite
+    direction: a step left outside the single writer produced a half-ban
+    that no caller knew about. An invariant left outside the single writer
+    produces a locked-out instance the same way.
+
+    Raising rather than returning ``False`` is deliberate. ``suspend()``
+    and ``ban()`` already use a ``False`` return to mean "already in that
+    state", and overloading it with "refused" would make a refused action
+    indistinguishable from a replay — the exact quiet failure this rule
+    exists to prevent. A caller that means to allow this has to catch it
+    by name and say so.
+    """
+
+
 class UserManager(BaseUserManager):
     def _create_user(self, localname, password, **extra_fields):
         if not localname:
@@ -302,6 +323,10 @@ class User(AbstractBaseUser, PermissionsMixin):
         when it was already suspended, so a caller can tell a decision from a
         replay rather than assuming.
         """
+        if self.is_superuser:
+            raise AdminImmunityError(
+                f"@{self.localname} is the site admin and cannot be suspended (R114)."
+            )
         if self.suspended_at is not None:
             return False
         self.suspended_at = timezone.now()
@@ -389,6 +414,10 @@ class User(AbstractBaseUser, PermissionsMixin):
         it already was, so a caller can tell a decision from a replay. A
         replay removes nothing — the first ban already did.
         """
+        if self.is_superuser:
+            raise AdminImmunityError(
+                f"@{self.localname} is the site admin and cannot be banned (R114)."
+            )
         if self.banned_at is not None:
             return False
         # One transaction: an account that is banned but whose content is

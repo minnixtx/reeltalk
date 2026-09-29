@@ -37,7 +37,11 @@ from reeltalk.activitypub.broadcast import (
     broadcast_status_delete,
 )
 from reeltalk.core.models import Status
-from reeltalk.moderation.decorators import can_act_on, moderator_required
+from reeltalk.moderation.decorators import (
+    can_act_on,
+    can_impose_severity,
+    moderator_required,
+)
 from reeltalk.moderation.forms import ReportForm
 from reeltalk.moderation.models import (
     DomainBlock,
@@ -197,7 +201,7 @@ def queue_cards(actor):
                 and can_act_on(actor, target),
                 "can_suspend": target.local
                 and target.suspended_at is None
-                and can_act_on(actor, target),
+                and can_impose_severity(actor, target),
                 # Ban sits beside suspend rather than above it, and the two
                 # conditions differ in exactly one column on purpose. Ban
                 # requires the same thing suspend requires — a local account
@@ -208,7 +212,7 @@ def queue_cards(actor):
                 # someone already banned while hiding the ban itself.
                 "can_ban": target.local
                 and target.banned_at is None
-                and can_act_on(actor, target),
+                and can_impose_severity(actor, target),
                 # Forward is the mirror image of the other four: it is the
                 # only card action aimed *outward* at a remote account, and
                 # the only one that decides nothing. The three conditions
@@ -395,7 +399,7 @@ def suspend(request, report_id):
     if report.resolved_at is not None:
         raise Http404("This report has already been resolved.")
     target = report.target_user
-    if not can_act_on(request.user, target):
+    if not can_impose_severity(request.user, target):
         raise PermissionDenied
     if not target.local:
         raise Http404(
@@ -541,7 +545,7 @@ def ban(request, report_id):
     if report.resolved_at is not None:
         raise Http404("This report has already been resolved.")
     target = report.target_user
-    if not can_act_on(request.user, target):
+    if not can_impose_severity(request.user, target):
         raise PermissionDenied
     if not target.local:
         raise Http404(
@@ -723,7 +727,7 @@ def refuse_remote(request, report_id):
         raise Http404(
             "This is an account on this instance — suspend or ban it, do not refuse it."
         )
-    if not can_act_on(request.user, target):
+    if not can_impose_severity(request.user, target):
         raise PermissionDenied
 
     note = request.POST.get("note", "").strip()

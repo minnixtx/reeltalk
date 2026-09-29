@@ -30,10 +30,12 @@ from django.conf import settings
 from django.contrib.auth import SESSION_KEY, authenticate, get_user_model
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from reeltalk.core.models import Film, Status
 from reeltalk.mentions.models import sync_status_mentions
 from reeltalk.moderation.models import Report
+from reeltalk.social.models import AdminImmunityError
 from reeltalk.social.views import has_admin
 
 User = get_user_model()
@@ -465,28 +467,45 @@ def test_unfollowing_a_banned_account_still_works(bob, banned):
     assert bob.follows.filter(pk=banned.pk).exists() is False
 
 
-# --- flagged, not decided ----------------------------------------
+# --- the admin cannot reach the lockout state (R114) -----------------
 
 
-def test_has_admin_still_counts_a_banned_only_admin(siteadmin):
-    """FLAGGED FOR THE OWNER, NOT DECIDED — same open question 4b left for
-    suspension, now with a second way to reach it.
+def test_the_admin_cannot_be_banned_so_the_lockout_state_is_unreachable(siteadmin):
+    """R114 resolves the flagged ``has_admin()`` question by prevention.
 
-    ``has_admin()`` is ``filter(is_superuser=True).exists()``. If the site
-    admin is banned and nobody else is an admin, the instance still reads
-    as "set up" while no administrator can sign in. Both candidate fixes
-    have consequences the owner should weigh rather than an agent picking:
-    filtering bans out of ``has_admin()`` makes the instance look
-    *unconfigured* (redirecting to ``/setup/``, which could invite a
-    second admin creation over a database that already has one); counting
-    banned admins — the current behaviour — makes it look fine while it is
-    unreachable.
+    The open question was: ``has_admin()`` is
+    ``filter(is_superuser=True).exists()``, so a banned sole admin leaves
+    the instance reading as "set up" while nobody can sign in — and
+    filtering bans out instead makes it read as *unconfigured*, redirecting
+    to ``/setup/`` and inviting a second admin to be created over a
+    database that already has one. Both candidate fixes were bad, which is
+    why it was flagged rather than picked.
 
-    Reachable today only by a self-ban: a moderator cannot ban the admin
-    (R103b). The test pins the behaviour so the decision is a change
-    rather than a discovery.
+    The owner's answer removes the premise instead of choosing between
+    them: the admin can never be banned, so the state cannot be reached
+    through the model at all. ``has_admin()`` is deliberately left
+    unchanged — it is no longer load-bearing for reachability, because
+    reachability is guaranteed upstream of it.
     """
-    siteadmin.ban(reason="self")
+    with pytest.raises(AdminImmunityError):
+        siteadmin.ban(reason="self")
+    siteadmin.refresh_from_db()
+    assert siteadmin.banned_at is None
+    assert has_admin() is True
+    assert authenticate(username="root", password=PASSWORD) is not None
+
+
+def test_has_admin_still_counts_a_banned_superuser_written_in_by_hand(siteadmin):
+    """Defense in depth for a state R114 makes unreachable through code.
+
+    ``has_admin()``'s semantics are unchanged by the rule, and a row can
+    still get this way by a direct database edit on the host. Pinned so
+    that anyone who hand-writes one can see what the instance will do —
+    reads as configured, while that admin cannot sign in — rather than
+    discovering it during an outage.
+    """
+    User.objects.filter(pk=siteadmin.pk).update(banned_at=timezone.now())
+    siteadmin.refresh_from_db()
     assert has_admin() is True
     assert authenticate(username="root", password=PASSWORD) is None
 

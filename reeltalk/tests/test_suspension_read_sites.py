@@ -227,32 +227,53 @@ def test_unsuspending_puts_the_review_straight_back_in_the_feed(
     assert "Great film" in body(logged_in(viewer).get(reverse("index")))
 
 
-def test_has_admin_still_counts_a_suspended_only_admin_flagged_not_fixed(
+def test_the_admin_cannot_be_suspended_so_the_lockout_state_is_unreachable(
     db,
 ):
-    """**Flagged for the owner, deliberately not decided here.**
+    """R114 resolves the flagged ``has_admin()`` question by prevention.
 
-    ``has_admin()`` is ``filter(is_superuser=True).exists()`` and reads
-    nothing about suspension. So if the one site admin is suspended and no
-    other superuser exists, every page still reads "instance is set up" —
-    while nobody can actually log in to run it. The tests above had to
-    create a second superuser to get a 200 out of ``index``, which is the
-    same mechanism seen from the other side.
+    This file's flagged item was the suspension half of the same edge the
+    ban file hit: ``has_admin()`` is ``filter(is_superuser=True).exists()``
+    and reads nothing about suspension, so a suspended sole admin left the
+    instance reading as "set up" while nobody could sign in to run it. The
+    tests above have to create a superuser just to get a 200 out of
+    ``index`` — the same mechanism from the other side.
 
-    This test pins the behaviour **as it currently is** rather than as
-    anyone decided it should be, so that a future change is a change and
-    not drift. The two candidate fixes carry consequences the owner needs
-    to weigh: making ``has_admin()`` suspension-aware sends the whole
-    instance to the ``/setup/`` wizard, which could be a recovery path or
-    could let a second admin be created alongside the suspended one; and
-    refusing to suspend the last superuser makes the state unrepresentable
-    but also makes a solo admin unsuspendable-by-anyone-but-themselves.
+    The owner settled it by removing the premise rather than picking between
+    the two bad fixes: the admin can never be suspended, so no code path
+    reaches the state. ``has_admin()`` is deliberately left unchanged — it
+    is no longer load-bearing for reachability, because reachability is
+    guaranteed upstream of it by the guard in ``User.suspend()``.
     """
+    from reeltalk.social.models import AdminImmunityError
     from reeltalk.social.views import has_admin
 
     admin = User.objects.create_superuser(localname="lonely_root", password=PASSWORD)
     assert has_admin() is True
-    admin.suspend()
+    with pytest.raises(AdminImmunityError):
+        admin.suspend()
+    admin.refresh_from_db()
+    assert admin.suspended_at is None
+    assert has_admin() is True
+    assert authenticate(username="lonely_root", password=PASSWORD) is not None
+
+
+def test_has_admin_still_counts_a_suspended_superuser_written_in_by_hand(db):
+    """Defense in depth for a state R114 makes unreachable through code.
+
+    ``has_admin()``'s semantics are unchanged by the rule, and a row can
+    still get this way by a direct database edit on the host. Pinned so
+    that anyone who hand-writes one can see what the instance will do —
+    reads as configured, while that admin cannot sign in — rather than
+    discovering it during an outage.
+    """
+    from django.utils import timezone
+
+    from reeltalk.social.views import has_admin
+
+    admin = User.objects.create_superuser(localname="lonely_root", password=PASSWORD)
+    User.objects.filter(pk=admin.pk).update(suspended_at=timezone.now())
+    admin.refresh_from_db()
     assert has_admin() is True
     assert authenticate(username="lonely_root", password=PASSWORD) is None
 

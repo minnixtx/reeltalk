@@ -764,7 +764,12 @@ def block_domain(domain: str, *, by_user=None, reason: str = "") -> tuple:
             domain=normalized, created_by=by_user, reason=reason
         )
         suspended = []
-        for user in User.objects.filter(local=False):
+        # ``is_superuser`` is excluded rather than left to the AdminImmunityError
+        # backstop in ``suspend()`` because a sweep that raises halfway leaves
+        # the moderator with a block row and no explanation. A superuser with
+        # ``local=False`` is nonsense the schema does not prevent, so the sweep
+        # declines to touch one rather than trusting it never happens.
+        for user in User.objects.filter(local=False, is_superuser=False):
             if not any(
                 blocked_domain_for(host) is not None
                 for host in account_host_candidates(user)

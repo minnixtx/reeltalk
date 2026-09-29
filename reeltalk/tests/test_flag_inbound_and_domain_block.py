@@ -519,6 +519,46 @@ def test_the_block_sweep_does_not_touch_local_accounts(db, member):
     assert member.suspended_at is None
 
 
+@pytest.mark.django_db
+def test_the_block_sweep_skips_a_superuser_row_rather_than_raising_on_it(db):
+    """R114's backstop must not turn a domain block into a 500.
+
+    ``local=False`` with ``is_superuser=True`` is nonsense the schema does
+    not prevent — a bad import or a hand-edited row can produce one. The
+    ``AdminImmunityError`` in ``suspend()`` would fire mid-sweep and leave
+    the moderator a block row, a half-completed sweep, and a traceback.
+    The sweep therefore declines such rows up front, so the block still
+    lands on every ordinary mirror from the host.
+    """
+    from reeltalk.social.models import AdminImmunityError
+
+    odd = User.objects.create(
+        localname="ghost@blocked.example",
+        local=False,
+        is_superuser=True,
+        actor_url="https://blocked.example/users/ghost",
+        inbox_url="https://blocked.example/users/ghost/inbox",
+    )
+    ordinary = User.objects.create(
+        localname="real@blocked.example",
+        local=False,
+        actor_url="https://blocked.example/users/real",
+        inbox_url="https://blocked.example/users/real/inbox",
+    )
+    block, suspended = block_domain("blocked.example")
+    odd.refresh_from_db()
+    ordinary.refresh_from_db()
+    assert odd.suspended_at is None
+    assert odd.pk not in [u.pk for u in suspended]
+    # The rest of the sweep still completed — the skip is selective, not a
+    # bail-out that leaves the whole block unenforced.
+    assert ordinary.suspended_at is not None
+    assert ordinary.suspension_origin == SuspensionOrigin.DOMAIN_BLOCK
+    # And the immunity itself is real, not merely absent from this path.
+    with pytest.raises(AdminImmunityError):
+        odd.suspend()
+
+
 # --- the per-account refusal ---------------------------------------------
 
 

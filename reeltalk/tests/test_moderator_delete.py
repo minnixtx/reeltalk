@@ -42,7 +42,7 @@ from django.urls import reverse
 
 from reeltalk.activitypub.broadcast import broadcast_status_delete
 from reeltalk.core.models import Film, Status
-from reeltalk.moderation.decorators import can_act_on
+from reeltalk.moderation.decorators import can_act_on, can_impose_severity
 from reeltalk.moderation.models import (
     Report,
     delete_reported_status,
@@ -297,6 +297,72 @@ def test_an_anonymous_visitor_may_act_on_nobody(alice, siteadmin):
     # is_authenticated check short-circuits rather than raising.
     assert can_act_on(AnonymousUser(), alice) is False
     assert can_act_on(AnonymousUser(), siteadmin) is False
+
+
+# --- can_impose_severity: the two account severities (R114) -------------
+
+
+def test_the_two_predicates_are_not_the_same_function(siteadmin):
+    """The split itself is the thing worth pinning.
+
+    R114 had to land as a *second* predicate rather than a change to
+    ``can_act_on``, because the admin's answer to "may you moderate this
+    account" stays yes — they delete reported posts and forward reports
+    about it — while the answer to "may you suspend or ban it" is now
+    never. Asserting both halves on one subject is the only way to show the
+    rules actually diverge instead of one having swallowed the other.
+    """
+    assert can_act_on(siteadmin, siteadmin) is True
+    assert can_impose_severity(siteadmin, siteadmin) is False
+
+
+def test_a_second_superuser_cannot_suspend_or_ban_the_first(siteadmin, bare_superuser):
+    """R114 binds superuser-to-superuser, not just moderator-to-admin.
+
+    A moderator could never reach the admin anyway (R103b's bottom line),
+    so the only actor the new rule actually constrains is another
+    superuser — and ``bare_superuser`` has ``is_staff=False`` to prove the
+    rule reads ``is_superuser`` and not the admin door.
+    """
+    assert can_impose_severity(bare_superuser, siteadmin) is False
+    assert can_impose_severity(siteadmin, bare_superuser) is False
+
+
+def test_a_moderator_still_cannot_impose_severity_on_anyone_they_could_not_before(
+    mod, siteadmin, mod2, admin_door
+):
+    """R114 widens nothing. Every refusal ``can_act_on`` already issued
+    against a privileged target still refuses the heavier verb."""
+    for target in (siteadmin, mod2, admin_door, mod):
+        assert can_act_on(mod, target) is False
+        assert can_impose_severity(mod, target) is False
+
+
+def test_a_moderator_may_still_impose_severity_on_a_regular_user(mod, alice):
+    """The rule is about the admin, not a freeze on moderator reach."""
+    assert can_impose_severity(mod, alice) is True
+
+
+def test_the_admin_may_still_impose_severity_on_everyone_else(siteadmin, alice, mod):
+    for target in (alice, mod):
+        assert can_impose_severity(siteadmin, target) is True
+
+
+def test_nobody_may_impose_severity_on_the_instance_representative(siteadmin, alice):
+    """R113's shield survives the new one — and both hold for the same
+    reason: an account that is infrastructure rather than a person must
+    not be destroyed by the moderation system that depends on it."""
+    from reeltalk.moderation.representative import instance_representative
+
+    rep = instance_representative()
+    assert can_act_on(siteadmin, rep) is False
+    assert can_impose_severity(siteadmin, rep) is False
+    assert can_impose_severity(alice, rep) is False
+
+
+def test_can_impose_severity_refuses_a_missing_target(alice):
+    assert can_impose_severity(alice, None) is False
+    assert can_impose_severity(AnonymousUser(), None) is False
 
 
 # --- the route refuses whom it must, and writes nothing -------------------

@@ -123,6 +123,45 @@ def can_act_on(actor, target) -> bool:
     return not (target.is_superuser or target.is_moderator or target.is_staff)
 
 
+def can_impose_severity(actor, target) -> bool:
+    """Whether ``actor`` may **suspend or ban** ``target`` (R114).
+
+    :func:`can_act_on` plus the one rule the reach question does not
+    carry: the site admin is never a valid target for either severity,
+    from anyone — including themselves.
+
+    This is a separate function rather than a change to ``can_act_on``
+    because the two rules have different scopes. ``can_act_on`` answers
+    "may this actor moderate anything about this target", and its answer
+    for the admin is yes — the admin deletes reported posts, forwards
+    reports, blocks servers. The owner's rule is narrower and absolute:
+    the two **account severities** may never land on the admin. Folding it
+    into ``can_act_on`` would silently take the admin's own reported posts
+    out of the queue and stop them forwarding, which is not what was asked
+    and not what the rule means.
+
+    **What it actually changes, given how ``can_act_on`` is already
+    written:** almost nothing for a moderator. A non-superuser actor
+    already fails on ``target.is_superuser`` at the bottom of
+    ``can_act_on``, so a moderator could never ban or suspend the admin.
+    The only path this closes is the **self** one — ``can_act_on`` lets a
+    superuser through before any shield runs, so before R114 the admin
+    could suspend or ban themselves, and did in increment 5's live test.
+    That is the lockout the rule removes: ``has_admin()`` reads only
+    ``is_superuser``, so a self-banned sole admin leaves the instance
+    reading as configured with nobody able to sign in and the setup
+    wizard refusing to run.
+
+    The backstop for callers that never pass through here is
+    :class:`~reeltalk.social.models.AdminImmunityError`, raised by the two
+    state writers themselves. This function exists so the view can answer
+    ``403`` and the template can hide the control instead of crashing.
+    """
+    if target is not None and target.is_superuser:
+        return False
+    return can_act_on(actor, target)
+
+
 def moderator_required(view_func):
     """Gate a view behind :func:`may_moderate`.
 
