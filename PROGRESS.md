@@ -3179,10 +3179,29 @@ written, not before.**
 instance reading as *configured* with nobody able to sign in. This increment
 made that reachable in one more way: `can_act_on` now shields `_instance`, but
 nothing shields the admin from themselves, and no code prevents suspending the
-only admin. (2) The **post-lift divergence check** increment 5's shield finding
-suggests is now worth more than it was: the domain block's lift is also a
-request, and if a peer refuses to unsuspend our mirror of their account we have
-no way to see it. Neither was decided here.
+only admin.
+
+(2) The **post-lift divergence check** increment 5's shield finding suggests.
+**Checked while writing this and the increment-6 half of my own framing was
+wrong, so it is corrected here rather than left standing.** The claim was that
+"the domain block's lift is also a request" — it is not. `unblock_domain` is
+**purely local**: it unsuspends our own mirrors and sends nothing, because a
+mirror is another instance's identity and we hold no private key for it
+(`broadcast_actor_update`'s own docstring pins that). No peer-side claim means
+no peer-side divergence. **The only lift path that can diverge is
+`unsuspend` of a *local* user** (line 479, `broadcast_actor_update`), where we
+sign as that user and a peer can answer 2xx and then discard the lift under
+their `suspension_origin_local?` shield. `ban` broadcasts a `Delete(Person)`
+but `unban` broadcasts nothing at all, so it cannot diverge either. Narrowing
+it this far matters: the check has exactly one subject, not a family of them, so
+it is a small feature rather than a reconciliation system.
+
+**What that one check would be:** after `unsuspend`, fetch the peer's copy of
+our actor and compare its `suspended` claim against ours. If they still say
+suspended, tell the moderator *"they have not lifted their side"* instead of
+letting the success message stand. The honest alternative — already defensible
+— is to accept the limit as documented, since a peer refusing to undo its own
+moderation is correct behaviour and we are not going to override it.
 
 **What is still mock-only after this round trip.** The **outbound** `Flag` is
 live-proven end to end. The **inbound** `Flag` handler, the domain block's two
