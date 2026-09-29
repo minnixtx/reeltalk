@@ -3053,24 +3053,38 @@ report from the *same* member dedups to the resolved row under R107's
 `nulls_distinct=False`, so the test needs two reporters to make two rows — a
 trap worth naming.)
 
-**`can_act_on` gained a shield that NARROWS R103b, and the owner has not
-signed off on it.** `is_instance_actor(target)` now returns `False` from
-`can_act_on` **before** the superuser short-circuit, so nobody — not the site
-admin — can suspend or ban `@_instance`. The reason is operational, not
-political: banning `_instance` 410s `/user/_instance/`, after which peers
-cannot verify anything we sign with that key, which breaks outbound federation
-for every report and every future activity that uses the representative. It is
-placed before the superuser branch deliberately, so the admin's "may act on
-anyone" is the thing being narrowed rather than a moderator's reach. **Flagged
-for the owner's explicit yes-or-no; it is the one place this increment changed
-a settled rule rather than adding to it.**
+**`can_act_on` gained a shield that narrows R103b — and the owner signed it off
+as R113.** `is_instance_actor(target)` now returns `False` from `can_act_on`
+**before** the superuser short-circuit, so nobody — not the site admin — can
+suspend or ban `@_instance`. The reason is operational, not political: banning
+`_instance` 410s `/user/_instance/`, after which peers cannot verify anything
+we sign with that key, which breaks outbound federation for every report and
+every future activity that uses the representative. It is placed before the
+superuser branch deliberately, so the admin's "may act on anyone" is the thing
+being narrowed rather than a moderator's reach. This was surfaced as the one
+place the increment changed a settled rule rather than adding to one; asked,
+**the owner chose to keep the shield.** **How to apply: R103b's "the admin may
+act on anyone" now reads "…anyone except the instance representative."** Any
+future actor that is infrastructure rather than a member inherits the same
+question — the test is *would acting on this break the instance's own ability to
+be verified*, not *is this account important enough to protect*.
+
+**Deployed 2026-09-29 15:40 UTC** — pre-migration restore point
+`reeltalk-20260929T153944Z.dump` (723,502 bytes) taken first, then
+`docker compose build` (all three images) + `up -d`. The entrypoint applied
+`moderation.0005_domainblock` and `social.0013_alter_user_suspension_origin`
+to the live DB — both present in `django_migrations`. All four services up, web
+healthy, `/` serving 200 and `/moderate/` returning the anonymous 302.
+`moderation_domainblock` exists with zero rows, and `@_instance` is **not yet
+minted** — confirming the lazy-create: the representative row appears on the
+first forward, not on a GET, so browsing the queue never writes.
 
 **Mock-only, stated plainly.** Everything above is proven against `responses`
 mocks and the local test DB: the payload shape, the key identity, the reporter
 masking, both doors, the sweep, the three-way lift scoping, all four forward
-refusals, and every permission boundary. **Nothing in this increment has been
-sent to a real peer yet.** The live proof below is handed to the owner because
-it writes into their instance.
+refusals, and every permission boundary. **Nothing has been sent to a real peer
+yet.** The live proof below is handed to the owner because it writes into their
+instance.
 
 **The live test the owner should run, and what to look for on their side.**
 The asset already exists — four live mirrored remote statuses
@@ -3410,4 +3424,9 @@ New owner decisions for the rewrite are recorded here, numbered R1, R2, … The 
 
 - **R111 — The instance representative is a dedicated non-human local actor whose name is reserved by the signup charset (owner decision 2026-09-29, taken during increment 6).** Mastodon masks its reporters behind `Account.representative` — `mastodon.internal`, `actor_type: Application`. We have no Application model, and the owner chose the closest honest equivalent over the alternatives (signing as the moderator, or a config-only key with no actor): a real local `User` with localname **`_instance`**, display name "Instance representative", no `is_staff`, no `is_moderator`, unusable password. **Why the reservation is structural:** R12's signup charset is `^[a-zA-Z0-9][a-zA-Z0-9._-]*$`, so a leading underscore is already invalid — nobody can register the name we are using, and the reservation cannot drift out of step with a denylist somebody forgets to extend. `validate_instance_localname()` exists as a belt and is **deliberately not wired into `SignupForm`**, because a second check that only restates the first is a thing to forget to keep in step. **How to apply:** anything that lists, counts or displays accounts must decide whether `@_instance` belongs; it is not a member and must not appear in member lists. Its row is created lazily by `instance_representative()` and never by a GET.
 
-- **R112 — Outbound forwarding is a moderator click and resolves nothing (owner decision 2026-09-29, taken during increment 6).** The alternatives were auto-forward on filing and forward-on-resolve; the owner chose **the moderator presses Forward**, so nothing leaves the box until a human decides. **Why:** a `Flag` is a statement to another instance's staff about one of *their* users, made in our instance's name by our representative — an automatic forward would let any member's report become a cross-server accusation with no human in the loop, and would make report-filing a way to attack another instance's members. **And forwarding must not resolve the report:** passing a complaint to the one server that can act on that account is not a judgment of our own. The moderator may still delete the local copy, refuse the mirror, or dismiss the pile afterwards, and the card's disclosure says so. **How to apply:** the forward verb never writes `resolved_at` and never writes `Report.Action`; it writes only a `[federation]` outcome line. A future "auto-forward remote reports" would reverse this decision and needs the owner, not an optimisation.
+- **R112 — Outbound forwarding is a moderator click and resolves nothing (owner decision 2026-09-29, taken during increment 6).** The alternatives were auto-forward on filing and forward-on-resolve; the owner chose **the moderator presses Forward**, so nothing leaves the box until a human decides. **Why:** a `Flag` is a statement to another instance's staff about one of *their* users, made in our instance's name by our representative — an automatic forward would let any member's report become a cross-server accusation with no human in the loop, and would make report-filing a way to attack another instance's members. **And forwarding must not resolve the report:** passing a complaint to the one server that can act on that account is not a judgment of our own. The moderator may still delete the local copy, refuse the mirror, or dismiss the pile afterwards, and the card's disclosure says so.  **How to apply:** the forward verb never writes `resolved_at` and never writes
+`Report.Action`; it writes only a `[federation]` outcome line. A future
+"auto-forward remote reports" would reverse this decision and needs the owner,
+not an optimisation.
+
+- **R113 — Nobody may act on the instance representative, not even the site admin; this narrows R103b (owner decision 2026-09-29, taken during increment 6 after the shield was surfaced for sign-off).** `can_act_on` returns `False` for `is_instance_actor(target)` **before** the superuser short-circuit, so `_instance` cannot be suspended or banned by anyone. This is the only place increment 6 changed a settled rule rather than adding to one, which is why it was surfaced rather than shipped silently. **Why:** banning `_instance` makes `/user/_instance/` return `410 Gone`, after which no peer can verify anything we sign with that key — every forwarded report and every future activity using the representative breaks at the signature check, and it breaks on *their* side, where our own logs look perfectly green. The placement before the superuser branch is the substance: it is the admin's reach being narrowed, not a moderator's. **How to apply:** R103b's "the admin may act on anyone" now reads "…anyone except the instance representative." When any future actor is infrastructure rather than a member, the test for shielding it is *would acting on this break the instance's own ability to be verified* — not *is this account important enough to protect*. The first question is about the system and has an answer; the second is about status and does not.
