@@ -36,6 +36,8 @@
 > **✅ Moderation increment 3 — the delete action and the target guard — is DONE, gate-verified, deployed, and peer-proven against the real Mastodon 4.7.2 (2026-09-27/28).** `Report.Action.DELETE_STATUS` + `moderation.0002_alter_report_action`, `delete_reported_status()` following `dismiss_report`'s shape (resolve the whole pile with who/when/what/note, then soft-delete), `can_act_on()` as the target-side guard, `POST /moderate/<id>/delete-status/`, and the queue card carrying `can_delete` computed from the acting user so the template reads a boolean and never decides a permission. **This is the first moderation action that federates.** Gate **`1468 passed + 5 skipped`** (baseline 1407; **+61 = 59 new tests in `tests/test_moderator_delete.py` + 2 clean-room params** for that file and the new migration), `makemigrations --check` clean, `ruff check`/`format` clean, non-vacuity proven by **five** mutations of `can_act_on`, one clause at a time, each restored byte-identical. **Four findings worth more than the code.** (a) **The mirrored-author broadcast would have 500'd after the damage.** A mirror's `private_key` is `""` by construction, `load_private_key("")` raises `ValueError`, and the delivery loop catches only `requests.RequestException` — so an unconditional broadcast deletes the post, closes the report, *then* throws. The view broadcasts only `if status.user.local`, with the hazard pinned at the primitive. (b) **A resolved report is not a live delete handle** — 404, because unlike dismiss a delete cannot be idempotent, and a report id must not stay a way to destroy a post after the decision about it was made. (c) **Two clauses of the guard are redundant, and the mutation pass is what said so rather than the code looking confident.** The self check turns zero tests red (every actor reaching it already holds a shielded flag) and is kept as declared defense-in-depth; and the `is_superuser` half was being covered by `create_superuser`'s own `is_staff=True` until a `bare_superuser` fixture made it bite on its own. (d) **R103b** — the owner settled the account model mid-increment: **three kinds, `is_staff` not among them**, and a moderator's reach is a regular user only, identically for delete, suspend and ban. **Live: 46/46 on the whole loop and 51/51 on the three-kind matrix**, both actor positions, sessions proven by `_auth_user_id`, absence checked at the read sites rather than the flag asserted, the notification ledger flat at 5 across the cycle (R99), and the admin position driven by a **minted probe superuser so the owner's `minnix` account was never logged in as** — teardown left sessions 29→29 and no probe marker anywhere. **Federation proved on Mastodon's own table**, not on our status code: 4 live rows → probe row → 3 live rows, originals untouched. **One bug flagged, deliberately not fixed here:** broadcasts sign their `keyid` from `request.scheme`, and `http://192.168.1.138:3030` is in `ALLOWED_HOSTS` + `CSRF_TRUSTED_ORIGINS`, so a moderator deleting over the LAN on plain HTTP signs a key no internet peer can resolve — it fails **quietly** (a WARNING in the delivery log, remote copy stays up, moderator sees "Post deleted."). The fix belongs to the scheme/trust layer, not to this increment.
 
 > **✅ 2F-1 — the email-verification model and token layer — is DONE and gate-verified (2026-09-30). Nothing sends and nothing is gated.** `User.email_verified_at` + `User.verified_email` with `email_verified` **derived** from the pair, so an admin address edit invalidates verification with no save hook and nothing to forget; `email`/`verified_email` normalised `strip().lower()` in `save()` the `LinkDomain` way; the **partial** unique index `unique_email_when_set` (`~Q(email="")`), because a full `unique=True` cannot be built over the three address-less rows the live DB holds; and `EmailVerificationToken` on the `Invite` shape with R120's two named substitutions — `user` for `created_by` (one subject, not two parties) and `email` for `used_by` (the consumer is the same account by construction, so what this flow needs is the **address binding**) — plus `mint`/`lock_live`/`consume`/`is_live`/`unusable_reason`, 72h TTL, single-use, mint-supersedes. `consume()` writes **both** halves in one transaction and raises `AddressMismatchError` when the account's address has moved, so a link sent to a typo can never verify the correction. **One field added past the spec's list, flagged not slipped:** `superseded_at`. R120's supersede clause cannot live in `used_at` (that would make a resend read as a click, destroying the meaning R123 protects), in `expires_at` (the copy would lie), or by deleting the row (contradicts the spec's own "a row per send"). **`mint()` refuses an address-less account** because a token bound to `""` would satisfy `verified_email == email` and read as verified on nothing — a live trap on this schema, not a theoretical one, since the partial index exists precisely to allow blanks. **The increment's own boundary is pinned, not asserted:** an unverified member still authenticates through `ModelBackend`, `is_active` is unmoved by verification (R102b intact), and `UserAdmin` was checked rather than assumed — its explicit `fieldsets` mean the two new columns are **absent** from the admin form rather than editable, which is what keeps R123's no-hand-verify true. **2E trap 3 retired** (owner decision): `test_two_staff_sharing_one_address_are_two_recipients` was the only failure in the first gate run, killed by `unique_email_when_set` doing exactly what it was added to do; the shared-address state is now unconstructible, so the trap is closed by the schema rather than handled by the code. Gate **`1838 passed + 5 skipped`** (baseline 1804 + 5; **+34 = 33 new tests + 2 clean-room params − 1 retired test**), `ruff check` / `format --check` clean, `makemigrations --check` clean. **Not done by scope:** no send path, template, console guard, `change_email()`, auth backend, routes, or `SignupForm` change — the instance behaves exactly as it did before. Full record in §2F.
+>
+> **✅ 2F-2 — the send path — is DONE and gate-verified (2026-09-30, `faca204`). Still no gate: apart from mail going out, the instance behaves exactly as it did.** `social/verify.py` decides whether to send, guards, mints and enqueues; `social/tasks.py` sends on the worker and records the outcome. **One `send_verification_email(user)` helper is wired into all three creation routes** — signup, the setup wizard, `invite_accept` — rather than the send being inlined three times, because three call sites is three places to forget and forgetting here is silent: the account still appears, it just never gets a link and nothing about it looks broken. **The address check is delegated to `mint()`, not duplicated** — the helper translates `mint`'s `ValueError` into a logged no-op so an address-less signup keeps working while `SignupForm.email` is still `required=False`, and logs it loudly because that is the account that will not be able to sign in once the gate goes up. **The console-backend guard fires in the request that created the account, not only in the worker** — 2F trap 1 escalated from 2E's version: a silent non-send here means an account that can never be verified, not merely an alert nobody read. **`change_email()` is now the single writer of an address**, with the R125 notice firing from inside it and `UserAdmin.save_model` routed through it — and the admin's plain save is deliberately written with the address the row *already* had, so the submitted one can only arrive through the function that notifies the old address. It skips the alert when the old address is empty and is a true no-op on an unchanged or case-variant address. **A real change also supersedes the account's live tokens** (owner decision): not for safety, which the 2F-1 address binding already provides, but so no live credential sits pointing at an address the account no longer holds and nobody spends a click on a link that can only produce a mismatch error. **The shape gap was raised and settled before building rather than improvised past** — this is the second time this class of gap has appeared after `superseded_at` in 2F-1: `EmailVerificationToken` gains `sent_at` + `send_error`, with the `queued`/`sent`/`failed` label **derived** from the pair rather than stored, so the admin's inline readout cannot disagree with the facts it summarises. `sent_at` is **not** redundant with `created_at` — that is when the link was minted, which in the signup flow is the same second the account appeared and the mail can fail seconds later, and 2F-3's resend cooldown must count from the real send so a failed mail costs the member no wait. `send_error` is a `TextField` because an SMTP diagnostic must not be truncated to fit. **The tamper notice carries no link of any kind and records to the log only**, both owner decisions: it goes to an address an attacker may still control, so anything actionable in it is something they could act on too, and it is not a credential with a row of its own to write an outcome on. **The verify link is minted from `CANONICAL_ORIGIN`, never the request**, and its path is a pinned constant (`VERIFY_PATH = "/account/verify/"`) that 2F-3 must bind its route to — until it does, the link in the mail 404s, which is the honest state of shipping the mail before the page. Gate **`1886 passed + 5 skipped`** (baseline 1838 + 5; **+48 = 42 new tests + 6 clean-room params** for `social/verify.py`, `social/tasks.py`, both templates, migration `social.0016` and `tests/test_verification_send.py`), `ruff check` clean, `ruff format --check` clean at 140 files, `makemigrations --check` reports no changes. **All mock-only** — locmem throughout; §2F-4 is the live proof. **Not done by scope:** no gate, no auth backend, no routes, no login-copy change, no `SignupForm` required-email change, no `UserAdmin` send action or token inline.
 
 | Area | State |
 |---|---|
@@ -4248,6 +4250,206 @@ then `manage.py migrate`, then `up -d --force-recreate web worker`.
 The migration adds two nullable/defaulted columns and one **partial** index,
 so it applies cleanly over the three address-less rows the live DB holds —
 which is the thing a full `unique=True` could not have done.
+
+### Executed — 2F-2 is DONE, gate-verified; mail now goes out and nothing is gated (2026-09-30)
+
+**What landed.** `reeltalk/social/verify.py` — `send_verification_email()`
+(decide, guard, mint, enqueue), `build_verification_email()`,
+`verification_url()`, `change_email()` (the single address writer) and
+`build_address_change_email()`; `reeltalk/social/tasks.py` —
+`enqueue_verification_email` / `send_verification_token` and
+`enqueue_address_change_notice` / `send_address_change_notice`; the
+`social/email/verify_email.txt` and `social/email/email_changed.txt`
+templates; the console-backend guard at all three creation routes;
+`UserAdmin.save_model` routed through `change_email`;
+`EmailVerificationToken.sent_at` + `send_error` with the derived
+`send_state`; migration `social.0016_emailverificationtoken_send_error_and_more`;
+and the `reeltalk.social.verify` logger raised to `INFO`
+(`VERIFY_EMAIL_LOG_LEVEL`). **Still no gate** — no auth backend, no routes,
+no login-copy change, no `SignupForm` change. The instance behaves exactly
+as it did apart from mail going out.
+
+**The one helper, three routes.** `send_verification_email(user)` hangs off
+`signup()`, `setup()` and `invite_accept()` rather than the send being
+inlined three times. This is the 2E lesson applied to a second feature, and
+the failure mode is identical: a send at each creation route is N places to
+forget, and forgetting here is silent — the account is created, it simply
+never gets a link, and nothing about it reads as broken. Each of the three
+is pinned by its own test asserting the queued task carries that account's
+own token pk, so a route that stops sending cannot drift back in
+unnoticed. In `invite_accept` the call sits **inside** the existing
+`transaction.atomic()`, so the `on_commit` only fires if the account and
+the invite's redemption both landed.
+
+**The address check is delegated, not duplicated.** `mint()` owns the "no
+address, no token" rule, so `send_verification_email` does not re-test
+`user.email`; it catches `mint`'s `ValueError` and turns it into a logged
+no-op returning `{"enqueued": 0, "reason": "no-address"}`. That
+distinction matters because `SignupForm.email` is still `required=False`
+until a later increment: an address-less signup is a normal, working thing
+today and must not 500. The logging is the substance rather than the
+swallowing — that account is the one that will not be able to sign in once
+2F-3 goes up, and the operator needs to have heard about it at the moment
+it was created rather than reconstructing it from an absence three
+increments later.
+
+**The guard is in the request, deliberately.** `_shout_if_console_backend`
+runs in the process that created the account, before the enqueue, and the
+test asserts the warning is already logged while `mail.outbox` is still
+empty — i.e. no worker ran. 2F trap 1 is 2E's trap escalated: the console
+backend reports success, and here a silent non-send does not mean an alert
+nobody read, it means an account that can never be verified. The worker
+shouts a second time because the operator chasing "nobody got the link"
+reads the worker log, not the web container.
+
+**`change_email()` as the single writer (R125).** The admin's `save_model`
+reads the persisted address, sets `obj.email` **back** to it, calls the
+normal `super().save_model()` so every other field saves as usual, and
+then calls `change_email()` with the submitted value. The consequence is
+the point: the address column can only ever be written by the function that
+fires the notice, so an address change with no alert is not something a
+caller can construct — not from the admin, not from a management command,
+not from an import hook. A spy test pins the routing itself rather than
+only the observable, and asserts that with `change_email` monkeypatched out
+the row still holds the **old** address. The alert is skipped when the old
+address is empty (nothing to tell — which is also the shape of giving the
+standing address-less accounts their first address), and an unchanged or
+case-variant address is a true no-op: no write, no supersede, no false
+alarm about a change that never happened.
+
+**Superseding on a real change, and why it is not about safety.** The
+safety question is already closed by 2F-1: the address binding refuses a
+stale link, so an old token can never verify the corrected address, and a
+test proves it by consuming one after a change and asserting
+`AddressMismatchError`. What superseding buys is that the state is
+**unreachable rather than handled** — no live credential sits in a mailbox
+pointing at an address this account no longer holds, and no member spends a
+click on a link whose only output is a mismatch error. The member is not
+stranded: the logged-out resend route (2F-3) mints on demand, and the
+notice they just received is what tells them to. It reuses the same single
+`UPDATE` `mint()` already runs, so there is no second mechanism to drift.
+
+**The shape gap, raised before building.** The spec says the worker should
+"record the outcome on the token" and R123 wants the admin's inline token
+view to show state and last error, but `EmailVerificationToken` had no
+field for it — and none of the existing columns could honestly hold one:
+`used_at` means *a human clicked this* (the single meaning R123 refuses to
+dilute), `superseded_at` means *a newer send replaced it*, `expires_at` is
+a deadline the spec fixed at 72h. This is the same class of gap 2F-1 hit
+with `superseded_at`, so it was put to the owner with the options and the
+tradeoffs rather than improvised past. **Settled: `sent_at` + `send_error`,
+with the `queued`/`sent`/`failed` label derived rather than stored** — a
+stored label is a third thing that must be kept in step with the two it
+summarises, and the failure mode of forgetting is a row that reads "sent"
+with `sent_at` empty. The three labels are mutually exclusive because **one
+row is one send attempt**: every send mints a fresh row (R120's
+row-per-send) and django-q does not re-run a task that raised, so a row is
+never mailed twice.
+
+**Why `sent_at` is not redundant with `created_at`.** `created_at` is when
+the link was minted, which in the signup flow is the same second the
+account appeared; the mail can fail seconds later. The 2F-3 resend cooldown
+needs to know which of the two it counts from — keyed on `created_at`, a
+send that never left the box still makes the member wait out a window for
+mail that never came; keyed on `sent_at`, a failed send costs them nothing.
+`send_error` is a `TextField` rather than a bounded `CharField` because an
+SMTP diagnostic must not be cut short to fit: the 2E
+`554 5.7.1 … Sender is not same as SMTP authenticate username` line is
+exactly the sentence that explains a whole broken deploy, and truncating it
+would amputate the part that names the cause. The writer collapses newlines
+so it stays one readable line without losing anything.
+
+**`sent_at` claims only what the code knows.** It means *the transport
+accepted the message*, not that anybody received it — R88's "`202 Accepted`
+is not delivery", stated in the docstring so the column name does not
+overclaim what sits behind it.
+
+**The tamper notice is a notice, not an action.** `email_changed.txt`
+carries **no link of any kind** — not to undo the change, not to the
+instance, not to a support page — because it goes to an address that an
+attacker may still control, so anything actionable in it is something they
+could act on too. The absence is asserted rather than trusted: no
+`http://`, no `https://`, no `//`, no verify path. It also names **the
+site administrator** and never the acting member's handle, since the mail
+may land in a stranger's mailbox (a corrected typo, a hijacked account)
+and another member's handle there is a leak with no upside. **Its outcome
+is recorded in the log only**, by owner decision: it is not a credential,
+so unlike the verification mail there is no row of ours its result belongs
+on. The accepted cost is stated rather than glossed — if this send fails,
+nothing in the admin screen shows it and the only way to find out is
+`docker logs`. A general outbox table would fix that and is a bigger piece
+of work than this increment.
+
+**The link is request-independent, and its path is a contract.**
+`verification_url()` mints from `settings.CANONICAL_ORIGIN` via
+`absolute_uri`, R108's rule applied to a credential that leaves the box
+inside an email. Proved through the request rather than around it: the test
+client presents `testserver`, `CANONICAL_ORIGIN` is overridden to something
+else, and the mail that comes out carries the override and not
+`testserver`. The path is a named constant (`VERIFY_PATH =
+"/account/verify/"`) rather than a literal in a template because it is a
+contract between two increments — 2F-3 must bind its route to it. **Until
+2F-3 lands, the link in the mail 404s.** That is the honest state of
+shipping the mail before the page, not a defect: 2F-2's scope is the send,
+and the spec put the routes in 2F-3.
+
+**Verified.** Gate **`1886 passed + 5 skipped`** against a baseline of
+1838 + 5 — **+48**, reconciled as 42 new test functions plus 6 clean-room
+parametrised instances (one each for `social/verify.py`, `social/tasks.py`,
+`verify_email.txt`, `email_changed.txt`, migration `social.0016`,
+`tests/test_verification_send.py`). `ruff check` clean, `ruff format
+--check` clean at 140 files, `makemigrations --check` reports **No changes
+detected**. Full log at `/tmp/gate-2f2-final.log`; the preceding
+`/tmp/gate-2f2.log` is the same suite one build earlier and shows the same
+`1886 passed + 5 skipped` with the pre-format ruff failure, which is why
+the final run was repeated after the last file was written.
+
+**Suite coverage of the spec's list.** All three creation routes queue
+exactly one task carrying their own token pk; nothing leaves the box inside
+the signup request (outbox and `OrmQ` both empty with the commit callbacks
+deliberately left un-run); an address-less signup still creates its
+account, sends nothing, and explains itself in the log; the console guard
+fires in the request and stays quiet under a real SMTP override, and the
+worker shouts independently; the mail carries its own token's link, goes to
+the address the token is bound to, and has **no unsubscribe** in body,
+subject or headers (R121); the send stamps `sent_at` on success and
+`send_error` on failure and re-raises (2E trap 6), with the error collapsed
+to one line and `sent_at`/`send_error` never both holding; a task for a
+deleted token is dropped without sending; **sending verifies nothing** —
+the mail only asks, and verification is `consume()`'s; the notification
+ledger stays at zero across the whole cycle (R99). On the write side: the
+new address is written normalised; the notice goes to the **old** address
+and not the new one; it carries no link; it names the site admin and not
+the acting handle; an empty old address skips it; an unchanged or
+case-variant address is a no-op with the live token left live; a change
+supersedes live tokens and a superseded token still could not have verified
+the new address; the derived verified state goes false with the old proof
+left intact as the record of what was actually clicked; a rolled-back
+change produces no notice; and the admin routes through `change_email`
+rather than writing the address directly, sends no notice when the address
+is untouched, is refused at the form boundary on a duplicate address with
+no notice about the change that did not happen, and sends no verification
+mail on the add path.
+
+**Not done, by scope.** No gate, no custom auth backend, no
+`GET /account/verify/<token>/`, no `POST /account/verify/resend/` (neither
+cooldown axis), no session reset across the confirm boundary, no login-copy
+change, no unverified banner, no `SignupForm` required-email change, and no
+`UserAdmin` read-only status line or token inline — the
+`sent_at`/`send_error`/`send_state` fields exist for that surface but
+nothing renders them yet.
+
+**Deploy note.** `social.0016_…` is now the **second** pending migration
+after `social.0015_…`. `docker compose build` (all three images, each its
+own tag) → `manage.py migrate` → `up -d --force-recreate web worker`.
+`up -d` alone picks up new env vars but keeps running the image's old
+`settings.py`, because normal operation has no code bind mount. The
+migration adds one nullable column and one blank-defaulted `TextField` to
+an existing table, so it applies cleanly with no backfill. **A live signup
+or an admin address edit on the running instance will now enqueue real
+mail** — which is new behaviour on deploy, and the reason the
+console-backend guard matters before any real address is put on a real
+account.
 
 ## 3. Host facts (this box)
 
