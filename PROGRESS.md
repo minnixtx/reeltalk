@@ -4064,12 +4064,38 @@ showing refusal. Prove the cooldown by asking twice inside the window. Prove the
 gate by trying to sign in before verifying and after. **State plainly which parts
 are mock-only vs live-proven**, as §2E did.
 
-**Note on which account the live proof runs as.** `witness` (124) has no address
-and locks out under R119. The live proof therefore needs a **verified** account,
-which needs a unique receivable address — `minnix@minnix.dev` is taken by user 1
-and `danny@minnix.dev` by `warden`. Either a third address on the mail server, or
-rebuild the instance with fresh verified test accounts. The owner has said the
-instance is rebuildable at will, so this is a setup task, not a blocker.
+**Note on which account the live proof runs as — RESOLVED 2026-09-30.** The
+owner supplied **`forgejo@minnix.dev`** as the third unique receivable address,
+which was the only thing blocking this. `witness` (124) has no address and locks
+out under R119, so the live proof needs a verified account and `minnix@minnix.dev`
+(user 1) and `danny@minnix.dev` (`warden`) are both already taken.
+
+**One sequencing choice remains, and it is a §2F-4 decision, not a §2F-1 one.**
+There is one spare address and two competing claims on it:
+
+- **Give it to `witness` and verify it.** This keeps the standing probe harness
+  alive. The plain-member-files / moderator-acts-without-staff pair is what makes
+  a masking or reach test mean anything (a test run entirely by the site admin
+  proves nothing about R103b, because the admin reaches everything), so if
+  `witness` cannot sign in, the moderation arc's live testing is broken going
+  forward, not just §2F's. Setting the address through `change_email()` also
+  exercises R125's empty-old-address skip for free. **What this does not prove
+  live is the signup auto-send path** — it proves the verify machinery, not the
+  creation route.
+- **Use it for a fresh signup**, so the live proof runs the whole creation →
+  mail → click → verified chain end to end. Cleaner as a proof of §2F, but it
+  leaves `witness` address-less and locked out.
+
+**Recommendation: `witness`.** The moderation arc's live coverage is the thing
+that is hardest to reconstruct and easiest to break silently, and signup is well
+covered in the suite either way. If a fourth address turns up later, the signup
+path can be proven live too; otherwise a rebuild covers it.
+
+**The IMAPS password will be needed at §2F-4**, not before — proving receipt at
+that mailbox means reading it over 993 with `readonly=True` / `BODY.PEEK` and
+before/after count baselines, per the standing discipline. Nothing in §2F-1
+through §2F-3 touches it, so it is asked for at the point of use rather than
+parked across three increments.
 
 ### Out of scope here
 
