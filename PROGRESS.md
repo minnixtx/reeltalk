@@ -3623,6 +3623,281 @@ on `.moderation-link`, and email verification all stay out of scope per §2E. Th
 unsubscribe gap remains a real compliance consideration for any deploy with real
 users, not a nice-to-have.
 
+## 2F. Forward plan — email verification of member addresses
+
+### The finding that sets the scope
+
+`email` is `models.EmailField(blank=True)` (`social/models.py:119`) with an
+in-code comment pinning why: *"two users with no email must be possible until
+then"* — the deferral points here. Nothing on the instance knows whether an
+address is real. `SignupForm.email` is `required=False`, so an account can exist
+with no address at all, and the address it does hold may be wrong, expired, or
+someone else's, and nothing distinguishes those states.
+
+**This is the increment that discharges the deferral**, and the owner settled it
+in the hard direction rather than the soft one: email becomes **required and
+unique**, and an unverified account **cannot sign in**. That combination is a
+different product from the one §2E shipped against, and the consequences were
+enumerated against live data before the decisions were taken rather than after.
+
+**Measured live 2026-09-29, not assumed.** 6 local users, 3 with an address, 3
+without, **zero shared addresses** — so the uniqueness migration is clean here.
+The three blanks are `witness` (124, the standing live-probe member), `_instance`
+(126, the signing identity for every outbound `Flag`, R111) and `zz_dedup` (127,
+the dedup fixture) — the exact accounts §2D's record says are kept deliberately.
+Under the chosen rules all three lock out. **The owner accepts this: the whole
+instance is disposable test data, destroyable and rebuildable at will, used for
+nothing else.** Rebuilding it with verified accounts is the recovery, not an
+exception carved for them.
+
+### The decisions — settled by the owner 2026-09-29 as R118–R123
+
+All six were put to the owner with their consequences enumerated against live data
+before any code was written. None follow from the code; they are product choices.
+
+- **R118 — Email is required at signup and unique when set.** Amends R12's
+  "email optional and non-unique until password reset needs it": the need has
+  arrived and the answer is the strong one.
+- **R119 — An unverified account cannot sign in. No exceptions, admin
+  included.** The owner was offered an admin exemption on R114's reasoning and
+  declined it. See *The sharpest edge* below for what this costs and why it is
+  still recoverable.
+- **R120 — Token: 72 hours, strictly single-use, minting supersedes prior live
+  tokens, and the token is bound to the address it was minted for.**
+- **R121 — §2F is verification only.** One-click unsubscribe and password reset
+  each stay in their own increment. The unsubscribe gap 2E flagged belongs to the
+  **staff report mail**, not to the member verification mail, and its threat
+  model is different in kind: verification is a logged-in member proving their own
+  address, unsubscribe is a **logged-out** recipient clicking once from a mail
+  client that may prefetch or virus-scan the link. R116 already framed staff
+  self-service opt-out as a later increment; this confirms it rather than
+  reversing it.
+- **R122 — Recovery is a logged-out, rate-limited resend route.** The only shape
+  that actually recovers a lost verification mail under a mandatory gate.
+- **R123 — No hand-verify.** The site admin may trigger a verification email but
+  may **never** flip the verified state by hand. Every verified flag traces to a
+  token that was actually clicked. The owner took stronger provenance over the
+  onboarding convenience, accepting that a member who genuinely cannot receive
+  mail is not onboardable without a code change.
+
+### The sharpest edge, recorded rather than smoothed over
+
+R119 reproduces the *shape* of the risk R114 was written to kill: a state where
+the instance reads as configured and nobody can get in. R114 deleted that premise
+for suspension and ban; R119 deliberately keeps this one. **It is not a brick, and
+the reason matters:** R122's logged-out resend works without a session, so an
+admin who cannot sign in can still resend to themselves and get in. The residual
+failure is "SMTP is fundamentally not working", which is a deployment fault that
+**shouts** via 2E's `console_backend_active()` rather than failing silently.
+
+**The one place it does bite is first run.** `setup()` creates the admin and calls
+`login(request, user)`; under R119 that login is refused, and the wizard is
+already gone because `has_admin()` is now true. So:
+
+> **Deploy note: configure `EMAIL_*` in `.env` before running the setup wizard.**
+> The default config is the console backend, which delivers nothing. On a fresh
+> box with no SMTP, the first admin cannot reach `/admin/` to add the settings
+> and must fix mail at the host level first. The guard logs this loudly; the
+> requirement is stated here so it is not discovered mid-setup.
+
+### Shape
+
+**Two columns on `User`, verified state derived rather than stored as a flag.**
+`email_verified_at` (nullable) plus `verified_email` — the address that was
+actually verified. Verification reads:
+
+```python
+@property
+def email_verified(self) -> bool:
+    return bool(self.email_verified_at) and self.verified_email == self.email
+```
+
+This is the codebase's standing "one fact, derived" instinct (R93's unread
+timestamp, R102b's `is_active`), and it buys one specific thing that a boolean
+cannot: **when the site admin edits `email` in `UserAdmin`, the verified state
+invalidates itself** with no save-hook, no change detection, and nothing to forget.
+A stored boolean would need a hook to notice the address moved, and a hook that
+misfires is exactly the silent staleness this avoids.
+
+**`email` normalised on save** — `strip().lower()` — following `LinkDomain.save()`
+exactly. Uniqueness is meaningless without it: `Foo@x.com` and `foo@x.com` are one
+mailbox, and a case-sensitive unique index would let both exist.
+
+**The unique index is partial, not full.** `UniqueConstraint(fields=["email"],
+condition=~Q(email=""))`. A plain `unique=True` **fails on this live DB today** —
+three rows carry `email=''` and a unique index cannot hold three empties. The
+partial form is the same device as `unique_actor_url_for_remote_mirrors`, which is
+conditioned for precisely this reason. It also keeps `_instance` legal: infrastructure
+must not need an address. *"Required"* is enforced at the form boundary; *"unique"*
+is enforced in the database over non-empty values. Those are two different layers
+and collapsing them is what breaks the migration.
+
+**The token reuses the `Invite` shape with two named substitutions.**
+`EmailVerificationToken` in `reeltalk/social`: `code` (unique / 64 / non-editable,
+`secrets.token_urlsafe(32)`), `created_at`, `expires_at`, `used_at`, `is_live`,
+`mint()`, `lock_live()` (row-locked inside a transaction, because two people — or
+one person and a mail-client prefetch — opening the same link must not both pass the
+liveness check), `consume()`, `unusable_reason()`. Two fields differ, and the
+divergence is deliberate rather than sloppy:
+
+- **`user` replaces `created_by`.** An invite has two distinct parties — the
+  inviter and the redeemer — and `created_by` names the first. Verification has one
+  subject: the account itself. Nobody else mints it.
+- **`email` replaces `used_by`.** The consumer is the same account by
+  construction, so `used_by` would carry no information. What this flow needs
+  instead is the **address binding**: a token minted for address A must never be
+  able to verify address B. `email` on the token is that binding, and it is what
+  makes the R120 "bound to the address it was minted for" clause real rather than
+  aspirational.
+
+**The gate lives in a custom auth backend, not in `is_active`.** R102b pins
+`is_active` to `suspended_at is None and banned_at is None` with tests that exist
+to stop exactly this. Folding a third unrelated state into that property would merge
+verification with suspension and ban, break the pinned contract, and make three
+different refusals indistinguishable. A `ModelBackend` subclass overriding
+`user_can_authenticate` is the idiomatic seam.
+
+Because `get_user()` calls `user_can_authenticate` on **every** request, refusing
+there gives the same *"already-logged-in sessions are cut on its next click"*
+property R102b got for suspension, with no middleware. **The consequence is
+stated, not discovered later:** if the admin changes a signed-in user's email
+address, that user is logged out at their next click until they verify the new
+address. That is the consistent behaviour and it is what the derived property
+above produces for free; the alternative (gate at `authenticate()` only, existing
+sessions ride on) is the weaker guarantee and was not taken.
+
+**The login page must distinguish "wrong password" from "not verified".**
+Django's `LoginView` answers both with *"Please enter a correct username and
+password."* Under R119 that copy is actively harmful — it sends a person to a
+password reset that **does not exist yet** (R121 keeps it out of this increment)
+instead of to the resend route that does. So the login surface needs a custom form
+that names the real reason and links to `/account/verify/resend/`. **The tradeoff
+is named, not hidden:** a distinct message tells an attacker who has already guessed
+the password that the account is unverified. That leak is taken deliberately — it
+requires a valid password, which is a far weaker position than address
+enumeration, and the UX cost of hiding it is a support dead-end.
+
+**The resend cooldown is the token table itself.** Refuse when a live token for that
+address was minted less than N minutes ago. No new table, no new dependency, no
+rate-limit library — and it cannot be bypassed by clearing cookies because it is
+keyed server-side on the address. Response copy is identical whether or not the
+address exists: *"If that address has an account here, a verification link is on
+its way."*
+
+**This cooldown is a floor, not a ceiling, and R107 says why.** R107 established
+that dedup is not rate limiting and that antispam is separate, still-unbuilt work.
+A 5-minute per-address cooldown still admits ~288 mails/day to one victim from a
+determined caller. §2F puts a floor under the abuse surface it creates; it does
+not close it, and the spec should not read as though it does.
+
+**Signup stops logging in.** `signup()`, `setup()` and `invite_accept()` all
+currently call `login(request, user)` and redirect. Under R119 they must not —
+they mint and send, then redirect to a "check your email" state. Three call sites
+is the 2E lesson (one call site, not several), so the send hangs off a single
+`send_verification_email(user)` helper rather than being inlined three times.
+
+### Traps to design around, not discover late
+
+1. **Console backend + mandatory gate = every signup creates an account that can
+   never sign in.** This is 2E trap 1 escalated from "an alert nobody gets" to "an
+   account nobody can use". The `console_backend_active()` guard must fire at
+   signup, loudly, in the request that created the account — not only in the
+   worker.
+2. **The unique index over empties fails the migration on real data.** Partial or
+   it does not apply. See *Shape*.
+3. **Case-normalisation must happen before the uniqueness check, not after.**
+   Normalising in the form but not in `save()` means a management command or a
+   fixture writes `Foo@x.com` beside `foo@x.com` and the index does not catch it.
+   Normalise in `save()`, the `LinkDomain` way.
+4. **A stale verified state is worse than no verified state.** If `email` moves
+   and `email_verified_at` survives, the instance asserts a person controls an
+   address they may never have owned — and password reset, the next thing built on
+   this, would mail a stranger's reset link. The derived property is the defence;
+   a bare boolean is the bug.
+5. **A token must not verify a different address than it was minted for.** Without
+   the `email` binding on the token, mint → admin changes the address → click the
+   old link verifies the new address without it ever being proven.
+6. **Mail-client prefetch can consume a single-use token.** Link scanners and
+   prefetchers `GET` verification links. A token consumed by a scanner leaves the
+   human with a used link and no account. Mitigated by the resend route and by
+   making the verify endpoint idempotent about *showing* the already-verified
+   state, but it is a real friction and the copy must handle "already used"
+   gracefully rather than as an error.
+7. **The generic login error hides the one recoverable failure.** See *Shape*.
+8. **`_instance` (R111) must never be asked for an address and must never be
+   gated into existence-one.** It is infrastructure, not a member. The partial
+   index keeps it legal; the signup path never creates it; nothing should prompt it.
+9. **Do not widen `is_active`.** R102b's tests exist for this. Repeated here
+   because `user_can_authenticate` is the obvious seam and `is_active` is the
+   obvious thing to edit inside it, and that specific edit is the one that breaks a
+   pinned contract.
+
+### Increments
+
+Four, each ending green and committed.
+
+1. **§2F-1 — model and token, no mail, no gate.** `User.email_verified_at`,
+   `User.verified_email`, the derived `email_verified` property, `email`
+   normalisation in `save()`, the partial unique index, `EmailVerificationToken`
+   with `mint`/`lock_live`/`consume`/`is_live`/`unusable_reason`, the migration,
+   and tests. Nothing sends and nothing is gated.
+2. **§2F-2 — the send path.** `social/verify.py` (decide, guard, mint, enqueue),
+   `social/tasks.py` (send on the worker, record the outcome on the token), the
+   email template, the console-backend guard at signup, the single
+   `send_verification_email()` helper wired into the three creation routes, tests.
+   Still no gate — the instance behaves exactly as before apart from mail.
+3. **§2F-3 — the gate and the routes.** Custom auth backend, the login page
+   distinguishing unverified from wrong-password, `GET /account/verify/<token>/`,
+   the logged-out rate-limited `POST /account/verify/resend/`, signup stops
+   logging in, the unverified banner, the `UserAdmin` read-only status line plus
+   the token inline (the R116 `report_email_status` pattern), tests.
+4. **§2F-4 — live proof.** Real SMTP, end to end, from the received message.
+
+### Verification plan
+
+**Suite (locmem, no credentials).** Required-vs-blank at the form boundary; the
+partial index accepts many empties and rejects a duplicate non-empty; case
+normalisation defeats `Foo@` vs `foo@`; the derived property goes false when the
+address moves; a token cannot verify an address other than the one it was minted
+for; mint supersedes a prior live token; single-use refuses the replay; expiry
+refuses at 73 hours and passes at 71; `lock_live` outside a transaction behaves;
+the auth backend refuses an unverified user and admits a verified one; the login
+form distinguishes the two failures; the resend cooldown refuses inside the window
+and admits outside it, with identical copy either way; signup does not
+authenticate; the console-backend guard fires at signup.
+
+**Live (real SMTP, credentials already in `.env`).** Prove from the **received
+message**, never a status code: the link actually followed, then the verified state
+read out of the database. Prove single-use by replaying the same link and showing
+the replay refused. Prove expiry by backdating `expires_at` past the window and
+showing refusal. Prove the cooldown by asking twice inside the window. Prove the
+gate by trying to sign in before verifying and after. **State plainly which parts
+are mock-only vs live-proven**, as §2E did.
+
+**Note on which account the live proof runs as.** `witness` (124) has no address
+and locks out under R119. The live proof therefore needs a **verified** account,
+which needs a unique receivable address — `minnix@minnix.dev` is taken by user 1
+and `danny@minnix.dev` by `warden`. Either a third address on the mail server, or
+rebuild the instance with fresh verified test accounts. The owner has said the
+instance is rebuildable at will, so this is a setup task, not a blocker.
+
+### Out of scope here
+
+- **Password reset.** Still its own increment. R118 is what unblocks it — an
+  address that is unique *and* verified is what makes a reset link trustworthy —
+  but building it here would double this increment and mix two token purposes.
+- **One-click unsubscribe.** R121. Belongs to the staff report mail, with its
+  logged-out / prefetch-unsafe / one-click threat model, not to this one.
+- **Any change to `notify()`, the notification ledger, or `Kind`.** R99 holds.
+- **Any change to `is_active`.** R102b holds.
+- **A general rate limiter or the antispam work `PLAN.md` §5 describes.** R122
+  puts a narrow floor under the one endpoint this increment creates. It is not the
+  antispam system and must not be read as it.
+- **Self-service email editing.** `ProfileForm` still has no `email` field; the
+  address stays admin-editable. R123 means a member who cannot receive mail has
+  no self-service path and no admin override, which is the accepted cost of
+  token-click-only provenance.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -3903,3 +4178,15 @@ not an optimisation.
 - **R116 — The staff report-email toggle lives in Django `UserAdmin`, not a self-service preferences page (owner decision 2026-09-29, taken while speccing §2E).** The admin sets and clears it in the same `UserAdmin` Roles fieldset where they grant `is_moderator`. **Why:** R100 already established that the site admin grants moderation there and that a moderator cannot reach that form at all, so putting the notification behaviour beside the grant keeps one place where a moderator's whole capability is visible and auditable — and this instance has no notification-preferences page, so the alternative was a new page rather than a move. **What it means in practice:** a moderator who wants to stop receiving report emails asks the site admin. **How to apply:** this is a scoping decision, not a statement that self-service is wrong. Mastodon renders the toggle in `/settings/preferences/notifications` gated on `can?(:manage_reports)`, and if staff ever need to opt themselves out without asking, that is a legitimate later increment — but it must not be treated as missing from this one. Do not solve the self-service question by loosening who can reach `UserAdmin`; that reverses R100 for a convenience.
 
 - **R117 — Staff report mail is sent as the site admin's own mail address, not a role address (owner decision 2026-09-29, taken when the first live send was refused).** `DEFAULT_FROM_EMAIL` is `minnix@minnix.dev`, deliberately equal to `EMAIL_HOST_USER`, minted by the new `EMAIL_SENDER_NAME` + `EMAIL_SENDER_DOMAIN` pair. **Why:** the owner's mail server enforces `554 5.7.1 Sender is not same as SMTP authenticate username`, so the From address and the authenticated SMTP user must agree — and the instance's own host is not the mail account's domain (`reeltalk.minnix.dev` vs `minnix.dev`), which made the pre-2E `admin@<instance host>` unsendable here. Given the choice between sending as himself, creating a role alias on the mail server, and provisioning a dedicated app SMTP account, the owner took the one needing no mail-server work. **How to apply:** those two env keys are the whole mechanism, and a role address later is a mail-server task, not a code task — add `reeltalk@minnix.dev` (or `moderation@…`) as an alias of the admin's existing account and point the two keys at it. `EMAIL_SENDER_DOMAIN` unset falls back to `DOMAIN_HOST`, which reproduces the pre-2E value byte for byte, so an operator on a server with no anti-spoof rule sets nothing and sees no change. Do not reintroduce a hardcoded `admin@` sender: on any host that authenticates and enforces the sender match it fails every send, and it fails in the worker, where it reads as a broken task instead of a missing setting.
+
+- **R118 — Email is required at signup and unique when set (owner decision 2026-09-29, taken while speccing §2F).** This discharges the deferral that `social/models.py:119` has carried since R12 — *"email optional and non-unique until password reset needs it"* — and the owner took the strong option over the two softer ones offered. **Why:** an address that is neither required nor verified is not an address at all, it is a string somebody typed; every downstream feature that trusts it (verification now, password reset next) inherits that untrustworthiness, and retrofitting uniqueness onto an instance that has been accepting duplicates for a year is a data-cleanup project rather than a migration. Doing it here, at 3 addresses and zero duplicates, costs almost nothing. **Shape:** *"required"* is enforced at the form boundary and *"unique"* is enforced in the database as a **partial** index over non-empty values — collapsing the two layers breaks the migration, because a full unique index cannot be built over the three `email=''` rows that exist on the live DB today. Normalised `strip().lower()` in `save()`, the `LinkDomain` way, because uniqueness without case-folding is not uniqueness. **How to apply:** this amends R12 and R13's deferral and the in-code comment that records it — that comment must be updated when the increment lands, not left to contradict the schema. `_instance` (R111) stays legal precisely because the index is partial: infrastructure must never need an address. The owner chose this **knowing** it makes the 3 existing blank-address accounts non-conformant, and accepting it because the instance is disposable test data.
+
+- **R119 — An unverified account cannot sign in. No exceptions, admin included (owner decision 2026-09-29).** The owner was offered an exemption for `is_superuser` on the same reasoning that produced R114 — the admin is the root of trust and must never be locked out by a configuration state — and **declined it**. **Why it is not the brick R114 was written to prevent:** R122's resend route works without a session, so an admin who cannot sign in can still resend to themselves and get in. The residual failure is "SMTP is fundamentally not working", which is a deployment fault that shouts via 2E's `console_backend_active()` rather than failing silently, and is fixed at the host. **The one place it bites is first run:** `setup()` creates the admin and calls `login()`, which is now refused, and the wizard has already vanished because `has_admin()` is true — so `EMAIL_*` must be configured in `.env` **before** the wizard runs, or the first admin needs host-level intervention. That is stated in §2F as a deploy note rather than discovered mid-setup. **Shape:** enforced in a custom `ModelBackend` subclass overriding `user_can_authenticate`, **never** by widening `is_active` — R102b pins that property to suspension and ban with tests written for exactly this purpose, and folding verification into it would merge three unrelated refusals into one indistinguishable state. Because `get_user()` calls `user_can_authenticate` on every request, this carries the same *"existing sessions are cut on the next click"* property R102b got for suspension, with no middleware. **How to apply:** the pairing to remember is R119 + R122 — the gate is only acceptable because the recovery path exists. If a future change removes or breaks the resend route, it re-creates the lockout-with-no-exit that R114 deleted, and must not be made without the owner.
+
+- **R120 — Verification token: 72 hours, strictly single-use, mint supersedes prior live tokens, bound to the address it was minted for (owner decision 2026-09-29, with the three semantics carried as a package).** **Why 72 hours:** short enough that a credential sitting in a mailbox is not live for a week, long enough that someone who checks mail a day later still gets through; a shorter window was rejected because a verification mail landing over a weekend would read as expired by Monday, and a longer one because the token is a credential delivered over a transport that may be plaintext-capable. Resend is cheap, which is what makes a short TTL affordable at all. **Why the other three are not optional:** single-use because the token grants control over the account's address, and a token that survives its own use is a permanent credential; supersede-on-mint because otherwise N live tokens accumulate per user and "single-use" means nothing when nine of them work; address-binding because without it the sequence *mint → admin changes the address → click the old link* verifies an address that was never proven. **Shape:** the `Invite` shape (`code` unique/64/non-editable, `created_at`, `expires_at`, `used_at`, `is_live`, `mint()`, `lock_live()`, `unusable_reason()`) with two named substitutions — `user` replaces `created_by` because verification has one subject where an invite has two parties, and `email` replaces `used_by` because the consumer is the same account by construction so that field carries no information, while the address binding is the thing this flow actually needs. **How to apply:** the substitutions are deliberate, not drift. If a future flow needs a second party on a verification token, that is a different object and should say so rather than reusing this one.
+
+- **R121 — §2F is verification only; one-click unsubscribe and password reset each stay in their own increment (owner decision 2026-09-29).** The bundling argument was real — same signed single-use token machinery — and was declined. **Why:** the unsubscribe gap 2E flagged belongs to the **staff report mail**, not to the member verification mail, and the two threat models differ in kind rather than in degree. Verification is a logged-in member proving an address they already control. Unsubscribe is a **logged-out** recipient clicking once from a mail client that may prefetch or virus-scan the link, with no session, no CSRF posture, and no second factor. Putting both in one token table means every consume must check `purpose` or a verification link silently becomes an unsubscribe link — a cross-purpose replay that is invisible until it bites. **How to apply:** R116 already framed staff self-service opt-out as a legitimate later increment; this confirms rather than reverses it. When unsubscribe is built, it should be built against the staff mail's requirements, and a separate token object with a separate route is the shape that keeps the two from being confusable. Password reset stays out for a different reason: R118 is what unblocks it, but building it here would double the increment and mix two token purposes in one flow.
+
+- **R122 — Recovery is a logged-out, rate-limited resend route (owner decision 2026-09-29).** Of the three shapes offered (logged-out resend, admin-only resend, a post-signup holding state that keeps the user authenticated but confined) the owner took the logged-out resend. **Why:** under a mandatory gate the user whose verification mail is lost is **not signed in**, so every authenticated surface is unreachable by definition — a resend that requires login cannot rescue the exact case it exists for. The holding-state alternative would mean building a confined authenticated surface to avoid the unauthenticated endpoint, which is more new code than the endpoint and is a different product from "cannot sign in". **Shape:** the cooldown is the token table itself — refuse when a live token for that address was minted less than N minutes ago. No new table, no rate-limit dependency, and it cannot be bypassed by clearing cookies because it is keyed server-side on the address rather than on a client token. Response copy is identical whether or not the address exists: *"If that address has an account here, a verification link is on its way."* **The cost is named:** this creates an unauthenticated mail-send endpoint, which is exactly the class of surface R107 warned about. A 5-minute per-address cooldown still admits roughly 288 mails a day to one address from a determined caller. **How to apply:** this is a floor under the abuse surface §2F creates, not the antispam system `PLAN.md` §5 describes, and must not be read or extended as though it were. R119 depends on this route existing and working; breaking it breaks the safety of the gate.
+
+- **R123 — No hand-verify: the admin may trigger a verification email but may never flip the verified state (owner decision 2026-09-29).** The owner took stronger provenance over the onboarding convenience. **Why:** if a verified flag can be set by hand, then "verified" no longer means *"the holder of this mailbox clicked a link we sent"* — it means that or *"an admin set it"*, and every downstream trust decision built on it (password reset above all) has to account for which one it got. Making the click the only writer keeps that meaning single. **What it costs, accepted knowingly:** a member who genuinely cannot receive mail — dead mailbox provider, filtered domain, no access to the address — has **no** path onto the instance. There is no self-service email edit (`ProfileForm` carries no `email` field) and no admin override, so the only routes are fixing the mail or a code change. **How to apply:** `UserAdmin` shows verification state read-only beside the address, following the R116 `report_email_status` pattern, plus a send-verification action and an inline of the user's tokens with their state and last error — so the admin can see exactly what happened and why it failed, and still cannot make it have succeeded. If a future requirement needs a manual override, it needs the owner and it needs to say what "verified" means afterwards.
