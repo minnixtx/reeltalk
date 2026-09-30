@@ -3680,6 +3680,123 @@ before any code was written. None follow from the code; they are product choices
   onboarding convenience, accepting that a member who genuinely cannot receive
   mail is not onboardable without a code change.
 
+### Peer precedent — Mastodon 4.7.2, read off the live tree 2026-09-29
+
+`/home/mastodon/live` at `v4.7.2` (`3987b9fd62`), `devise 5.0.4`
+(`Gemfile.lock:195`). Read on the live tree, not a tag. **Four findings change
+this spec and are folded into *Shape* below; three record divergences we are
+choosing deliberately so nobody later "corrects" us toward a peer we are not
+following.**
+
+**1. Mastodon does NOT gate sign-in on confirmation. R119 is stricter than the
+peer, and that must be on the record.** Stock Devise refuses an unconfirmed
+sign-in (`devise/confirmable.rb:144`: `super && (!confirmation_required? ||
+confirmed? || confirmation_period_valid?)`). Mastodon **throws that method away**:
+
+```ruby
+# app/models/user.rb:221-223
+def active_for_authentication?
+  !account.memorial?
+end
+```
+
+Defined on `class User` itself with no `super` and no `prepend`, so it wins over
+the included module and **Devise's confirmable check is dead code for `User`**.
+Confirmation is instead a **capability** gate one layer up — `functional?`
+(`user.rb:225`) behind a global `before_action :require_functional!, if:
+:user_signed_in?` (`application_controller.rb:30`). **So the option the owner
+declined at R119 is precisely what Mastodon does.** We are not aligned with the
+peer here and should not be "fixed" toward it.
+
+**2. Mastodon's gate carries explicit exemptions for the recovery surfaces — and
+that is the mechanism our §2F-3 needs.** The gate is global, and the pages an
+unconfirmed user *must* reach are carved out of it individually:
+`Auth::SetupController` skips it entirely (`setup_controller.rb:10`, so the user
+can change their address and re-request the link), `Auth::RegistrationsController`
+skips it `only: [:edit, :update]` (`registrations_controller.rb:20`), and
+`Auth::SessionsController` skips it (`sessions_controller.rb:12`) *"so the gate
+can't bounce you out of the login flow itself."* **A mandatory gate without
+carved-out recovery surfaces is a gate on your own escape route.** Our verify /
+resend / login surfaces must be exempt by name, not exempt by accident of being
+logged-out-only.
+
+**3. Our per-address-only cooldown is sprayable. Mastodon limits both axes.**
+`config/initializers/rack_attack.rb:124-142` runs four throttles over the same
+flows: **25 / 5 min per IP**, **5 / 30 min per target email**, 5 / 10 min per
+setup-page email, 5 / 10 min per account. A cooldown keyed only on the target
+address does not throttle an attacker cycling through *many* addresses — which is
+the cheap direction for an abuse caller. **Amendment in *Shape*: the resend route
+needs a per-IP limit alongside the per-address one.**
+
+**4. Mastodon resets the session across the confirmation boundary; we must too.**
+`Auth::ConfirmationsController#show` (`confirmations_controller.rb:17-23`)
+captures the session, calls `reset_session`, then restores it minus `session_id`
+before delegating to `super`. This is anti-session-fixation across a privilege
+transition: confirmation changes what the account *is*, so the session that
+arrived with it should not survive unchanged. **We have no equivalent in the
+draft and it belongs in §2F-3.**
+
+**5. Divergence: token lifetime.** Mastodon's `config.confirm_within` is
+**`2.days`** (`config/initializers/devise.rb:226`) — the only place it is set;
+there is no `confirm_within_days` in `settings.yml` at all. R120 says 72 hours.
+**We are 50 % longer than the peer deliberately**, and the reason is R122: a
+resend that actually works makes a longer window cheap, and 48 h is the window
+most likely to expire over a weekend before a member opens the mail.
+
+**6. Divergence: our token shape is stronger than Mastodon's, and the difference
+is an audit property.** Mastodon stores **one raw token on the user row**
+(`users.confirmation_token`, unique index `schema.rb:1429`) and **never clears it
+on confirm** — `Devise::Confirmable#confirm` (`confirmable.rb:79-103`) writes
+`confirmed_at` and touches nothing else. Single-use is a *state check*
+(`pending_any_confirmation`, `:237-244`), not invalidation. Worse for audit:
+`generate_confirmation_token` **short-circuits and reuses the same token while it
+is still live** (`:249-251`), so five resends email **the same URL five times**.
+A leak from any of the five copies *is* the live credential, and nothing records
+which copy was clicked. R120's **mint-supersedes** gives us a distinct credential
+per send with a row per send: a leaked stale token is dead, and the table says
+which one was used. That is the reason for the token table rather than a column,
+stated now rather than reverse-engineered later. (Mastodon forces rotation in
+exactly one place, the admin path: `Admin::ChangeEmailsController:18-22` nils
+the token to trip the generator.)
+
+**7. R121 is validated by the peer, concretely.** Mastodon's
+`confirmation_instructions` and `reconfirmation_instructions` templates carry
+**no one-click unsubscribe link at all** — only the "Change email preferences"
+link. `@unsubscribe_url` is set by exactly two mailers, `NotificationMailer:57`
+and `EmailSubscriptionMailer:52`, and the mailer layout renders the link only
+`if defined?(@unsubscribe_url)` (`layouts/mailer.html.haml:85-89`). Transactional
+confirmation mail is not unsubscribable, by design. **And the gap 2E flagged maps
+exactly onto the mailer that DOES have it**: our staff report mail is the analogue
+of `NotificationMailer`. So the gap is real, is in the mail R121 excludes, and is
+not in the mail §2F ships.
+
+**8. Our enumeration worry was aimed at the wrong path.** Mastodon does **not**
+collapse its verify-path error copy — it emits four distinguishable messages
+(blank / `confirmation_token is invalid` / `confirmation_period_expired` /
+`already_confirmed`, `devise.en.yml:110-111`) and mitigates at the **rate**
+layer plus an optional captcha interposed on the confirm click itself
+(`confirmations_controller.rb:12`, bypassed when the user is already confirmed,
+`:63-65`). The reason that is safe: **the token space is unguessable
+(`Devise.friendly_token`, ~116 bits), so a differentiated response tells an
+attacker nothing they did not already have — they must already possess a token to
+get one.** Enumeration risk lives on the path where you submit an **address**,
+not a token. **So R122's "identical copy either way" is the requirement that
+matters, and the verify-link path is free to be specific** — telling someone who
+holds a real expired token that it expired is a kindness, not a leak.
+
+**9. Worth taking and not yet in our design: the tamper alert on an address
+change.** Mastodon's reconfirm flow parks the new address in `unconfirmed_email`,
+force-resets `email` to the persisted value, and sends the confirmation to the
+**new** address only — while the **old** address gets a dedicated tamper alert
+(`config.send_email_changed_notification = true`, `devise.rb:207`;
+`UserMailer#email_changed`, `user_mailer.rb:55-63`: *"The email address for your
+account is being changed to… If you did not change your email, it is likely that
+someone has gained access to your account."*) **On ReelTalk the only party who
+can change an address is the site admin** (no self-service edit), which makes the
+alert *more* valuable, not less: a member should learn that their address moved
+rather than discovering it when mail stops arriving. Surfaced as a decision, not
+silently added.
+
 ### The sharpest edge, recorded rather than smoothed over
 
 R119 reproduces the *shape* of the risk R114 was written to kill: a state where
@@ -3777,12 +3894,44 @@ the password that the account is unverified. That leak is taken deliberately —
 requires a valid password, which is a far weaker position than address
 enumeration, and the UX cost of hiding it is a support dead-end.
 
-**The resend cooldown is the token table itself.** Refuse when a live token for that
-address was minted less than N minutes ago. No new table, no new dependency, no
-rate-limit library — and it cannot be bypassed by clearing cookies because it is
-keyed server-side on the address. Response copy is identical whether or not the
-address exists: *"If that address has an account here, a verification link is on
-its way."*
+**The resend cooldown is the token table itself — but per-address alone is not
+enough.** Refuse when a live token for that address was minted less than N minutes
+ago: no new table, no new dependency, no rate-limit library, and it cannot be
+bypassed by clearing cookies because it is keyed server-side on the address.
+**Per the peer read, that is one axis of two.** A cooldown keyed only on the
+target address does not throttle a caller cycling through *many* addresses, which
+is the cheap direction for abuse — Mastodon runs **25 / 5 min per IP** alongside
+**5 / 30 min per target address** (`rack_attack.rb:124-134`). **So the resend
+route needs a per-IP limit as well as the per-address one.** Response copy is
+identical whether or not the address exists: *"If that address has an account
+here, a verification link is on its way."*
+
+**The verify-link path is free to be specific; the address-submission path is
+not.** Because the token is unguessable (`secrets.token_urlsafe(32)`, ~192 bits),
+a caller cannot reach a verify endpoint's error message without already holding a
+token — so distinguishing *invalid* / *expired* / *already used* there leaks
+nothing that the response's recipient was not already entitled to know. Telling
+someone whose real token expired that it expired, with a link to get a new one, is
+the difference between a recoverable annoyance and a dead end. The enumeration
+surface is the one where you submit an **address** and learn whether it is
+registered, and that is the one R122's uniform copy closes.
+
+**Recovery surfaces must be exempt from the gate by name, not by accident.**
+Mastodon's gate is global and every page an unconfirmed user must reach is carved
+out of it explicitly — including the sign-in page itself, *"so the gate can't
+bounce you out of the login flow itself"* (`sessions_controller.rb:12`). Our
+verify route, resend route and login route must be listed as exempt deliberately.
+If the gate is implemented in `user_can_authenticate` as planned it does not
+intercept those logged-out routes by construction, but "by construction" is the
+kind of thing that stops being true the day someone adds a `login_required` to the
+resend view; naming the exemption makes the dependency visible.
+
+**Reset the session across the confirmation boundary.** Confirmation changes what
+the account *is*, so the session that arrived with it should not survive
+unchanged. Mastodon captures the session, calls `reset_session`, and restores it
+minus `session_id` before confirming (`confirmations_controller.rb:17-23`) —
+anti-session-fixation across a privilege transition. We have no equivalent yet
+and it belongs in §2F-3.
 
 **This cooldown is a floor, not a ceiling, and R107 says why.** R107 established
 that dedup is not rate limiting and that antispam is separate, still-unbuilt work.
@@ -3848,9 +3997,12 @@ Four, each ending green and committed.
    Still no gate — the instance behaves exactly as before apart from mail.
 3. **§2F-3 — the gate and the routes.** Custom auth backend, the login page
    distinguishing unverified from wrong-password, `GET /account/verify/<token>/`,
-   the logged-out rate-limited `POST /account/verify/resend/`, signup stops
-   logging in, the unverified banner, the `UserAdmin` read-only status line plus
-   the token inline (the R116 `report_email_status` pattern), tests.
+   the logged-out rate-limited `POST /account/verify/resend/` (**both axes:
+   per-address and per-IP**), the session reset across the confirm boundary, the
+   named exemptions keeping verify / resend / login reachable through the gate,
+   signup stops logging in, the unverified banner, the `UserAdmin` read-only
+   status line plus the token inline (the R116 `report_email_status` pattern),
+   tests.
 4. **§2F-4 — live proof.** Real SMTP, end to end, from the received message.
 
 ### Verification plan
