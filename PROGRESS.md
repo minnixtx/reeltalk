@@ -35,6 +35,8 @@
 
 > **✅ Moderation increment 3 — the delete action and the target guard — is DONE, gate-verified, deployed, and peer-proven against the real Mastodon 4.7.2 (2026-09-27/28).** `Report.Action.DELETE_STATUS` + `moderation.0002_alter_report_action`, `delete_reported_status()` following `dismiss_report`'s shape (resolve the whole pile with who/when/what/note, then soft-delete), `can_act_on()` as the target-side guard, `POST /moderate/<id>/delete-status/`, and the queue card carrying `can_delete` computed from the acting user so the template reads a boolean and never decides a permission. **This is the first moderation action that federates.** Gate **`1468 passed + 5 skipped`** (baseline 1407; **+61 = 59 new tests in `tests/test_moderator_delete.py` + 2 clean-room params** for that file and the new migration), `makemigrations --check` clean, `ruff check`/`format` clean, non-vacuity proven by **five** mutations of `can_act_on`, one clause at a time, each restored byte-identical. **Four findings worth more than the code.** (a) **The mirrored-author broadcast would have 500'd after the damage.** A mirror's `private_key` is `""` by construction, `load_private_key("")` raises `ValueError`, and the delivery loop catches only `requests.RequestException` — so an unconditional broadcast deletes the post, closes the report, *then* throws. The view broadcasts only `if status.user.local`, with the hazard pinned at the primitive. (b) **A resolved report is not a live delete handle** — 404, because unlike dismiss a delete cannot be idempotent, and a report id must not stay a way to destroy a post after the decision about it was made. (c) **Two clauses of the guard are redundant, and the mutation pass is what said so rather than the code looking confident.** The self check turns zero tests red (every actor reaching it already holds a shielded flag) and is kept as declared defense-in-depth; and the `is_superuser` half was being covered by `create_superuser`'s own `is_staff=True` until a `bare_superuser` fixture made it bite on its own. (d) **R103b** — the owner settled the account model mid-increment: **three kinds, `is_staff` not among them**, and a moderator's reach is a regular user only, identically for delete, suspend and ban. **Live: 46/46 on the whole loop and 51/51 on the three-kind matrix**, both actor positions, sessions proven by `_auth_user_id`, absence checked at the read sites rather than the flag asserted, the notification ledger flat at 5 across the cycle (R99), and the admin position driven by a **minted probe superuser so the owner's `minnix` account was never logged in as** — teardown left sessions 29→29 and no probe marker anywhere. **Federation proved on Mastodon's own table**, not on our status code: 4 live rows → probe row → 3 live rows, originals untouched. **One bug flagged, deliberately not fixed here:** broadcasts sign their `keyid` from `request.scheme`, and `http://192.168.1.138:3030` is in `ALLOWED_HOSTS` + `CSRF_TRUSTED_ORIGINS`, so a moderator deleting over the LAN on plain HTTP signs a key no internet peer can resolve — it fails **quietly** (a WARNING in the delivery log, remote copy stays up, moderator sees "Post deleted."). The fix belongs to the scheme/trust layer, not to this increment.
 
+> **✅ 2F-1 — the email-verification model and token layer — is DONE and gate-verified (2026-09-30). Nothing sends and nothing is gated.** `User.email_verified_at` + `User.verified_email` with `email_verified` **derived** from the pair, so an admin address edit invalidates verification with no save hook and nothing to forget; `email`/`verified_email` normalised `strip().lower()` in `save()` the `LinkDomain` way; the **partial** unique index `unique_email_when_set` (`~Q(email="")`), because a full `unique=True` cannot be built over the three address-less rows the live DB holds; and `EmailVerificationToken` on the `Invite` shape with R120's two named substitutions — `user` for `created_by` (one subject, not two parties) and `email` for `used_by` (the consumer is the same account by construction, so what this flow needs is the **address binding**) — plus `mint`/`lock_live`/`consume`/`is_live`/`unusable_reason`, 72h TTL, single-use, mint-supersedes. `consume()` writes **both** halves in one transaction and raises `AddressMismatchError` when the account's address has moved, so a link sent to a typo can never verify the correction. **One field added past the spec's list, flagged not slipped:** `superseded_at`. R120's supersede clause cannot live in `used_at` (that would make a resend read as a click, destroying the meaning R123 protects), in `expires_at` (the copy would lie), or by deleting the row (contradicts the spec's own "a row per send"). **`mint()` refuses an address-less account** because a token bound to `""` would satisfy `verified_email == email` and read as verified on nothing — a live trap on this schema, not a theoretical one, since the partial index exists precisely to allow blanks. **The increment's own boundary is pinned, not asserted:** an unverified member still authenticates through `ModelBackend`, `is_active` is unmoved by verification (R102b intact), and `UserAdmin` was checked rather than assumed — its explicit `fieldsets` mean the two new columns are **absent** from the admin form rather than editable, which is what keeps R123's no-hand-verify true. **2E trap 3 retired** (owner decision): `test_two_staff_sharing_one_address_are_two_recipients` was the only failure in the first gate run, killed by `unique_email_when_set` doing exactly what it was added to do; the shared-address state is now unconstructible, so the trap is closed by the schema rather than handled by the code. Gate **`1838 passed + 5 skipped`** (baseline 1804 + 5; **+34 = 33 new tests + 2 clean-room params − 1 retired test**), `ruff check` / `format --check` clean, `makemigrations --check` clean. **Not done by scope:** no send path, template, console guard, `change_email()`, auth backend, routes, or `SignupForm` change — the instance behaves exactly as it did before. Full record in §2F.
+
 | Area | State |
 |---|---|
 | M0 — functional spec, license audit, dev environment | ✅ Done 2026-09-05, verified (stack healthy, site on :3030, pytest green, ruff green) |
@@ -3468,6 +3470,14 @@ objection before the increment starts rather than during it.
 3. **Email is not unique.** Two staff can share an address, and nothing prevents
    it today. Do not assume one user per address, and do not let this increment
    make uniqueness a de facto requirement.
+   **[RETIRED by R118 in 2F-1, 2026-09-30.]** The premise is gone:
+   `email` now carries a partial unique index over non-empty values, so two
+   accounts cannot share an address at all. The trap is closed by the schema
+   rather than handled by the code, which is stronger than the tripwire that
+   stood here. `test_two_staff_sharing_one_address_are_two_recipients` was
+   deleted with a note at its site; per-account delivery (one message per
+   moderator) is still covered by
+   `test_the_recipient_set_never_diverges_from_may_moderate`.
 4. **Never email the reporter.** Obvious in hindsight, and exactly the kind of
    thing a recipient-set helper gets wrong.
 5. **Keep the email short — a pointer, not a mirror of the queue.** Link, target,
@@ -4113,6 +4123,131 @@ parked across three increments.
   address stays admin-editable. R123 means a member who cannot receive mail has
   no self-service path and no admin override, which is the accepted cost of
   token-click-only provenance.
+
+### Executed — 2F-1 is DONE, gate-verified; nothing sends and nothing is gated (2026-09-30)
+
+**What landed.** `social.User.email_verified_at` (nullable) and
+`social.User.verified_email`, with `User.email_verified` **derived** from the
+pair rather than stored; `email` and `verified_email` normalised
+`strip().lower()` in `User.save()`, the `LinkDomain` way; the partial unique
+index `unique_email_when_set` (`condition=~Q(email="")`);
+`EmailVerificationToken` in `reeltalk/social` on the `Invite` shape —
+`code` (unique/64/non-editable, `secrets.token_urlsafe(32)`), `created_at`,
+`expires_at`, `used_at`, `is_live`, `live()`, `mint()`, `lock_live()`,
+`consume()`, `unusable_reason()` — with R120's two named substitutions
+(`user` for `created_by`, `email` for `used_by`);
+`AddressMismatchError(ValueError)`; `EMAIL_VERIFICATION_TTL_HOURS = 72`;
+migration `social.0015_emailverificationtoken_user_email_verified_at_and_more`.
+The stale `models.py` comment that had carried R12's deferral since M1 was
+replaced rather than left to contradict the schema, as R118 requires.
+
+**One field added beyond the spec's list, and why it was not optional.** The
+Shape section names `code`/`created_at`/`expires_at`/`used_at`/`is_live` and
+the five methods, but R120's *supersede* clause needs somewhere to live that
+none of those can honestly hold:
+
+- **Deleting** prior live tokens at mint contradicts the spec's own
+  "a row per send" — the audit trail R123's admin token inline reads would
+  lose every send but the last.
+- Setting **`used_at`** would destroy exactly the meaning R123 protects.
+  `used_at` means *a human clicked this*. A resend is not a click, and
+  making the admin's inline view unable to tell them apart defeats its
+  purpose.
+- Backdating **`expires_at`** makes `unusable_reason()` say "expired on
+  &lt;date&gt;" about a token that was replaced, which is a copy lie to the
+  one person trying to debug why a member is stuck.
+
+So `superseded_at` is its own nullable column, and `is_live` reads all three
+(`used_at`/`superseded_at`/`expires_at`). It also keeps the invariant
+`is_live ⟺ unusable_reason() is None`, which `lock_live()` depends on: filter
+on one and report the other, and a drift means a token refused with no reason
+given. **Flagged rather than slipped in** because it is the one place the
+increment went past what the spec enumerated.
+
+**`consume()` writes both halves, deliberately.** It marks the token spent
+*and* stamps `email_verified_at`/`verified_email` on the user, in one
+`transaction.atomic()`, and raises `AddressMismatchError` if the account's
+address is no longer the one the token was bound to. R123's claim is that
+every verified flag traces to a link actually clicked; that is only a
+property of the code if the two writes cannot be separated — the 2E "one
+call site, not several" lesson applied to a new write. Leaving the view to do
+both would mean a future caller could verify without spending, or spend
+without verifying.
+
+**`mint()` refuses an address-less account, which is not fussiness.** A token
+bound to `""` would satisfy `verified_email == email` for a user with no
+address at all, so consuming it would read as *verified* on nothing. Blank
+addresses are legal by design here — the partial index exists precisely to
+allow them — so the trap is live on this schema rather than theoretical. The
+guard is at the only writer rather than as an extra term in the derived
+property, which stays exactly the formula the spec wrote.
+
+**Nothing sends, nothing gates — pinned rather than asserted.**
+`test_an_unverified_account_still_signs_in` authenticates an unverified
+member through `ModelBackend` and passes, and
+`test_verification_does_not_widen_or_narrow_is_active` pins R102b:
+verifying moves `is_active` not at all, and suspending leaves `email_verified`
+untouched. `UserAdmin` needed no change and that was checked rather than
+assumed — it uses explicit `fieldsets`, so the two new columns are **absent**
+from the admin form rather than editable. Had they auto-appeared as editable
+inputs, the admin could have hand-set the verified state, which is the one
+thing R123 forbids.
+
+**2E trap 3 retired by R118** (owner decision this increment).
+`test_staff_report_email.py::test_two_staff_sharing_one_address_are_two_recipients`
+put two moderators on `shared@example.test` as a tripwire against the
+recipient query deduping by address. The partial unique index makes that
+state unconstructible, so the trap is now closed by the schema rather than
+handled by the code — a stronger position than the tripwire. The test is
+deleted with a note at its old site saying so, and the half that still
+matters (delivery is per-account, one message per moderator) remains
+covered by `test_the_recipient_set_never_diverges_from_may_moderate` with
+two moderators on two distinct addresses. **This was the only failure in the
+first gate run**, and it failed on `unique_email_when_set` — the constraint
+doing exactly what it was added to do.
+
+**Verified.** Gate **`1838 passed + 5 skipped`** against a baseline of
+1804 + 5 — **+34**, reconciled as 33 new test functions plus 2 clean-room
+parametrised instances (one each for the migration and the new test file),
+minus the one retired 2E trap-3 test. `ruff check` clean, `ruff format
+--check` clean (137 files), `makemigrations --check` reports **No changes
+detected**. Full log at `/tmp/gate-2f1-final.log`, exit markers read from
+inside the log; the first run is at `/tmp/gate-2f1.log` and shows the
+retired-test failure described above.
+
+**Suite coverage of the spec's list.** Required-vs-blank at the *form*
+boundary is not here — that is a `SignupForm` change and belongs to a later
+increment; 2F-1 changes no behaviour at any boundary. Covered instead:
+normalisation on save; a case variant of a taken address refused; three
+address-less accounts coexisting (the non-vacuity of the partial condition);
+the derived property false with an address but no proof, false with a proof
+and no timestamp, true only when they agree; **the property going false when
+the address moves, with the old proof left intact**; both sides normalised so
+a valid token is never refused on casing; token bound to the account address;
+`mint` refuses an address-less account; 72h TTL asserted against the literal
+number; supersede sets `superseded_at` and leaves `used_at` NULL; a spent
+token untouched by a later mint; one live token per account at a time; the
+`live()` queryset and the `is_live` property agreeing across all four states;
+expiry refused at 73h and admitted at 71h; replay refused at the lock;
+`lock_live` outside a transaction raising `TransactionManagementError`
+(the same non-vacuity test the invite shape carries); **a token minted for a
+typo'd address refusing to verify the corrected one, leaving the user
+unverified**; the consume stamping the pair at the same instant as the spend;
+CASCADE on account deletion; and the `__str__` readout naming which of the
+four states a token is in.
+
+**Not done, by scope.** No send path, no template, no console-backend guard,
+no `change_email()`, no auth backend, no routes, no login-copy change, no
+`SignupForm` required-email change. The instance behaves exactly as it did
+before this commit.
+
+**Deploy note.** `social.0015_…` needs applying on deploy like every prior
+migration — `docker compose build` (all three images, each its own tag),
+then `manage.py migrate`, then `up -d --force-recreate web worker`.
+`up -d` alone keeps running the image's old code; there is no bind mount.
+The migration adds two nullable/defaulted columns and one **partial** index,
+so it applies cleanly over the three address-less rows the live DB holds —
+which is the thing a full `unique=True` could not have done.
 
 ## 3. Host facts (this box)
 
