@@ -1,0 +1,28 @@
+Your email address on {{ site_name }} was changed
+
+The email address on the account @{{ localname }} has just been changed.
+
+  Previous address : {{ old_email }}
+  New address      : {{ new_email }}
+  Changed          : {{ changed_at }}
+
+This message is a notice only. It carries no link, and nothing in it can
+undo the change, confirm a new address, or reach any part of your account.
+Only the site administrator can change an address.
+
+Changing an address also clears the verified status of the account. Until
+the new address has been confirmed through a link sent to it, this account
+is treated as unverified.
+
+If you asked the site administrator to correct your address, you have
+nothing to do.
+
+If you did not ask for this change, contact the site administrator as
+soon as you can. This message is sent to your previous address precisely
+so that you find out about a change you did not make — a change like this
+moves every future email for the account, including anything used to
+recover access to it.
+
+This message deliberately contains no links. It is going to an address
+that may no longer be yours, and anything clickable in it would be
+something the person who changed your address could act on too.

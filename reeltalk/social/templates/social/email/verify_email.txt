@@ -1,0 +1,23 @@
+Verify your email address on {{ site_name }}
+
+You created the account @{{ localname }} with this address. Click the link
+below to confirm that you actually receive mail here:
+
+{{ verify_url }}
+
+The link works once and expires {{ ttl_hours }} hours after we sent it. If
+you ask for another one, this one stops working — use the most recent
+message we sent you.
+
+Until this is done, the address on your account counts as unverified.
+
+If the link says it has already been used and you did not click it, your
+mail provider may have opened it automatically while scanning the message.
+Nothing has gone wrong: ask for a new link and this one stays dead.
+
+If you did not create this account, you can ignore this message. Nobody
+can verify an address they cannot receive mail at, so nothing happens to
+your account either way.
+
+This is a verification notice, not a newsletter. It has no unsubscribe
+link because your account depends on receiving it.

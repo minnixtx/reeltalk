@@ -943,6 +943,33 @@ class EmailVerificationToken(models.Model):
     # Superseded rows are kept, not deleted, for the same reason: a row that
     # is gone explains nothing about the send it recorded.
     superseded_at = models.DateTimeField(null=True, blank=True)
+    # What came of actually mailing this (2F-2). Two facts and deliberately
+    # no stored status label — :attr:`send_state` below reads them, so the
+    # queued/sent/failed wording an admin is shown can never disagree with
+    # what happened. Same one-fact economy as ``email_verified`` and R93's
+    # unread timestamp.
+    #
+    # ``sent_at`` means **the transport accepted the message**, not that
+    # anybody received it. That is the honest ceiling on what a send can
+    # attest — R88's "`202 Accepted` is not delivery", which 2E trap 6 is
+    # built on — and it is stated here so the column name does not overclaim
+    # what the code behind it knows.
+    #
+    # Not redundant with ``created_at``. That is when the link was minted,
+    # which in the signup flow is the same second the account appeared.
+    # The mail can fail seconds afterwards, and the 2F-3 resend cooldown has
+    # to know which of the two it is counting from: keyed on ``created_at``,
+    # a send that never left the box still makes the member wait out a
+    # window for mail that never came. Keyed on ``sent_at``, a failed send
+    # costs them nothing.
+    sent_at = models.DateTimeField(null=True, blank=True, default=None)
+    # The failure, as one line. ``TextField`` rather than a bounded
+    # ``CharField`` because an SMTP diagnostic is precisely the thing that
+    # must not be cut short to fit: ``554 5.7.1 ... Sender is not same as
+    # SMTP authenticate username`` is the sentence that explained a whole
+    # broken deploy in 2E, and truncating it would amputate the part that
+    # names the cause.
+    send_error = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["-created_at"]
@@ -998,6 +1025,34 @@ class EmailVerificationToken(models.Model):
             and self.superseded_at is None
             and self.expires_at > timezone.now()
         )
+
+    @property
+    def send_state(self) -> str:
+        """``"sent"`` / ``"failed"`` / ``"queued"`` — read off the two facts.
+
+        Derived rather than stored, for the standing reason (R93, R102b,
+        ``email_verified``): a stored label is a third thing that has to be
+        kept in step with the two it summarises, and the failure mode of
+        forgetting is a row that says "sent" with ``sent_at`` empty — the
+        exact unreadable state this whole table exists to prevent.
+
+        The three are mutually exclusive because **one row is one send
+        attempt**. Every send mints a fresh row (R120's row-per-send) and
+        django-q does not re-run a task that raised, so a row is never
+        mailed twice and ``sent_at`` and ``send_error`` never both hold. If
+        a future change ever re-sends a row in place, this derivation is
+        the thing to revisit — not the columns.
+
+        Note what ``"queued"`` covers: it is both "not picked up yet" and
+        "never scheduled". The code cannot tell those apart from the row
+        alone, which is why the loud console-backend warning lives at enqueue
+        time in the request rather than being reconstructed from here.
+        """
+        if self.sent_at is not None:
+            return "sent"
+        if self.send_error:
+            return "failed"
+        return "queued"
 
     @classmethod
     def mint(cls, user) -> "EmailVerificationToken":

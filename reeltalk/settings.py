@@ -372,5 +372,20 @@ LOGGING = {
             "level": env.str("STAFF_EMAIL_LOG_LEVEL", default="INFO"),
             "propagate": False,
         },
+        # The member verification mail (2F-2), raised to INFO on its own for
+        # the same reason as the three above: root stays at WARNING, so
+        # without this the "Verification email sent to ..." line — the only
+        # record that a member was ever asked to prove their address — never
+        # reaches ``docker logs``. That would make the worst failure mode in
+        # this increment invisible: an account that was created, never got a
+        # link, and (once 2F-3 lands) cannot sign in, with nothing in the
+        # log to explain why. The console-backend guard and the R125
+        # address-change notice ride this same logger; the notice has no row
+        # of its own to record on, so this line is the entire record.
+        "reeltalk.social.verify": {
+            "handlers": ["console"],
+            "level": env.str("VERIFY_EMAIL_LOG_LEVEL", default="INFO"),
+            "propagate": False,
+        },
     },
 }

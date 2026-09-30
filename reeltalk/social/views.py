@@ -61,6 +61,7 @@ from reeltalk.notifications.models import Notification, notify
 
 from .forms import ProfileForm, SignupForm
 from .models import Invite, SiteSettings, User
+from .verify import send_verification_email
 
 
 def has_admin() -> bool:
@@ -129,6 +130,13 @@ def signup(request):
             password=data["password1"],
             display_name=data.get("display_name", ""),
         )
+        # Ask the new account to prove its address (2F-2). One helper rather
+        # than a send inlined at each of the three creation routes: three
+        # call sites is three places to forget, and forgetting here is silent
+        # — the account still appears, it just never gets a link. Nothing
+        # sends in this request; the guard that shouts when the backend
+        # cannot deliver is the only part that runs here.
+        send_verification_email(user)
         login(request, user)
         messages.success(request, f"Welcome, {user.localname}!")
         # New users land on the getting-started page (M6), not the feed.
@@ -149,6 +157,13 @@ def setup(request):
             password=data["password1"],
             display_name=data.get("display_name", ""),
         )
+        # Same single helper as signup (2F-2). The first-run wizard is the
+        # worst case for a silent non-send: this is the account that owns
+        # the instance, and PROGRESS §2F's deploy note says the mail config
+        # has to be in place before it runs, because with the console
+        # backend the guard shouts here — in the request the admin is
+        # standing in — rather than three increments later.
+        send_verification_email(user)
         login(request, user)
         messages.success(request, "Instance set up — you are now the admin.")
         return redirect("index")
@@ -241,6 +256,11 @@ def invite_accept(request, code):
             display_name=data.get("display_name", ""),
         )
         claimed.redeem(user)
+        # Inside the transaction on purpose (2F-2): the ``on_commit`` in the
+        # helper means the mail is only queued if the account and the
+        # invite's redemption both landed. A send scheduled before the
+        # commit could go out for an account that never existed.
+        send_verification_email(user)
     login(request, user)
     messages.success(request, f"Welcome, {user.localname}!")
     return redirect("welcome")

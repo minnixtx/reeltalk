@@ -22,6 +22,7 @@ from django.utils.html import format_html
 
 from .forms import LOCALNAME_RE
 from .models import Invite, LinkDomain, SiteSettings, User
+from .verify import change_email
 
 
 class InviteUserCreationForm(UserCreationForm):
@@ -176,13 +177,48 @@ class UserAdmin(admin.ModelAdmin):
             readonly.append("localname")
         return readonly
 
+    def save_model(self, request, obj, form, change):
+        """Route every address change through :func:`change_email` (R125).
+
+        The address is taken out of the plain save's hands entirely. The
+        row is written with the address it already had, and the submitted
+        one arrives only through ``change_email`` — the sole writer, which
+        fires the notice to the previous address from inside itself. The
+        alternative, letting ``form.save()`` write the new address and then
+        sending the alert from here, is what R125 rules out: an alert that
+        lives in the admin view is an alert that the next writer of the
+        field omits, and on this instance the notice is the only signal a
+        member ever gets that their mail now lands elsewhere.
+
+        Only the address gets this treatment. Every other field on the form
+        saves normally, so a profile edit that leaves the address alone
+        produces no write to it, no superseded tokens, and no notice.
+
+        The **add** path deliberately does not send. R124's admin-triggered
+        *send verification* action is 2F-3's surface; an admin creating an
+        account here is not the same act as a member signing up, and
+        giving the create form a side-effecting mail would put a second
+        unsolicited sender on the instance that nobody asked for.
+        """
+        if not change:
+            super().save_model(request, obj, form, change)
+            return
+
+        submitted_email = obj.email
+        obj.email = (
+            User.objects.filter(pk=obj.pk).values_list("email", flat=True).first() or ""
+        )
+        super().save_model(request, obj, form, change)
+        change_email(obj, submitted_email, changed_by=request.user)
+
     @admin.display(description="Report email delivery")
     def report_email_status(self, obj):
         """Say out loud whether the toggle above can actually do anything.
 
-        ``email`` is ``blank=True`` and not unique, so a moderator with the
-        ``report_email`` box ticked and no address on file receives nothing
-        — and the recipient query skips them silently, because skipping is
+        ``email`` is ``blank=True`` — unique only when set, per R118's
+        partial index — so a moderator with the ``report_email`` box ticked
+        and no address on file receives nothing, and the recipient query
+        skips them silently, because skipping is
         the only correct thing it can do. 2E trap 2's requirement is that
         the skip be **visible**: without this line the admin ticks a box,
         sees it saved, and has no way to know the mail will never go out.
