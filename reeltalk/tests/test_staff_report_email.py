@@ -278,28 +278,22 @@ def test_a_moderator_who_opted_out_is_skipped(member, accused, review, mod, mod2
     assert staff_email_recipients(report) == [mod2]
 
 
-def test_two_staff_sharing_one_address_are_two_recipients(member, accused, review, db):
-    """Trap 3. ``email`` is not unique and this path must not assume it is.
-
-    Both accounts get their own message — the per-account behaviour Mastodon
-    has. Nothing here collapses recipients by address, and nothing here would
-    break if two users shared one mailbox.
-    """
-    one = User.objects.create_user(
-        localname="twin1",
-        password="s3cretpass",
-        email="shared@example.test",
-        is_moderator=True,
-    )
-    two = User.objects.create_user(
-        localname="twin2",
-        password="s3cretpass",
-        email="shared@example.test",
-        is_moderator=True,
-    )
-    report, _ = file_against_status(member, review)
-    got = staff_email_recipients(report)
-    assert {u.pk for u in got} == {one.pk, two.pk}
+# NOTE — 2E trap 3 retired by R118 (2F-1, 2026-09-30).
+#
+# This file used to carry ``test_two_staff_sharing_one_address_are_two_recipients``,
+# which put two moderators on one address and asserted both got mailed. Its
+# job was a tripwire against the recipient query deduping by address — a real
+# hazard while ``email`` had no uniqueness rule, because two people in one
+# mailbox would have looked like one recipient.
+#
+# R118 put a partial unique index on ``email``, so the state that test built
+# cannot be created at all. The trap is now closed by the schema rather than
+# handled by the code, which is a stronger position than the tripwire was.
+# What still needs proving — that delivery is per-account, one message per
+# moderator — is covered by
+# ``test_the_recipient_set_never_diverges_from_may_moderate``, which uses two
+# moderators on two distinct addresses. Recorded here so the missing test
+# reads as a retired premise rather than an oversight.
 
 
 # --- D-c: the dedup -------------------------------------------------------

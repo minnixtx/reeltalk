@@ -27,6 +27,16 @@ from reeltalk.core.models import Film, Shelf, ShelfFilm, Status
 # rather than staying one forever.
 INVITE_TTL_DAYS = 7
 
+# A verification link stays open this long before it lapses (R120). The window
+# is a compromise between two failures that pull opposite ways: too long and a
+# credential sitting in a mailbox — a transport that may be plaintext-capable —
+# stays live for a week; too short and a member who checks mail once a day, or
+# whose link lands on a Friday, reads it as expired and gives up. 72h is the
+# second one priced down, and it is affordable only because R122's resend makes
+# a fresh token cheap. **Longer than the Mastodon peer deliberately** — its
+# ``confirm_within`` is 2 days; the divergence is recorded in PROGRESS §2F.
+EMAIL_VERIFICATION_TTL_HOURS = 72
+
 
 class AdminImmunityError(ValueError):
     """Raised when a ban or suspension is aimed at the site admin (R114).
@@ -46,6 +56,29 @@ class AdminImmunityError(ValueError):
     indistinguishable from a replay — the exact quiet failure this rule
     exists to prevent. A caller that means to allow this has to catch it
     by name and say so.
+    """
+
+
+class AddressMismatchError(ValueError):
+    """Raised when a verification token is spent on a different address (R120).
+
+    A verification token is not a generic "prove you are this account"
+    credential — it is proof of control over **one specific mailbox**, and
+    that address is recorded on the token when it is minted. The address on
+    the account can move afterwards: the site admin corrects a typo at the
+    member's request (R124), and R123 explicitly permits that, because
+    correcting an address is a different act from attesting it.
+
+    Without this guard the sequence *mint → admin corrects the address →
+    somebody clicks the old link* would mark the **new** address verified on
+    the strength of a link that was only ever sent to the old one. That is
+    the exact state R120's binding clause exists to make unreachable, and
+    the thing password reset — the next thing built on this — must not
+    inherit: a "verified" flag that attests an address nobody proved.
+
+    Raised rather than returned for the same reason as
+    :class:`AdminImmunityError`: the caller needs to distinguish "refused"
+    from "nothing to do", and a silent no-op here reads as success.
     """
 
 
@@ -114,9 +147,35 @@ class User(AbstractBaseUser, PermissionsMixin):
     # are stored as <preferredUsername>@<netloc>, which can exceed 30 chars.
     localname = models.CharField(max_length=255, unique=True)
     display_name = models.CharField(max_length=255, blank=True, default="")
-    # Not unique yet: password reset (later in M1) will need it; two users
-    # with no email must be possible until then.
+    # The member's contact address. **Required at signup and unique when set**
+    # since R118, which discharges the deferral this field carried from R12
+    # ("email optional and non-unique until password reset needs it") — the
+    # need arrived, and the owner took the strong option.
+    #
+    # The two halves live at different layers on purpose. *Required* is a
+    # form-boundary rule (``SignupForm``), because that is where a human can
+    # be told what is missing. *Unique* is a database rule, and it has to be
+    # a **partial** index — see ``unique_email_when_set`` in ``Meta`` below,
+    # which explains why a plain ``unique=True`` cannot be built over the
+    # empty-address rows a live instance already holds. Collapsing the two
+    # layers into one column definition is what breaks the migration.
+    #
+    # Normalised in ``save()`` rather than only in the form, because the
+    # uniqueness is worthless without case-folding and everything below the
+    # form bypasses it.
     email = models.EmailField(blank=True)
+    # When this account proved it can receive mail, and **which address** the
+    # proof was for (R118/R120). Two columns, not a boolean, because
+    # verification is always verification *of an address*, and the address
+    # can move afterwards.
+    #
+    # NULL means "never verified" — the same one-fact economy as
+    # ``suspended_at`` and R93's unread timestamp.
+    email_verified_at = models.DateTimeField(null=True, blank=True, default=None)
+    # The address that was actually clicked. Read together with
+    # ``email_verified_at`` by the ``email_verified`` property below; never
+    # consulted on its own, and never meaningful without the timestamp.
+    verified_email = models.EmailField(blank=True, default="")
     # HTML rendered from markdown at write time (§3.2), like Film.description.
     summary = models.TextField(blank=True, default="")
     # The markdown source of the summary (R18's raw-source pattern): the edit
@@ -268,9 +327,42 @@ class User(AbstractBaseUser, PermissionsMixin):
                 condition=models.Q(local=False),
                 name="unique_actor_url_for_remote_mirrors",
             ),
+            # One account per address, over the accounts that have one (R118).
+            #
+            # The condition is not cosmetic and cannot be dropped: a plain
+            # ``unique=True`` **fails to build on a live instance today**,
+            # because several rows carry ``email=''`` and a unique index
+            # cannot hold more than one empty string. Same device as
+            # ``unique_actor_url_for_remote_mirrors`` directly above, which
+            # is conditioned for exactly this reason.
+            #
+            # It also keeps ``_instance`` (R111) legal. That row is the
+            # signing identity for every outbound ``Flag``, not a member, and
+            # infrastructure must never be forced to hold an address it will
+            # never read.
+            models.UniqueConstraint(
+                fields=["email"],
+                condition=~models.Q(email=""),
+                name="unique_email_when_set",
+            ),
         ]
 
     def save(self, *args, **kwargs):
+        # Normalise the address before anything else (R118), the ``LinkDomain``
+        # way. Doing this here rather than only in the form is the whole point:
+        # a management command, a fixture, a data migration or a direct
+        # ``.create()`` bypasses every form, and without case-folding
+        # ``Foo@x.com`` and ``foo@x.com`` both land — one mailbox, two
+        # accounts, and a unique index that never fires.
+        #
+        # ``verified_email`` gets the same treatment because the verified
+        # state is a *string comparison* between the two. If only one side
+        # were folded, a legitimately verified address could read as
+        # unverified purely on casing.
+        if self.email:
+            self.email = self.email.strip().lower()
+        if self.verified_email:
+            self.verified_email = self.verified_email.strip().lower()
         creating = self.pk is None
         if creating and self.local and not self.private_key:
             # Every local user signs federation requests with its own key
@@ -329,6 +421,37 @@ class User(AbstractBaseUser, PermissionsMixin):
         raise so nobody rediscovers it in production.
         """
         return self.suspended_at is None and self.banned_at is None
+
+    @property
+    def email_verified(self) -> bool:
+        """Whether **the address on this account right now** has been proven.
+
+        Derived rather than stored, and the derivation is the entire point
+        (R118/R120). A stored boolean would answer "was this account ever
+        verified?"; what every consumer actually needs is "can we trust the
+        address we are looking at?", and those come apart the moment the site
+        admin edits ``email`` — which R123 explicitly permits and R124 makes
+        a routine support action.
+
+        Comparing ``verified_email`` to ``email`` makes that case impossible
+        rather than handled: the address moves, the equality fails, the
+        account reads as unverified, with **no save hook, no change detection
+        and nothing for a future writer to forget.** A hook that misfires is
+        exactly the silent staleness this avoids — and trap 4 in PROGRESS §2F
+        spells out what staleness costs here: password reset, the next thing
+        built on this, would mail a stranger's reset link.
+
+        Both halves are independently necessary. ``email_verified_at`` alone
+        is a proof of some address, possibly not this one; ``verified_email``
+        alone is an address nobody clicked.
+
+        **Not to be confused with** :attr:`is_active`, which R102b pins to
+        suspension and ban. Verification is a third, unrelated state, and
+        R119 puts its enforcement in a custom auth backend rather than in
+        that property — folding the three together would make three different
+        refusals indistinguishable.
+        """
+        return bool(self.email_verified_at) and self.verified_email == self.email
 
     def suspend(
         self, *, reason: str = "", origin: str = SuspensionOrigin.LOCAL
@@ -754,6 +877,249 @@ class Invite(models.Model):
         if self.expires_at <= timezone.now():
             return (
                 f"That invite link expired on {date_format(self.expires_at, 'F j, Y')}."
+            )
+        return None
+
+
+class EmailVerificationToken(models.Model):
+    """One single-use proof that a member controls their own email address (2F).
+
+    Deliberately the same shape as :class:`Invite`: an invite and a
+    verification link are the same kind of object — a long random credential
+    with a clock on it, which has to be *spent* atomically, because the
+    liveness check and the marking cannot be two separate statements or "one
+    click" is only true until two things click at once.
+
+    Two fields diverge from the invite, and both divergences are named rather
+    than incidental (R120):
+
+    * ``user`` replaces ``created_by``. An invite has two parties — the
+      inviter and the redeemer — and ``created_by`` names the first.
+      Verification has **one subject**: the account itself. Nobody else mints
+      it, so there is no second party to name.
+    * ``email`` replaces ``used_by``. The consumer of a verification token is
+      the same account by construction, so ``used_by`` would carry exactly no
+      information. What this flow needs in that slot is the **address
+      binding** — the mailbox the link was actually sent to — so that a token
+      minted for A can never verify B. ``consume()`` enforces it rather than
+      leaving the check to each caller to remember.
+
+    A token *table* rather than a column on ``User`` is an audit property, and
+    it is the reason this is not shaped like Mastodon's ``confirmation_token``.
+    There the raw token lives on the user row, is never cleared on confirm,
+    and is *reused* while it is still live — so five resends email the same
+    URL five times, a leak from any copy is the live credential, and nothing
+    records which copy was clicked. Here every send is its own row, a
+    superseded token is genuinely dead rather than merely old, and the table
+    says which one was used and when.
+
+    Nothing in this class sends mail. Deciding to send, the transport, and the
+    console-backend guard are 2F-2; the gate and the routes are 2F-3.
+    """
+
+    code = models.CharField(max_length=64, unique=True, editable=False)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="email_verification_tokens",
+    )
+    # The address this token proves control of. Required, never blank, and
+    # ``mint()`` refuses to issue one to an address-less account — a token
+    # bound to the empty string would make ``User.email_verified`` true for a
+    # user with no address at all, because ``"" == ""``. That is not
+    # hypothetical on this schema: blank addresses are legal by design (R118's
+    # partial index exists precisely to allow them).
+    email = models.EmailField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    # Closed out by a newer mint (R120's supersede). Its own column rather
+    # than a value in ``used_at``, because the two are different facts and
+    # only one of them is provenance: ``used_at`` means "a human clicked
+    # this", which is the single meaning R123 refuses to dilute. Folding
+    # supersede into it would make a resend indistinguishable from a click —
+    # and the admin's token inline (R123) exists to tell those apart.
+    #
+    # Superseded rows are kept, not deleted, for the same reason: a row that
+    # is gone explains nothing about the send it recorded.
+    superseded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        if self.used_at:
+            state = "used"
+        elif self.superseded_at:
+            state = "superseded"
+        elif self.expires_at <= timezone.now():
+            state = "expired"
+        else:
+            state = "live"
+        return f"verification {self.code[:8]}… for {self.user.localname} ({state})"
+
+    def save(self, *args, **kwargs):
+        # Normalised exactly like ``User.email`` (R118), because the address
+        # binding is a string comparison. If the token held ``Foo@x.com`` and
+        # the account held ``foo@x.com``, a perfectly good token would read as
+        # a mismatch and the member would be stuck on a link that "doesn't
+        # work" for a reason nobody can see. Both sides fold, so the
+        # comparison means what it looks like.
+        if self.email:
+            self.email = self.email.strip().lower()
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def live(cls):
+        """Every live token, as a queryset — the query-level ``is_live``.
+
+        ``mint()`` needs to close out a user's live tokens in one UPDATE
+        rather than load-then-loop, and ``lock_live()`` filters on the same
+        predicate. Kept as one expression so the two cannot drift apart from
+        the property they mirror.
+        """
+        return cls.objects.filter(
+            used_at__isnull=True,
+            superseded_at__isnull=True,
+            expires_at__gt=timezone.now(),
+        )
+
+    @property
+    def is_live(self) -> bool:
+        """Usable right now: unspent, unsuperseded, still inside its window.
+
+        Stays exactly equivalent to ``unusable_reason() is None`` — the
+        ``lock_live()`` path filters on this and then reports that, so if the
+        two ever diverged a token would be refused with no reason given, or
+        accepted while a reason exists.
+        """
+        return (
+            self.used_at is None
+            and self.superseded_at is None
+            and self.expires_at > timezone.now()
+        )
+
+    @classmethod
+    def mint(cls, user) -> "EmailVerificationToken":
+        """Open a fresh verification token for ``user``'s current address.
+
+        Supersedes the user's prior live tokens first (R120). That clause is
+        not tidiness: without it N tokens stay live per account and "strictly
+        single-use" is false whenever any older one still works. With a row per
+        send plus a supersede marker, a leaked stale token is dead *and* the
+        table still records every send.
+
+        Raises ``ValueError`` when the account has no address. There is no
+        such thing as proving control of nothing, and minting one anyway
+        would put a token into the world whose consumption satisfies
+        ``"" == ""`` — reading as a verified address on an account that has
+        none.
+        """
+        if not user.email:
+            raise ValueError(
+                f"@{user.localname} has no email address to verify; "
+                "a verification token must be bound to a real address."
+            )
+        now = timezone.now()
+        with transaction.atomic():
+            # Atomic because a mint that superseded but failed to create would
+            # leave the member with no live token and no new link — strictly
+            # worse than either outcome alone.
+            cls.live().filter(user=user).update(superseded_at=now)
+            return cls.objects.create(
+                code=cls._fresh_code(),
+                user=user,
+                email=user.email,
+                expires_at=now + timedelta(hours=EMAIL_VERIFICATION_TTL_HOURS),
+            )
+
+    @classmethod
+    def _fresh_code(cls) -> str:
+        # 32 bytes, ~256 bits, from ``secrets`` — a credential, not a
+        # guessable word. The unique index is the real guard; this loop just
+        # keeps an astronomically unlucky collision from surfacing as a 500.
+        #
+        # Stronger than the invite's 24 bytes on purpose. A verification token
+        # is what password reset will one day be built on, and unlike an
+        # invite link it gets opened by mail clients and link scanners whose
+        # behaviour we do not control.
+        while True:
+            code = secrets.token_urlsafe(32)
+            if not cls.objects.filter(code=code).exists():
+                return code
+
+    @classmethod
+    def lock_live(cls, code: str) -> "EmailVerificationToken | None":
+        """Return the live token for ``code`` with its row write-locked.
+
+        ``None`` for an unknown, spent, superseded or expired token. The lock
+        only means anything inside a transaction — the caller holds one across
+        the consume, so the liveness check and the spend cannot be
+        interleaved. Two things click a verification link at once all the time
+        in practice: a person and their mail client's link prefetcher.
+        """
+        token = cls.objects.select_for_update().filter(code=code).first()
+        if token is None or not token.is_live:
+            return None
+        return token
+
+    def consume(self) -> None:
+        """Spend this token and record the address it proved as verified.
+
+        Both halves in one method, on the 2E "one call site, not several"
+        lesson. If the view had to mark the token spent *and* stamp the user,
+        a later caller could do one without the other — a token that verifies
+        nothing, or a verified state no token paid for. R123's whole claim is
+        that *every* verified flag traces to a link that was actually clicked,
+        and that is only a property of the code if the two writes are one
+        operation.
+
+        Assumes the caller reached this token through :meth:`lock_live`, which
+        is what enforces single use. The spend itself is idempotent in effect
+        — re-running it writes the same values — because a second consume
+        cannot verify anything the first one did not.
+
+        Raises :class:`AddressMismatchError` when the account's address is no
+        longer the one this token was minted for. That is the R120 binding
+        made real: the admin may correct an address at any moment (R124), and
+        a link sent to the old one must never stand in as proof of the new
+        one.
+        """
+        if self.email != self.user.email:
+            raise AddressMismatchError(
+                f"This token was issued for {self.email}, but @{self.user.localname} "
+                f"is at {self.user.email} now."
+            )
+        with transaction.atomic():
+            self.used_at = timezone.now()
+            self.save(update_fields=["used_at"])
+            self.user.email_verified_at = self.used_at
+            self.user.verified_email = self.email
+            self.user.save(update_fields=["email_verified_at", "verified_email"])
+
+    def unusable_reason(self) -> str | None:
+        """Human sentence for why this link can't verify anything, if any.
+
+        Specific rather than uniform, and that is a deliberate asymmetry with
+        the resend form (R122). The enumeration risk lives on the path where
+        you submit an **address** and learn whether it is registered; this
+        path needs an unguessable token to reach at all, so whoever reads this
+        message already holds a real token and is entitled to know what is
+        wrong with it. Telling a person whose link expired that it expired —
+        with a way to get a new one — is the difference between a recoverable
+        annoyance and a dead end.
+        """
+        if self.used_at is not None:
+            return "That verification link has already been used."
+        if self.superseded_at is not None:
+            return (
+                "That verification link was replaced by a newer one — use the "
+                "most recent link we sent you."
+            )
+        if self.expires_at <= timezone.now():
+            return (
+                f"That verification link expired on "
+                f"{date_format(self.expires_at, 'F j, Y')}."
             )
         return None
 
