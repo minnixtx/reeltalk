@@ -3650,10 +3650,12 @@ instance is disposable test data, destroyable and rebuildable at will, used for
 nothing else.** Rebuilding it with verified accounts is the recovery, not an
 exception carved for them.
 
-### The decisions — settled by the owner 2026-09-29 as R118–R123
+### The decisions — settled by the owner 2026-09-29 as R118–R125
 
-All six were put to the owner with their consequences enumerated against live data
-before any code was written. None follow from the code; they are product choices.
+All eight were put to the owner with their consequences enumerated against live
+data before any code was written. None follow from the code; they are product
+choices. R124 and R125 came out of the peer read below — the first closes a hole
+R123 opened, the second is a control Mastodon has that we were not planning.
 
 - **R118 — Email is required at signup and unique when set.** Amends R12's
   "email optional and non-unique until password reset needs it": the need has
@@ -3679,6 +3681,39 @@ before any code was written. None follow from the code; they are product choices
   token that was actually clicked. The owner took stronger provenance over the
   onboarding convenience, accepting that a member who genuinely cannot receive
   mail is not onboardable without a code change.
+- **R124 — Typo recovery is admin-mediated. No self-service email correction and
+  no logged-out correction endpoint.** A member who fat-fingers their address at
+  signup asks the site admin, who edits the address (permitted under R123 — the
+  admin may change `email`, only not mark it verified) and triggers the
+  verification mail to the corrected address. **Why this and not the
+  self-service variant:** Mastodon lets a signed-in-but-unconfirmed member change
+  their address without re-entering a password (`setup_controller.rb:14-25`),
+  because the account has nothing to protect yet — but that shape rides a
+  session, and under R119 our unconfirmed member has none. Rebuilding it
+  logged-out means an unauthenticated endpoint that validates credentials, which
+  is a second password oracle to rate-limit and reason about, and the restricted
+  holding-state alternative is one the owner already declined at R122. **What it
+  costs:** one support round-trip per typo, to the owner. **What it does not
+  cost:** the path exists, and it does not weaken R123. **How to apply:** this is
+  why the `UserAdmin` verification surface must include a *send verification*
+  action and not only a status readout — without it the admin can fix the address
+  but cannot get the member unstuck.
+- **R125 — Changing an account's email address notifies the OLD address.** The
+  member gets a notice at the address they had on file saying it was changed.
+  **Why this is worth more here than on Mastodon:** on ReelTalk the *only* party
+  who can change an address is the site admin, so the alert is not noise from
+  careless self-editing — it is the member's only signal that their mail now goes
+  somewhere else. If an admin account is ever compromised, silently repointing a
+  member's address is the obvious move, and this is the one control that makes it
+  visible to the person it harms. **Shape:** the alert is a **notice, not an
+  action** — it carries no link that would let the recipient undo the change or
+  reach anything privileged, because that would be an unauthenticated change
+  primitive delivered to an address the attacker may still control. **Single
+  writer:** `change_email(user, new_email, *, changed_by)` is the only path that
+  changes an address, and the alert fires from inside it, so no caller can change
+  an address without producing the alert — the 2E "one call site, not several"
+  lesson applied to a new write. `UserAdmin.save_model` routes through it when
+  the address differs. Skipped when the old address is empty (nothing to tell).
 
 ### Peer precedent — Mastodon 4.7.2, read off the live tree 2026-09-29
 
@@ -3992,9 +4027,12 @@ Four, each ending green and committed.
    and tests. Nothing sends and nothing is gated.
 2. **§2F-2 — the send path.** `social/verify.py` (decide, guard, mint, enqueue),
    `social/tasks.py` (send on the worker, record the outcome on the token), the
-   email template, the console-backend guard at signup, the single
-   `send_verification_email()` helper wired into the three creation routes, tests.
-   Still no gate — the instance behaves exactly as before apart from mail.
+   verification email template, the console-backend guard at signup, the single
+   `send_verification_email()` helper wired into the three creation routes,
+   **`change_email()` as the single writer of address changes with the R125
+   tamper alert firing from inside it and `UserAdmin.save_model` routed through
+   it**, tests. Still no gate — the instance behaves exactly as before apart from
+   mail.
 3. **§2F-3 — the gate and the routes.** Custom auth backend, the login page
    distinguishing unverified from wrong-password, `GET /account/verify/<token>/`,
    the logged-out rate-limited `POST /account/verify/resend/` (**both axes:
@@ -4342,3 +4380,7 @@ not an optimisation.
 - **R122 — Recovery is a logged-out, rate-limited resend route (owner decision 2026-09-29).** Of the three shapes offered (logged-out resend, admin-only resend, a post-signup holding state that keeps the user authenticated but confined) the owner took the logged-out resend. **Why:** under a mandatory gate the user whose verification mail is lost is **not signed in**, so every authenticated surface is unreachable by definition — a resend that requires login cannot rescue the exact case it exists for. The holding-state alternative would mean building a confined authenticated surface to avoid the unauthenticated endpoint, which is more new code than the endpoint and is a different product from "cannot sign in". **Shape:** the cooldown is the token table itself — refuse when a live token for that address was minted less than N minutes ago. No new table, no rate-limit dependency, and it cannot be bypassed by clearing cookies because it is keyed server-side on the address rather than on a client token. Response copy is identical whether or not the address exists: *"If that address has an account here, a verification link is on its way."* **The cost is named:** this creates an unauthenticated mail-send endpoint, which is exactly the class of surface R107 warned about. A 5-minute per-address cooldown still admits roughly 288 mails a day to one address from a determined caller. **How to apply:** this is a floor under the abuse surface §2F creates, not the antispam system `PLAN.md` §5 describes, and must not be read or extended as though it were. R119 depends on this route existing and working; breaking it breaks the safety of the gate.
 
 - **R123 — No hand-verify: the admin may trigger a verification email but may never flip the verified state (owner decision 2026-09-29).** The owner took stronger provenance over the onboarding convenience. **Why:** if a verified flag can be set by hand, then "verified" no longer means *"the holder of this mailbox clicked a link we sent"* — it means that or *"an admin set it"*, and every downstream trust decision built on it (password reset above all) has to account for which one it got. Making the click the only writer keeps that meaning single. **What it costs, accepted knowingly:** a member who genuinely cannot receive mail — dead mailbox provider, filtered domain, no access to the address — has **no** path onto the instance. There is no self-service email edit (`ProfileForm` carries no `email` field) and no admin override, so the only routes are fixing the mail or a code change. **How to apply:** `UserAdmin` shows verification state read-only beside the address, following the R116 `report_email_status` pattern, plus a send-verification action and an inline of the user's tokens with their state and last error — so the admin can see exactly what happened and why it failed, and still cannot make it have succeeded. If a future requirement needs a manual override, it needs the owner and it needs to say what "verified" means afterwards.
+
+- **R124 — Typo recovery is admin-mediated; no self-service email correction and no logged-out correction endpoint (owner decision 2026-09-29, arising from the Mastodon peer read of §2F).** A member who fat-fingers their address at signup asks the site admin, who corrects it and triggers the verification mail to the corrected address. **Why this came up at all:** R123 removed the admin's ability to mark an address verified, and there is no self-service email edit (`ProfileForm` carries no `email` field), so the spec as drafted left a typo'd address with no recovery. Mastodon solves this with `Auth::SetupController#update` (`setup_controller.rb:14-25`), which lets a signed-in-but-unconfirmed member change their address **without re-entering a password** — its own comment reasons that the account has nothing to protect yet. **Why we cannot copy it:** that shape rides a session, and under R119 our unconfirmed member has none. Rebuilding it logged-out produces an unauthenticated endpoint that validates credentials — a second password oracle needing its own rate limiting and threat modelling — and the alternative that avoids it, a restricted post-signup holding state, is the option the owner already declined at R122. **What it costs, priced honestly:** one support round-trip per typo, to the owner. **What it does not cost:** the path genuinely exists, and taking it does not weaken R123, because correcting an address is not the same act as attesting it. **How to apply:** this decision is what makes the `UserAdmin` *send verification* action load-bearing rather than decorative — a status readout alone lets the admin fix the address but leaves the member stuck. If self-service email editing is ever added, it must come with its own re-verification path and must not become a way to sidestep the verified state.
+
+- **R125 — Changing an account's email address notifies the OLD address (owner decision 2026-09-29, taken from Mastodon's `email_changed` control).** The member gets a notice at the address previously on file that it has been changed. **Why this is worth more on ReelTalk than on Mastodon:** there, address changes are mostly careless self-editing, so the alert is one more notification in a stream. Here the *only* party who can change an address is the site admin, so the alert is not noise — it is the member's only signal that their mail now arrives somewhere else. **The threat it covers is a compromised admin account:** silently repointing a member's address is the obvious first move for an attacker holding admin, because it captures every subsequent mail including a password reset, and the member has no other way to notice. This is the one control that makes that visible to the person it harms rather than only to the one who did it. **Shape — a notice, not an action:** it carries **no link** that would let the recipient undo the change, revert the address, or reach anything privileged. A privileged link delivered to an address the attacker may still control is an unauthenticated change primitive, which is worse than the silence it replaces. **Single writer:** `change_email(user, new_email, *, changed_by)` is the only path that changes an address, and the alert fires from *inside* it, so no caller can change an address without producing the alert. `UserAdmin.save_model` routes through it when the address differs. This is the 2E "one call site, not several" lesson applied to a new write: an alert that lives in the admin view is an alert that a future management command or import hook silently omits. Skipped when the old address is empty — there is nobody to tell. **How to apply:** the derived verified state (R118's `verified_email == email`) already prevents anything from *trusting* a stale verification after a change; R125 is the separate control that makes the change *known*. Do not treat one as covering the other — the first protects the system, the second protects the member.
