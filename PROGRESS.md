@@ -19,7 +19,10 @@ is history.**
   four "Live proof" sections at its end.
 - **Gate baseline: `1959 passed + 5 skipped`.** `ruff check`,
   `ruff format --check` (138 files) and `makemigrations --check` all clean.
-- **git:** `main` = `81fe064`, pushed, working tree clean.
+- **git:** `main` is pushed and the tree is clean — read the current hash with
+  `git log -n 1 --oneline` rather than trusting one written here. Anything a
+  single command answers for free is a pointer in this block, not a value;
+  only a literal hash goes stale faster than this block gets rewritten.
 - **Open, and it is not code:** whether the router SNATs inbound **WAN**
   traffic. If it does, every internet user shares a single source address
   and the per-IP resend throttle counts the wrong party. Owner-side check
