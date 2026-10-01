@@ -4711,6 +4711,176 @@ for further live moderation testing it needs an address set by the admin
 followed by a resend — that is R124's path, and it is the one thing here that
 will bite someone who forgets it.
 
+### Executed — 2F-3b is DONE, gate-verified; the admin can see and send but never attest (2026-10-01)
+
+**What landed.** An `Email verification` fieldset on `UserAdmin`'s change
+page with three read-only members — `verification_status` (the line beside
+the address), `send_verification` (the button) and `verification_tokens`
+(the inline of every send for that account, with its link state, send
+state, requesting IP and last SMTP error) — plus `send_verification_now`,
+which calls the existing `send_verification_email()`; `response_change`
+overridden to stay on the account after a press; and
+`EmailVerificationToken.link_state`, the four-way read that `__str__` had
+been computing inline and that the inline table also needed.
+`reeltalk/tests/test_admin_verification_surface.py` (25 tests). **No
+migration** — nothing here is a field; `makemigrations --check` reports
+`No changes detected`.
+
+**The hole this closes, and why it was not cosmetic.** An account created
+in `UserAdmin` was dead on arrival: it had an address, was unverified, and
+nothing sent its link, so under R119 it could not sign in and nothing on
+the instance said so. 2F-3's own record named this explicitly. The admin
+could see the address and could not do a thing about it.
+
+**R123 is held by absence, not by a check.** `email_verified_at` and
+`verified_email` appear nowhere in `UserAdmin` — not editable, not
+read-only, not at all. That absence *is* the mechanism: a read-only
+display of the stored columns would still be a field, and a field is a
+second writer waiting for someone to drop the `readonly`. Two tests pin it
+from different directions — one walks `get_fieldsets` on both the change
+and add pages rather than trusting the class attribute (an override is
+exactly where a field could sneak back in), and one POSTs both column names
+as a hand-crafted form body and shows the row still unverified. The second
+is the one that matters: it models someone who read the model and guessed
+the names, which is a more likely path than an admin finding a disabled
+input.
+
+**The token inline truncates its code, and that is a control rather than
+tidiness.** A full live token rendered on a screen is a credential the
+admin could open in a new tab and click themselves, producing a verified
+flag with no member ever having seen the mail — hand-verify arriving
+through the display layer after it was turned off at the form layer. Eight
+characters is enough to tell one send from another and not enough to spend
+one; the invite admin already draws the identical line for the identical
+reason. A test asserts the full code is absent from the rendered page while
+its prefix is present, so the truncation cannot be "helpfully" widened
+without failing.
+
+**The send is the member's send, not an admin send.** It calls
+`send_verification_email(user, request_ip=client_ip(request))` — the same
+helper signup, the setup wizard and invite acceptance call. A bespoke
+admin send would have been a second set of guards, and the first thing a
+later change to the send path (a new throttle, a new template, a new
+binding rule) missed would be the copy nobody thought to update. The test
+asserts the queue carries `SEND_TOKEN_FUNC` with the token pk, the same
+assertion shape 2F-2 uses for the three creation routes, so the admin
+route is provably the same route rather than a lookalike.
+
+**Correcting a typo and pressing send in one save mails the corrected
+address.** This is R124's recovery flow collapsed into a single action,
+and it works on ordering rather than on intent: `save_model` already runs
+`change_email()` before the send, and `change_email` leaves `obj.email` at
+the new value, so the mint that follows binds to the correction. The
+stale token comes back `superseded`, so it could not have verified the new
+address even if it were still in a mailbox.
+
+**Two behaviours the owner chose at the start of this increment.**
+
+*The button names the replacement instead of being blocked.* Every send
+supersedes the prior live token — that is what makes single-use mean
+anything — so pressing send twice silently kills the link the member is
+currently reading, and their click then says "replaced by a newer one."
+Three shapes were on the table: replace silently, show the live link and
+put the consequence on the button label, or apply the member-facing
+five-minute cooldown to the admin too. **Chosen: show and warn.** The
+status line reports that a link was sent and when it expires, and the
+button reads "Send a new link (replaces the live one)". A cooldown would
+have put a limit on a power the spec grants the admin and given no way to
+override it while debugging; silent replacement would have manufactured
+support tickets out of ordinary clicks.
+
+*The add form still does not send.* 2F-3's `save_model` comment deferred
+this, and the owner kept it: a side-effecting mail on the create form puts
+a second unsolicited sender on the instance, and a checkbox left ticked
+sends mail the admin did not mean to send at that moment. The cost is
+three extra clicks to unblock a newly created account (create → bounced to
+the list → open → press send), taken deliberately so every send is a
+press rather than a default.
+
+**Why the send button is a submit on the change form rather than a custom
+admin view.** Django's admin wraps the change form in one `<form>`, so a
+button rendered in a read-only field submits that form and inherits its
+CSRF protection and its validation for free. The tradeoff is named:
+pressing send also saves whatever else is on the page. That is the same
+contract Django's own "Save and continue editing" / "Save and add another"
+buttons run on, so it is the admin's existing idiom rather than a new
+surprise — and a send against an invalid form is correctly refused, which
+is the behaviour you want when the address itself is the thing being
+edited. `response_change` redirects back to the account so the status line
+the admin just read is still on screen; without it the press bounces to
+the changelist and they have to find the account again to see whether the
+send worked.
+
+**Three accounts get their own sentence rather than a generic one.**
+`_instance` reads as "Instance representative — infrastructure, not a
+member. It never signs in and needs no address. Do not give it one,"
+because left in the generic branch it looks like a stuck account and invites an
+admin to fix it by giving it an address — which would not break anything
+today but is exactly the kind of well-meant edit R111 exists to make
+unappealing. A remote mirror reads as "Remote account — it signs in on its
+own home instance," and an address-less local account reads as "Not
+verified, and there is no address to verify," with no button, because
+`mint()` correctly refuses a blank address and there is nothing to send.
+
+**The inline is bounded and says so.** `TOKEN_INLINE_LIMIT = 15` rows,
+with "…and N earlier send(s) not shown" past that. The row count is not
+ours to control — every resend adds one — and a page that renders
+thousands of rows is useless for the ten that matter. Stating the total is
+what makes the cap honest rather than a silent truncation of the record.
+
+**R126 pinned prospectively, from disk.** Two tests scan every template
+this repo owns (the root `templates/` and each app's `templates/`) for the
+sentences this increment introduces and assert none of them appear. The
+rule is about a file nobody has edited yet — nothing today puts unverified
+copy in shared chrome, and a rendered assertion cannot protect against the
+day someone adds it to `base.html`. The scan is the cheap way to make that
+a failed test rather than a deploy note.
+
+**Verified.** Gate **`1959 passed + 5 skipped`** against a baseline of
+1933 + 5 — **+26**, reconciled as 25 new test functions in
+`tests/test_admin_verification_surface.py` plus 1 clean-room parametrised
+instance for that new file. `ruff check` clean, `ruff format --check`
+clean at 138 files, `makemigrations --check` reports **No changes
+detected**. Full log at `/tmp/gate_2f3b.log`, exit marker read from inside
+the log.
+
+**Suite coverage.** R123's edge: the two verified columns absent from the
+rendered form and from every fieldset on both pages; a hand-crafted POST
+carrying both names leaves the row unverified. The send: queues
+`SEND_TOKEN_FUNC` with the account's own token pk; never writes a verified
+state and still refuses `authenticate()` afterwards; records a requesting
+IP; supersedes a pre-existing live link; mails the corrected address when
+the correction and the send share one save; refused outright for a non-staff
+member, who is bounced to the admin login with no token minted. The
+status line: verified, unverified-with-live-link, unverified-with-no-live-
+link, address-less, instance representative, remote mirror. The inline: a
+failed send's SMTP line rendered whole and greppable, queued distinguished
+from sent, the full token code never present, sends listed newest first,
+the bound enforced with the remainder counted, and "never been sent" for a
+clean account. Plus the redirect-stays-on-the-account claim and both
+template scans.
+
+**Not done, by scope.** No 2F-4 live proof. No password reset, by R121.
+Nothing routed through `notify()`, by R99. No `is_active` change, by
+R102b. No self-service email edit, by R124. No site-wide banner, by
+R126 — and this increment is the one that finally makes the admin-only
+signal complete, so nothing is left waiting on it.
+
+**Deploy note.** **No migration** — this is admin surface and a model
+property only, so `makemigrations --check` stays clean and nothing needs
+applying. Deploy is the usual `docker compose build` (all three images,
+each its own tag; not just `web`) → `up -d --force-recreate web worker`.
+**What changes on deploy is that the admin can now unblock accounts.**
+Specifically, `witness` becomes recoverable without touching the database:
+set its address in `UserAdmin` (which fires R125's notice to the old
+address — skipped here, since the old address is empty), press send, click
+the link. That is the whole R124 path exercised on a real account, and it
+is worth doing before 2F-4 so the moderation probe harness is alive again.
+**One thing to watch on the live page:** the send button is a submit on the
+change form, so pressing it saves the form too. Verified in the suite, but
+it is the kind of behaviour worth seeing once in a browser before anyone
+relies on it.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
