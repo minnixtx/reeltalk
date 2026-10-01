@@ -17,28 +17,37 @@ is history.**
 - **§2F is COMPLETE.** Nothing inside it is outstanding — do not re-run its
   proofs. The spec is §2F; the outcome is its "Executed" records and the
   four "Live proof" sections at its end.
-- **Gate baseline: `1959 passed + 5 skipped`.** `ruff check`,
-  `ruff format --check` (138 files) and `makemigrations --check` all clean.
-- **git:** `main` is pushed and the tree is clean — read the current hash with
-  `git log -n 1 --oneline` rather than trusting one written here. Anything a
-  single command answers for free is a pointer in this block, not a value;
-  only a literal hash goes stale faster than this block gets rewritten.
+- **Done since the last block, NOT yet deployed:** the `client_ip()` fix
+  (R127/R128) is committed and gate-verified but is **not running on
+  `reeltalk.minnix.dev`** — deploying it is a rebuild + restart, and nobody
+  has been asked to do that. The instance still resolves client addresses by
+  the old leftmost rule until it is redeployed. Check with
+  `git log -n 3 --oneline` against what the web container is running.
+- **Gate baseline: `2007 passed + 5 skipped`.** `ruff check`,
+  `ruff format --check` and `makemigrations --check` all clean; **no new
+  migration** in this increment.
+- **git:** read the current state with `git status` and `git log -n 1
+  --oneline` rather than trusting anything written here. Anything a single
+  command answers for free is a pointer in this block, not a value; only a
+  literal hash goes stale faster than this block gets rewritten.
 - **Resolved 2026-10-01:** the router does **not** SNAT inbound **WAN**
   traffic. NPM's access log for proxy host 76 shows real public client
   addresses arriving intact; the `192.168.1.1` bucket is LAN hairpin only.
-- **Open next (app work, direction agreed 2026-10-01):** `client_ip()` takes
-  the **leftmost** `X-Forwarded-For` entry, and the proxy **appends** rather
-  than replaces, so any client can forge the address every per-IP limit keys
-  on. The fix is a right-to-left trusted walk with a private-range default
-  plus startup diagnostics — **in the app**, never in a deployer's proxy.
-  `client_ip()` currently has **no tests at all**. Full design in "The fix:
-  resolve right-to-left" at the end of §2F.
-- **A gap, not a new feature:** there is **no self-service password reset**
-  anywhere in the codebase, though `PLAN.md` §3.7 marks it `[v0.1 core auth]`.
-  Recovery today means an operator setting the password in the admin. It is
-  cheap now because 2F-3 already built the token, the send path and the
-  throttle it needs — but it should land **after** the `client_ip()` fix,
-  because reset is the endpoint where a wrong client IP costs the most.
+- **The `client_ip()` forgery is closed (R127).** The leftmost-entry rule is
+  gone; the app now walks `X-Forwarded-For` right-to-left over trusted
+  hops, `TRUSTED_PROXIES` defaults to the private ranges so a compose
+  deploy needs no config, and the app announces a collapsed setup from
+  sampled traffic rather than leaving it undiscoverable. Record: "Executed:
+  the right-to-left walk" at the end of §2F.
+- **Open next: §2G, self-service password reset.** It does **not exist
+  anywhere** in the codebase, though `PLAN.md` §3.7 marks it
+  `[v0.1 core auth]`. Recovery today means an operator setting the password
+  in the admin. It is cheap now because 2F-3 already built the token, the
+  send path and the throttle it needs, and because the client IP it will
+  rate-limit on is now correct. **Three decisions need the owner before it
+  starts — ask them up front, not mid-build:** (1) does a completed reset
+  kill the account's existing sessions, (2) does the admin keep a raw
+  password field, and (3) what is the reset throttle budget.
 - **Parked:** the M6 grindhouse artwork polish pass, at R73.
 
 ### How to read the project's docs
@@ -49,7 +58,7 @@ is history.**
 | Product contract — domain model, watch state, TMDB, federation surface, deployment shape | `PLAN.md` §3 |
 | **D-series** — the original product decisions (D1–D17) | `PLAN.md` §2 |
 | License audit | `PLAN.md` §4 |
-| **R-series** — rewrite-era decisions (R1–R126) | `PROGRESS.md` §4 |
+| **R-series** — rewrite-era decisions (R1–R128) | `PROGRESS.md` §4 |
 | What was actually built, with commit hashes | `PROGRESS.md` §2 |
 | Host and deploy facts for this box | `PROGRESS.md` §3 |
 | What is live right now | the block above |
@@ -5276,6 +5285,133 @@ Cloudflare — with copy-paste values, not just this box's.
 neither useful alone. They should land **before** any feature whose throttle
 depends on a correct client IP — password reset above all.
 
+### Executed: the right-to-left walk, the private-range default, and the diagnostics
+
+Landed 2026-10-01 in `01e98ea` — items 1 and 2 as the single increment the
+section above called for, plus item 3's diagnostics. **Item 4 (the
+multi-proxy copy-paste guide in `DEPLOYING.md`) was deliberately not done**:
+the owner took "correctness only" for this increment, so the docs were fixed
+wherever the new default made them wrong and no new per-proxy guide was
+written.
+
+**The walk.** `resolve_chain(peer, chain)` is now the one implementation of the
+answer, and `client_ip(request)` is a thin wrapper over it. Two functions
+rather than one because `check_client_ip` needs the **trace**, not just the
+result — what a deployer pastes into an issue is the *reason* an address
+resolved the way it did. The rules, in the order they fire:
+
+| Case | Result |
+|---|---|
+| Peer untrusted | Return the peer. The chain is **not read at all** — nobody downstream can vouch for what an untrusted peer claims about hops above it. The same rule that strips a spoofed `X-Forwarded-Proto`. |
+| Entry trusted | Skip it; the client is further left. |
+| Entry untrusted and parseable | This is the client. |
+| Entry unparseable | **Stop and return the peer.** The naive rule returns the garbage — and since the string came from a header, the caller would then hold its own throttle key. Falling back to the peer puts that request in the shared bucket instead of handing over a fresh one, which is the difference between a misconfiguration and a bypass. |
+| Every hop trusted | The request originated inside our own network, so the peer is the honest answer. |
+
+**The default.** `settings.PRIVATE_NETWORKS` is now the shipped default for
+`TRUSTED_PROXIES`. The live deploy is **unaffected by the default change** —
+`.env` pins `192.168.1.141/32` explicitly, so what changed on
+`reeltalk.minnix.dev` is only the walk direction, which is the fix. Two
+consequences worth their own lines rather than a footnote:
+
+- `SECURE_PROXY_SSL_HEADER` is derived from `TRUSTED_PROXIES` being
+  non-empty, so it is now **on by default**. The scheme-trust surface widens
+  from "the one address you named" to "anyone on your private networks" —
+  the same boundary the proxy itself sits behind, and unreachable from the
+  public internet for the return-routing reason above.
+- A **LAN client behind a proxy resolves to the proxy**, not to itself. The
+  walk cannot tell "private because it is a proxy" from "private because it
+  is the laptop next door". `mod_remoteip` behaves identically. For a floor
+  under internet-originated abuse that is the right side of the trade, and
+  `test_a_lan_client_behind_a_proxy_resolves_to_the_proxy` states it as a
+  test rather than leaving it in prose where it would be read once and
+  forgotten.
+
+**The diagnostic could not be a startup check, and that is worth keeping.** The
+spec above asked for "a startup warning when the resolved client IP keeps
+equalling the immediate peer". Read literally that catches only **one** of
+the two faults: with an unconfigured CDN the resolved address is the CDN's
+egress, *not* the peer. And nothing at startup can tell an unconfigured CDN
+from a working deploy — the settings are byte-identical. So the middleware
+samples the first 50 **proxied** requests and warns once when not one of
+them resolved to a distinct client, with two branches in the message
+because the two faults need different remedies: resolved == peer means the
+proxy is forwarding nothing; resolved ≠ peer means something upstream is
+replacing it, which is usually a CDN. Direct traffic (untrusted peer) is
+never sampled — one address there genuinely means one user, and warning
+would train deployers to ignore the only warning that matters. The message
+names its own false positive out loud: an instance that really does have one
+user.
+
+**`manage.py check_client_ip`.** Three sections. The effective
+`TRUSTED_PROXIES` — raw, parsed, and flagged as shipped-default or
+operator-set — plus the `SECURE_PROXY_SSL_HEADER` that derives from it. A
+`--peer`/`--xff` resolver that prints the walk hop by hop with
+`trusted` / `client` / `unparseable` on each entry, so a chain copied out of
+a proxy's own access log can be checked without a running instance. And a
+summary of the `request_ip` values on recent verification tokens — **the
+same rows `ip_budget_spent` counts** — with a verdict that separates *many
+addresses* from *one address* from *no source recorded at all*, which is
+what a management-command mint looks like and which otherwise reads
+identical to the collapse.
+
+**Chose not to persist the forwarded chain.** The spec asked the command to
+print "the full forwarded chain" for recent requests. Nothing in the schema
+holds a chain, and adding `forwarded_for` to `EmailVerificationToken` meant
+a migration plus threading a second parameter through
+`send_verification_email` and its six call sites — into the write path §2F
+had just finished proving. The resolved-IP distribution already surfaces
+both failure modes the diagnostic exists for, and `--xff` covers the human
+debugging case against a pasted chain. The owner took that trade on
+2026-10-01. If a real deploy later wants stored chains, the field is a
+cheap addition to a table that already records one address per send.
+
+**Tests: 19 functions became 66**, all in the existing `test_proxy_trust.py`
+— a new test file costs an extra clean-room instance at collection and this
+increment did not need one. Every `client_ip` case is driven through
+`nginx_append()`, a reproduction of `$proxy_add_x_forwarded_for`'s append
+semantics, rather than a hand-built header: the bug *is* the append, and a
+test that models a proxy which replaces arrives at a topology that does not
+exist while the forgery it should catch stays live. The five deployment-table
+rows are five named tests, including the ✗ row pinned as a known limitation
+rather than smoothed over. Beyond the table: eleven forged entries at once;
+forty rotating forgeries asserting the resolved **set** stays at one key,
+which is the property the throttle actually needs — a single forgery failing
+is not enough; injected garbage never reaching the walk; an untrusted peer
+unable to use a chain at all; blank entries dropped; the malformed-fallback
+rule; the near-miss addresses (`11/8`, `172.32/12`, `192.169/16`) that a
+sloppy default range would let through; and the compose-needs-no-config
+case.
+
+**Non-vacuity, three mutations.** Reversing the walk to left-to-right — the
+old rule — kills **7** tests: the forged-leftmost row, the CDN row, the
+flood, the rotating-key proof, the garbage injection, the malformed
+fallback, and the command's chain resolver. Making the malformed branch
+return the garbage instead of the peer kills exactly **1**, the test written
+for it. Disabling the collapse diagnostic kills **4** — the three firing
+tests and the once-per-process test — while the "stays quiet" tests
+correctly survive. `proxy_trust.py` and `check_client_ip.py` are both at
+**100%**.
+
+**One bug the tests caught that a reader would not.** The first draft of the
+Cloudflare row used `104.16.0.0/13`, which covers only `.16` through `.23`
+and so does not contain the `104.28.4.4` it claimed to. The row silently
+became row 5 — a passing test asserting the opposite of what its comment
+said — until the assertion failed. It is `/12` now, with a comment saying
+why.
+
+**Also dropped:** `TrustedProxySchemeMiddleware.is_trusted()`, a shim left
+behind when the rule moved to `is_trusted_proxy()`. Zero callers repo-wide;
+a test written to cover dead code is worse than deleting it.
+
+**Gate** (all three images rebuilt, fresh `docker compose run --rm web`):
+`ruff check` — *All checks passed!*; `ruff format --check` — *145 files
+already formatted*; `makemigrations --check` — *No changes detected*, and
+**no new migration was needed**; pytest **2007 passed + 5 skipped in
+1456.87s**. Baseline reconciled: 1959 + 47 new test functions + 1
+`test_clean_room` instance for the new `check_client_ip.py` file = 2007.
+Skips unchanged at 5. No pre-existing test changed state.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -5574,3 +5710,7 @@ not an optimisation.
 - **R125 — Changing an account's email address notifies the OLD address (owner decision 2026-09-29, taken from Mastodon's `email_changed` control).** The member gets a notice at the address previously on file that it has been changed. **Why this is worth more on ReelTalk than on Mastodon:** there, address changes are mostly careless self-editing, so the alert is one more notification in a stream. Here the *only* party who can change an address is the site admin, so the alert is not noise — it is the member's only signal that their mail now arrives somewhere else. **The threat it covers is a compromised admin account:** silently repointing a member's address is the obvious first move for an attacker holding admin, because it captures every subsequent mail including a password reset, and the member has no other way to notice. This is the one control that makes that visible to the person it harms rather than only to the one who did it. **Shape — a notice, not an action:** it carries **no link** that would let the recipient undo the change, revert the address, or reach anything privileged. A privileged link delivered to an address the attacker may still control is an unauthenticated change primitive, which is worse than the silence it replaces. **Single writer:** `change_email(user, new_email, *, changed_by)` is the only path that changes an address, and the alert fires from *inside* it, so no caller can change an address without producing the alert. `UserAdmin.save_model` routes through it when the address differs. This is the 2E "one call site, not several" lesson applied to a new write: an alert that lives in the admin view is an alert that a future management command or import hook silently omits. Skipped when the old address is empty — there is nobody to tell. **How to apply:** the derived verified state (R118's `verified_email == email`) already prevents anything from *trusting* a stale verification after a change; R125 is the separate control that makes the change *known*. Do not treat one as covering the other — the first protects the system, the second protects the member.
 
 - **R126 — The unverified-account signal is admin-only. No site-wide banner (owner decision 2026-09-30, taken at the 2F-3 deploy).** The spec carried "the unverified banner" as a 2F-3 surface without saying who sees it, and the increment deferred it rather than guess. Asked directly, the owner ruled: **"I don't want a site wide banner on unverified accounts. Only the admin should be able to see that."** **What this settles:** there is no global notice, no site-wide strip, and no banner shown to other members or to the public that some accounts on the instance have not confirmed their addresses. The unverified state is visible to (a) the account's own owner, on their own login page and their own verify-result page — which 2F-3 already ships, because that person is the only one who can act on it — and (b) the site admin, in the `UserAdmin` read-only status line that 2F-3b builds. **Why the distinction matters rather than being a preference:** a site-wide banner turns an individual member's unfinished signup into a public property of the instance. It tells every visitor that this place has a pile of unconfirmed accounts, which is a statement about the instance the owner never chose to make, and it is a number that can only go up as spammers and drive-by signups accumulate. The member needing help and the instance advertising its own unfinished business are different audiences. **What it costs, priced:** a member who ignores the login-page message gets no further nudge anywhere on the site, so the admin is the only path to unblocking them — which is exactly what R124 already made true, and what 2F-3b's send-verification action is for. **How to apply:** when building 2F-3b, put the unverified surface in `UserAdmin` and nowhere else in shared chrome. Do not add it to a base template, a site-wide messages block, or anything rendered for other users' pages. If a broader visibility ever seems useful, it needs the owner — this decision is specifically a refusal of that.
+
+- **R127 — The client address resolves right-to-left over trusted proxies, and `TRUSTED_PROXIES` defaults to the private ranges (owner decision 2026-10-01, executed same day).** Two halves, one increment, neither useful alone. **Why the leftmost rule had to go:** every real proxy *appends* to `X-Forwarded-For` rather than replacing it — nginx's `$proxy_add_x_forwarded_for` keeps whatever the client sent and adds `$remote_addr` on the right — so the leftmost entry is the one entry in the chain a stranger definitely controls. Taking it meant any client could choose the address every per-source limit keys on. **The replacement is `mod_remoteip`'s algorithm**, chosen over inventing a rule because it is correct for every topology rather than one: walk right-to-left, skip hops that are themselves trusted, return the first that is not. **Why the private-range default rather than empty:** the common `docker compose up` with a reverse proxy on the compose network then needs **zero configuration**, and that matters more here than a minimal trust list because ReelTalk ships to deployers who are not technical. The safety argument is that a public-internet client cannot *present* a private source address — return routing fails and the TCP handshake never completes — so trusting those ranges only ever trusts machines genuinely on the local network. **What it costs, priced and accepted:** the walk cannot tell "private because it is a proxy" from "private because it is the laptop next door", so a LAN client behind a proxy resolves to the proxy rather than to itself; and `SECURE_PROXY_SSL_HEADER` derives from the list being non-empty, so the scheme-trust surface widens from one named address to the whole private network. Both are the same boundary the proxy already sits behind. **What this is not:** an identity system. R107's rule that dedup is not rate limiting applies with equal force to forwarded headers — an attacker who can set the header *and* presents an address we trust, meaning anyone already inside the private ranges, can still shape the chain. What the walk defeats is the cheap forgery from outside. **Standing constraint from the owner, not to be revisited:** the fix goes in the shipped app. No change was made to the owner's NPM box and none should be — "add an obscure setting to NPM because that is what I run" is not a shippable answer, and `reeltalk.minnix.dev` is a disposable test instance that will never carry real remote users. **How to apply:** use `client_ip()` for every per-source limit; never read `X-Forwarded-For` directly anywhere else, and never add a proxy-side workaround for an address-resolution problem. When a deploy reports a wrong address, run `manage.py check_client_ip` before touching config — the walk's trace is the diagnosis.
+
+- **R128 — The app explains a bad proxy setup from traffic, not from settings; the forwarded chain is not persisted (owner decision 2026-10-01).** **Why not a startup check, which is what the spec asked for:** the failure a private-range default cannot see is an unconfigured CDN, and that is invisible without traffic — the settings are byte-identical whether or not a CDN sits upstream. A startup check can only assert what the config already says. So the middleware samples the first 50 proxied requests and warns **once** when not one of them resolved to a distinct client, with two branches because the faults need different remedies: resolved == the immediate peer means the proxy is forwarding nothing; resolved ≠ peer means something upstream is replacing it, which is usually a CDN. Direct (untrusted-peer) traffic is never sampled, because one address there genuinely means one user and warning would train deployers to ignore the only warning that matters. The message names its own false positive rather than asserting a fault. **Why the app must explain itself at all:** a non-technical deployer has to find out something is wrong in plain language at 1am, not on a forum. `manage.py check_client_ip` prints the effective config (raw, parsed, shipped-default or overridden) and the `SECURE_PROXY_SSL_HEADER` that derives from it, walks a `--peer`/`--xff` chain hop by hop with `trusted`/`client`/`unparseable` on each entry so a chain copied from a proxy access log can be checked without a running instance, and summarises the `request_ip` values on recent verification tokens — the same rows `ip_budget_spent` counts — with a verdict separating *many addresses* from *one* from *no source recorded at all*. **The trade the owner took: no stored chain.** The spec asked for the full forwarded chain per recent request; nothing in the schema holds one, and adding `forwarded_for` to `EmailVerificationToken` meant a migration plus threading a second parameter through `send_verification_email` and its six call sites — into the write path §2F had just finished proving. The resolved-IP distribution already surfaces both failure modes the diagnostic exists for, and `--xff` covers the human debugging case. **How to apply:** keep the diagnostic's data source read-only — settings plus one existing table. If a real deploy later needs stored chains, the field is a cheap addition to a table that already records one address per send; do not pre-emptively widen the verification write path for a hypothetical.
