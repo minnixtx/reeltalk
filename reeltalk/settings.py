@@ -27,11 +27,28 @@ DOMAIN_HOST = DOMAIN.split(":", 1)[0]
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[DOMAIN_HOST, "localhost"])
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
-# Which peers are allowed to tell us the scheme a request arrived with (the
-# TLS terminator's address/CIDR, e.g. 192.168.1.141/32). Empty means no proxy
-# in front of us: nothing forwarded is believed and SECURE_PROXY_SSL_HEADER stays
-# off, so a misconfigured deploy can never trust a scheme from a stranger.
-TRUSTED_PROXIES = env.list("TRUSTED_PROXIES", default=[])
+# Which peers are allowed to tell us the scheme a request arrived with, and
+# whose address a per-source limit should skip past (see proxy_trust.py).
+#
+# The default is the private ranges rather than nothing, so the common
+# `docker compose up` with a reverse proxy on the compose network needs no
+# configuration at all. That is safe because a public-internet client cannot
+# *present* a private source address — return routing fails and the TCP
+# handshake never completes — so trusting these ranges only ever trusts
+# machines genuinely on the local network.
+#
+# Setting it explicitly to empty means "no proxy in front of us": nothing
+# forwarded is believed and SECURE_PROXY_SSL_HEADER stays off. That is a
+# supported posture, not a misconfiguration.
+PRIVATE_NETWORKS = [
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "fc00::/7",
+    "127.0.0.0/8",
+    "::1/128",
+]
+TRUSTED_PROXIES = env.list("TRUSTED_PROXIES", default=PRIVATE_NETWORKS)
 SECURE_PROXY_SSL_HEADER = (
     ("HTTP_X_FORWARDED_PROTO", "https") if TRUSTED_PROXIES else None
 )

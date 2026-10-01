@@ -43,8 +43,13 @@ build from the same Dockerfile but are **separate image tags** — see §7.
 
 Do **not** put Cloudflare's edge in the TLS path for this design. If you ever turn
 on the Cloudflare proxy, the peer address changes and `TRUSTED_PROXIES` must be
-rewritten to the Cloudflare IP ranges, or the forwarded scheme stops matching and
-you publish `http://` actor IDs over real HTTPS.
+extended with the Cloudflare IP ranges — **added alongside** the app's own proxy,
+not swapped for it, because the app walks `X-Forwarded-For` right-to-left and
+needs every trusted hop named. Without them the forwarded scheme stops matching
+and you publish `http://` actor IDs over real HTTPS; on the address axis every
+visitor collapses onto the CDN's egress address and shares one throttle bucket.
+`python manage.py check_client_ip` prints the resolved addresses so you can see
+that collapse rather than infer it.
 
 ---
 
@@ -81,7 +86,7 @@ Django's CSRF check.
 
 | Variable | Value here | Notes |
 |---|---|---|
-| `TRUSTED_PROXIES` | `192.168.1.141/32` | Comma-separated IPs/CIDRs. The only peers whose `X-Forwarded-Proto` is believed. **Empty means "no proxy":** the forwarded scheme is ignored entirely and `SECURE_PROXY_SSL_HEADER` is never set — a safe default, not a misconfiguration. |
+| `TRUSTED_PROXIES` | `192.168.1.141/32` | Comma-separated IPs/CIDRs. Answers two questions at once: the only peers whose `X-Forwarded-Proto` is believed, and the hops the app skips when walking `X-Forwarded-For` right-to-left to find the client a per-IP limit should count. **The shipped default is the private ranges** (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`, loopback), so a proxy on the LAN or the compose network needs no value at all — the explicit value here only narrows that default to the one measured terminator. **Explicitly empty means "no proxy":** nothing forwarded is believed and `SECURE_PROXY_SSL_HEADER` is never set — a supported posture, not a misconfiguration. |
 | `SECURE_COOKIES` | `true` (default) | Drives `SESSION_COOKIE_SECURE` + `CSRF_COOKIE_SECURE`. |
 | `COOKIES_FOLLOW_SCHEME` | `true` (default) — **leave it set** | The flag follows the request's actual scheme per-request. This is what lets one instance serve both public https and plain-HTTP LAN. Setting `false` makes `Secure` unconditional, and then **`csrftoken` is never returned over `http://` and LAN login 403s.** Only set `false` if you are deliberately giving up plain-HTTP LAN access. |
 
