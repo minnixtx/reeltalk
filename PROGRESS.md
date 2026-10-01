@@ -4451,6 +4451,209 @@ mail** — which is new behaviour on deploy, and the reason the
 console-backend guard matters before any real address is put on a real
 account.
 
+### Executed — 2F-3 is DONE, gate-verified; sign-in is now gated (2026-09-30)
+
+**What landed.** `reeltalk/social/backends.py` — `EmailVerificationBackend`
+(the gate) plus its `why_refused` / `diagnose` diagnostic and the three named
+refusals; `AUTHENTICATION_BACKENDS` set to that one backend in `settings.py`,
+replacing `ModelBackend` rather than sitting beside it; `GET
+/account/verify/<code>/` (`verify_link`), `GET+POST
+/account/verify/resend/` (`verify_resend`) and the `verify_form.html` /
+`verify_result.html` templates; `VerificationRefusalMixin` +
+`VerificationAwareLoginForm` + `AdminVerificationLoginForm` in `forms.py`;
+`ResendVerificationForm`; `SignupForm.email` required and unique (R118);
+`address_in_cooldown` / `ip_budget_spent` / `request_resend` in `verify.py`;
+`EmailVerificationToken.request_ip` + migration `social.0017`; the
+`client_ip` / `is_trusted_proxy` extraction in `proxy_trust.py`; `signup()`,
+`setup()` and `invite_accept()` no longer calling `login()`;
+`reeltalk/tests/members.py`; `reeltalk/tests/test_verification_gate.py`
+(37 tests). **Split boundary, by owner's choice at the start of this
+increment:** the unverified banner and the `UserAdmin` read-only status line
+with the token inline and the send-verification action are **2F-3b**, not
+here.
+
+**Why the gate is a backend and not `is_active`.** R102b fixed `is_active` to
+*suspended and banned*, with tests written specifically against a third state
+being folded in. Verification is unrelated to both — a suspended account and
+an unverified one are different problems with different fixes, and merging
+them would make three refusals indistinguishable to the person on the other
+side of the door. `ModelBackend.user_can_authenticate` is the idiomatic seam,
+and because `get_user()` runs it on **every** request rather than only at
+login, refusing there buys the same property R102b got for suspension for
+free: **an already-logged-in session is cut on its next click.** Stated
+beforehand rather than discovered later — if the admin moves a signed-in
+member's address, that member is out at their next click until they verify
+the new one. The weaker alternative (gate `authenticate()` only, so live
+sessions ride on untouched) was not taken.
+
+**`force_login` is not a bypass, and that is the whole reason the suite could
+be adapted honestly.** It goes through the same `get_user()` →
+`user_can_authenticate` path, so a test cannot smuggle an unverified account
+past the thing under test. Combined with the fact that an address-less test
+user is unverifiable by construction, this is what made the blast radius
+finite and forced an explicit helper rather than a settings switch — a control
+that only *looks* enforced is worse than none.
+
+**No exception for the admin, and what makes that safe rather than a brick.**
+R119 was offered an `is_superuser` exemption on R114's reasoning and the
+owner declined it. R122 is what makes the refusal survivable: the resend
+route works with no session at all, so an admin who cannot get in can still
+send the link to themselves. This is why R119 and R122 are one increment and
+not two — the door and the way back through it cannot ship separately. If a
+future change removes or breaks the resend route, it re-creates the
+lockout-with-no-exit R114 deleted and must not be made without the owner.
+
+**The bug the obvious wiring ships with.** Pointing `admin.site.login_form` at
+the same `AuthenticationForm` subclass the public page uses reads as "same
+gate, better copy" and in fact **deletes
+`AdminAuthenticationForm.confirm_login_allowed`, the only thing enforcing
+`is_staff` at the admin's login page.** A moderator — never staff, by
+R100's design — gets signed in through the admin's own form with a correct
+password. The gate holds; the form wiring opens a different door next to it.
+Fixed by splitting the refusal copy into `VerificationRefusalMixin` so each
+endpoint keeps its own base and borrows only the copy, with
+`test_the_admin_login_form_rejects_the_moderators_correct_password` pinning
+it. The admin form also **withholds** the "not verified" sentence from any
+account that could not have reached the admin anyway: telling a plain member
+probing `/admin/login/` that their password was *nearly* right would make
+this form a better oracle than Django's default one for no benefit, since
+that person cannot verify their way in regardless. A second test pins that
+half. Related trap found while building: `error_messages` is **not** merged
+across base classes by Django — each class spreads its parent's dict by hand —
+so putting the `not_verified` entry on the mixin would have hidden `inactive`
+and `invalid_login` outright and turned the suspension path into a
+`KeyError`.
+
+**The login page distinguishes "wrong password" from "not verified", and the
+diagnostic cannot log anyone in.** `AuthenticationForm.clean` cannot reach
+`confirm_login_allowed` for a backend-refused user, so the form overrides
+`clean()` and asks the gate itself. `why_refused` returns a **string and
+never a user object**, so nothing reached through it can be logged in by it,
+and it reuses `check_password_with_timing_attack_mitigation` rather than
+writing a second password check — a diagnostic that is faster for a
+non-existent account than for an existing one is an enumeration channel
+handed to anyone who can time a request. The accepted leak is priced:
+`REFUSAL_UNVERIFIED` is only reachable *after* the password passed, so
+learning it requires already knowing the password — a far weaker position
+than address enumeration, and the alternative is a support dead-end for every
+member who has not clicked a link. Django's stock copy is actively harmful
+after the gate because it sends that member to a password reset that does
+not exist yet (R121) instead of the resend route that does. The template
+renders the resend link off the form's own `not_verified` flag rather than by
+matching error text, so the copy can change without silently taking the link
+away.
+
+**Both resend axes, because dedup is not rate limiting (R107).**
+Per-address cooldown (5 min) and per-IP budget (25 / 5 min). The per-IP
+counter lives on the token table (`EmailVerificationToken.request_ip`)
+rather than `LocMemCache`, so it survives a deploy, is shared across web and
+worker processes, and is readable by the admin — a cache would have been a
+throttle that quietly resets on every container restart. `client_ip()`
+believes the leftmost `X-Forwarded-For` entry only when `REMOTE_ADDR` is in
+`TRUSTED_PROXIES`; with the live value `192.168.1.141/32`, throttling on
+`REMOTE_ADDR` alone would have counted every real user behind that proxy as
+one source. Stated honestly: the per-IP axis bounds **mail volume from a
+source**, not request-level flooding, which stays R107's unbuilt antispam
+layer.
+
+**Both cooldown filters carry `send_error=""` deliberately.** A *failed* send
+must not make the member wait out a window for mail that never came, while a
+queued-or-sent send still bounds minting. This is the same reasoning that made
+`sent_at` non-redundant with `created_at` in 2F-2, applied to the window
+that consumes it.
+
+**The uniform response, and what it costs.** Every resend POST outcome —
+known address, unknown address, throttled — renders the *identical*
+sentence; the reason goes only to the log. Accepted cost: a member who
+mistypes their address gets no signal that they did. The alternative makes
+the resend form an address-existence oracle, which is a worse trade than a
+typo.
+
+**R118 stopped being optional the moment the gate went up.** Making
+`SignupForm.email` required is necessary *in this increment*: an account
+with no address can never be verified, so under R119 it can never sign in.
+Shipping the gate while leaving the field optional would manufacture a brick
+one row at a time and charge the member for it later. The uniqueness check
+is the other half — two accounts on one address is an ambiguity about who
+owns the mailbox.
+
+**Signup stops logging you in.** `signup()`, `setup()` and `invite_accept()`
+no longer call `login()`; each sends the mail, flashes, and redirects to the
+resend page. Auto-login after signup was only ever coherent while the gate
+didn't exist — it put an unverifiable identity into a session and called it a
+welcome. `invite_accept`'s send stays **inside** the existing
+`transaction.atomic()`, so the `on_commit` fires only if the account and the
+invite's redemption both landed. Across the confirm boundary the session gets
+`cycle_key()`: a new key with the data retained and the old key deleted, so
+the privilege change cannot ride a session id that existed before the
+mailbox was proven.
+
+**The suite adapted through one helper that spends a real token.**
+`reeltalk/tests/members.py`'s `member()` / `site_admin()` / `moderator()`
+call `verify()`, which mints and `consume()`s an actual
+`EmailVerificationToken` rather than writing a verified column — so a
+fixture's "verified" is the same thing production produces, and R123's "every
+verified flag traces to a clicked link" stays true of the tests themselves.
+284 creation sites converted across 37 files. Two mechanical hazards turned up
+and both were real rather than cosmetic: the transform's inserted import
+landed inside parenthesised import blocks (syntax errors at build), and files
+that already had a fixture named `member` or `site_admin` ended up with
+`def member(db): return member(...)` resolving to **the fixture itself** —
+infinite recursion, caught by `F811` rather than by luck. Those now alias the
+import.
+
+**Five tests changed meaning rather than being deleted for convenience.**
+`test_setup_post_creates_admin_and_logs_in` → `…_but_does_not_log_it_in`;
+`test_signup_creates_local_user_and_logs_in` → `…_but_does_not_log_it_in`;
+`test_an_unverified_account_still_signs_in` → three tests that pin the stock
+`ModelBackend` still says yes, ours says no, and ours is the one Django is
+configured with; `test_admin_created_account_can_authenticate` →
+`…_is_refused_until_it_verifies`; `test_an_addressless_signup_still_creates_its_account_and_sends_nothing`
+→ `…_is_refused_rather_than_built_unverifiable` (its own comment had said
+"until a later increment" — this is that increment). Two more were
+**passing for the wrong reason** and are fixed rather than left green: the
+ban-reservation tests in `test_ban_read_sites.py` posted an empty email, so
+once the field became required they were being refused by the email check
+rather than by the ban — they now carry real addresses so the reservation is
+what refuses. `test_import_export.py`'s mirror-account test now spends a
+token to reach the import guard, with the fiction stated in place: a mirror
+account verifying its mail is not a thing that happens in production.
+
+**Verified.** Gate **`1933 passed + 5 skipped`** against a baseline of 1886 +
+5 — **+47**, reconciled as 37 new functions in
+`tests/test_verification_gate.py`, 4 net new elsewhere (9 added, 5 replaced),
+and 6 clean-room parametrised instances (one each for `social/backends.py`,
+`tests/members.py`, `verify_form.html`, `verify_result.html`, migration
+`social.0017`, `tests/test_verification_gate.py`). `ruff check` clean,
+`ruff format --check` clean at 137 files, `makemigrations --check` reports
+**No changes detected**. Full log at `/tmp/gate_2f3_final.log`.
+`/tmp/gate_2f3.log` is the same suite before the second pass and shows 23
+failures — the un-adapted files listed above — which is why the final run was
+repeated after the last file was written.
+
+**Not done, by scope.** No unverified banner. No `UserAdmin` read-only status
+line, no token inline, no admin-triggered send-verification action (R124) —
+`sent_at` / `send_error` / `send_state` and `request_ip` all exist and are
+written, and nothing renders them yet. **Consequence worth naming: an account
+created in `UserAdmin` is currently dead on arrival** — it has an address, is
+unverified, and nothing sends its link, so it cannot sign in until 2F-3b
+lands. No password reset, by R121. Nothing routed through `notify()`, by
+R99. No 2F-4 live proof.
+
+**Deploy note.** There are now **three** pending migrations — `social.0015`,
+`social.0016`, `social.0017` — not two. `docker compose build` (all three
+images, each its own tag) → `manage.py migrate` → `up -d --force-recreate web
+worker`. **`EMAIL_*` must be configured in `.env` BEFORE the first-run wizard
+runs**, because `setup()` creates the admin and its `login()` will now be
+refused while the wizard has already vanished — the resend route recovers it,
+but only if mail actually works. Under R119 the three blank-address accounts
+(`witness` 124, `_instance` 126, `zz_dedup` 127) lock out on deploy. The
+owner accepted that; two things about it are not reversible judgement calls:
+**`_instance` is the signing identity for every outbound Flag and must never
+be removed**, and `witness` holds the standing probe password — ask rather
+than guess. `social.0017` adds one blank-defaulted `CharField` to an existing
+table, no backfill.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
