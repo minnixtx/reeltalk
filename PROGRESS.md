@@ -23,10 +23,22 @@ is history.**
   `git log -n 1 --oneline` rather than trusting one written here. Anything a
   single command answers for free is a pointer in this block, not a value;
   only a literal hash goes stale faster than this block gets rewritten.
-- **Open, and it is not code:** whether the router SNATs inbound **WAN**
-  traffic. If it does, every internet user shares a single source address
-  and the per-IP resend throttle counts the wrong party. Owner-side check
-  in the NPM access log — see "The request path" at the end of §2F.
+- **Resolved 2026-10-01:** the router does **not** SNAT inbound **WAN**
+  traffic. NPM's access log for proxy host 76 shows real public client
+  addresses arriving intact; the `192.168.1.1` bucket is LAN hairpin only.
+- **Open next (app work, direction agreed 2026-10-01):** `client_ip()` takes
+  the **leftmost** `X-Forwarded-For` entry, and the proxy **appends** rather
+  than replaces, so any client can forge the address every per-IP limit keys
+  on. The fix is a right-to-left trusted walk with a private-range default
+  plus startup diagnostics — **in the app**, never in a deployer's proxy.
+  `client_ip()` currently has **no tests at all**. Full design in "The fix:
+  resolve right-to-left" at the end of §2F.
+- **A gap, not a new feature:** there is **no self-service password reset**
+  anywhere in the codebase, though `PLAN.md` §3.7 marks it `[v0.1 core auth]`.
+  Recovery today means an operator setting the password in the admin. It is
+  cheap now because 2F-3 already built the token, the send path and the
+  throttle it needs — but it should land **after** the `client_ip()` fix,
+  because reset is the endpoint where a wrong client IP costs the most.
 - **Parked:** the M6 grindhouse artwork polish pass, at R73.
 
 ### How to read the project's docs
@@ -5147,6 +5159,122 @@ from outside the LAN and see whether the client field is a real public
 address or another router hop. Worth doing before the instance has any user
 who is not the owner, because it decides whether the abuse throttle means
 anything at all.
+
+### Live check: the router does NOT SNAT inbound WAN — and the throttle is spoofable anyway
+
+Two findings from reading NPM's own logs on 2026-10-01. The first closes the
+open item above. The second opens a bigger one, and that one is in the app.
+
+**The WAN SNAT question is answered: no SNAT.** `reeltalk.minnix.dev` is NPM
+proxy host **76** (`/data/nginx/proxy_host/76.conf`); its log is
+`/data/logs/proxy-host-76_access.log` and carries a `[Client <ip>]` field.
+Distribution across the current log:
+
+```
+1311  176.9.223.138
+1245  188.34.142.224
+ 396  192.168.1.1        <- the LAN hairpin, unchanged
+ 362  195.201.87.85
+ 360  195.201.175.43
+  56  66.23.193.180
+  ... ~20 more distinct public addresses
+```
+
+Inbound WAN traffic arrives with real source addresses, so the per-source
+throttle counts the right party for internet traffic. The `192.168.1.1`
+bucket is LAN-hairpin only. **That open item is closed.**
+
+**But the per-IP axis is bypassable regardless, because the proxy appends
+rather than replaces.** `/etc/nginx/conf.d/include/proxy.conf` inside the NPM
+container:
+
+```nginx
+proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+```
+
+`$proxy_add_x_forwarded_for` **appends** `$remote_addr` to any
+`X-Forwarded-For` the client already sent; it does not replace it. There is
+no `real_ip` / `set_real_ip_from` anywhere in `76.conf`, so nothing overwrites
+an inbound forged header before it reaches us. And `client_ip()` takes the
+**leftmost** entry whenever the peer is trusted. Chain it:
+
+1. attacker sends `X-Forwarded-For: 203.0.113.7`
+2. NPM forwards `X-Forwarded-For: 203.0.113.7, <real attacker ip>`
+3. app sees `REMOTE_ADDR = 192.168.1.141` (trusted) → records `203.0.113.7`
+
+`RESEND_IP_LIMIT = 25` is defeated by rotating one header. The 5-minute
+per-address cooldown still holds, so this is not wide open — but the axis
+aimed at someone spraying **many** addresses is precisely the axis that
+attacker forges.
+
+`proxy_trust.py`'s own docstring anticipates the general shape ("behind a
+chain of proxies an attacker who can set the header at the front can still
+shape it"). What was not known until now is that **there is no chain**: NPM is
+the only proxy, so every WAN client *is* at the front.
+
+**Coverage gap found alongside it.** `reeltalk/tests/test_proxy_trust.py`
+covers `X-Forwarded-Proto` only. `client_ip()` — the function that decides
+whose address every per-source limit keys on — has **no tests at all**.
+
+**Django provides no replacement.** Checked on the installed 6.1.1: the only
+proxy-related global settings are `SECURE_PROXY_SSL_HEADER`,
+`USE_X_FORWARDED_HOST` and `USE_X_FORWARDED_PORT`. There is no
+`TRUSTED_PROXIES` to adopt, so this stays a `proxy_trust.py` change.
+
+**Not proven live.** This is read off the running NPM config and the app's
+trust code, not from a forged round-trip against the endpoint. The config is
+unambiguous, but the fix should ship with a test that models the real *append*
+semantics rather than a hand-built two-entry header.
+
+### The fix: resolve right-to-left, and default so no config is needed
+
+Decided with the owner on 2026-10-01 under a standing rule: **the fix belongs
+in the shipped code, not in the owner's proxy.** ReelTalk ships to deployers
+on unknown infrastructure, and "add an obscure setting to NPM because that is
+what I run" is not user-friendly. **No change was made to NPM and none should
+be** — the app fix makes NPM's append behaviour harmless as it stands.
+
+**1. Walk `X-Forwarded-For` right-to-left, skipping entries that are
+themselves trusted proxies, and return the first untrusted address.** This is
+`mod_remoteip`'s algorithm, and it is correct for every topology rather than
+one:
+
+| Deployment | Client sends | XFF at app | Peer | Resolved |
+|---|---|---|---|---|
+| No proxy at all | — | — | `8.8.7.6` | `8.8.7.6` ✓ |
+| One proxy (NPM / Caddy / Traefik / nginx) | nothing | `203.0.113.9` | `192.168.1.141` | `203.0.113.9` ✓ |
+| Same, forged header | `XFF: 1.2.3.4` | `1.2.3.4, 203.0.113.9` | `192.168.1.141` | `203.0.113.9` ✓ forgery skipped |
+| Cloudflare + proxy, CF ranges configured | nothing | `client, CF_ip` | `10.0.0.5` | `client` ✓ |
+| Cloudflare + proxy, CF ranges **not** configured | nothing | `client, CF_ip` | `10.0.0.5` | `CF_ip` ✗ — caught by the diagnostic below |
+
+**2. Default `TRUSTED_PROXIES` to the private ranges** — `10.0.0.0/8`,
+`172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`, loopback. The safety
+argument is that **a public-internet client cannot present a private source
+address**: return routing fails and the TCP handshake never completes, so
+trusting private ranges only ever trusts machines genuinely on the local
+network. The common `docker compose up` with a reverse proxy on the compose
+network then works with **zero configuration**. Residual risk is a malicious
+actor already inside the LAN spoofing a private source — against an abuse-rate
+control, not an identity system.
+
+**3. Make the app explain itself**, because a non-technical deployer has to
+find out something is wrong in plain language rather than on a forum at 1am:
+
+- A **startup warning** when the resolved client IP keeps equalling the
+  immediate peer — the signature of "your entire user base counts as one
+  address" (row 5). Something like: *all traffic appears to arrive from one
+  address; if you run behind a CDN, add its address ranges to
+  `TRUSTED_PROXIES`.*
+- **`manage.py check_client_ip`** printing, for recent requests, the full
+  forwarded chain, what was resolved, and why — so a deployer can paste it
+  into an issue instead of describing their setup.
+
+**4. `DEPLOYING.md` covers several proxies** — Caddy, Traefik, nginx, NPM,
+Cloudflare — with copy-paste values, not just this box's.
+
+**Sequencing.** Items 1 and 2 are one increment: same file, same test surface,
+neither useful alone. They should land **before** any feature whose throttle
+depends on a correct client IP — password reset above all.
 
 ## 3. Host facts (this box)
 
