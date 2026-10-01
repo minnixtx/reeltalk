@@ -5024,6 +5024,79 @@ net; what it could not give — a real mail server accepting, a real link
 being followed, a real clock expiring a real token, a real counter refusing
 a real request — is now on the record here.
 
+### Live proof — the admin send button pressed in a browser; §2F fully closed (2026-10-01)
+
+**The last unproven thing in §2F is now proven.** The owner pressed the
+admin send button on `bait` from `reeltalk.minnix.dev` while logged in as
+`minnix`. The token table went one row to two: the new row `khKZ4Gja`
+carries `send_state=sent`, `sent_at=2026-10-01 20:20:18` and no
+`send_error`, and the previously live token `EoxYekc4` came back
+`superseded`. **`bait` stayed `verified=False`** — a real admin click
+through the real HTTP endpoint could ask for verification and could not
+produce it. That is R123 observed on production rather than inferred from a
+test, and it is the specific thing the 2F-3b record had been flagging as
+outstanding.
+
+Confirmed by eye on the rendered page at the same time: the green verified
+status line on `witness`, the `_instance` "do not give it an address"
+branch, the address-less branch rendering no button, and that pressing send
+keeps the admin on the account rather than bouncing to the changelist.
+
+**Still test-only after this round:** the `failed`-send rendering with a real
+SMTP error line. `email.com` accepted the message, so no real failure was
+ever drawn on screen — the test covering it supplies a hardcoded error
+string. Low value to chase; the code path is the same one that stamps
+`send_error` on the live success.
+
+### The request path, and why `request_ip` reads as `192.168.1.1`
+
+Recorded because the alternative is a future session reading a router
+address in `request_ip` and concluding the proxy trust is broken.
+
+```
+browser (LAN)
+  → reeltalk.minnix.dev = 97.98.21.119    public; wildcard DNS on minnix.dev
+  → router 192.168.1.1                    hairpin DNAT + SNAT
+  → NPM 192.168.1.141                    sets X-Forwarded-For: 192.168.1.1
+  → app 192.168.1.138:3030               uvicorn peer = 192.168.1.141
+```
+
+Nginx Proxy Manager runs at **`192.168.1.141`**, which is the value in
+`TRUSTED_PROXIES=192.168.1.141/32` — **correct, and verified against
+uvicorn's own access log**, which shows the peer of every proxied request as
+`.141`. The trust check therefore passes and `client_ip()` reads the
+leftmost `X-Forwarded-For` entry rather than falling back to `REMOTE_ADDR`.
+
+**Why that entry is `.1` and not the browser.** A LAN client reaching the
+*public* hostname hairpins back through the router, which SNATs the source
+to its own LAN address. NPM sees `.1`, writes `.1` into
+`X-Forwarded-For`, and the app stores `.1`. Every hop behaved exactly as
+designed; nothing here is a bug.
+
+**Consequence.** LAN clients using the public hostname all share a single
+`192.168.1.1` bucket for the 25-per-5-minutes resend budget. Inert at six
+local accounts. If it ever bites, the fix is router-side — disable SNAT on
+the hairpin rule, or split DNS so LAN clients resolve the name to `.141`
+directly — not in the app.
+
+**Do not add `192.168.1.1` to `TRUSTED_PROXIES`.** It is a NAT device, not
+a proxy whose forwarded headers we should believe, and the actual proxy is
+already trusted. This was floated mid-session and rejected on inspection; it
+is written down so that it is not proposed again by someone who sees `.1` in
+a token and `.141` in the setting and assumes they disagree.
+
+**One check outstanding, and it is not an app check.** Whether the router
+also SNATs inbound **WAN** traffic. If it does, every internet user arrives
+as one address and the per-source throttle counts the wrong party — the
+exact failure mode `client_ip()` exists to avoid, arriving from a direction
+the app cannot see or fix. Consumer routers normally DNAT inbound without
+SNAT so real client IPs survive, but that has **not** been verified on this
+network. **How to check:** in NPM's access log, find a request that came
+from outside the LAN and see whether the client field is a real public
+address or another router hop. Worth doing before the instance has any user
+who is not the owner, because it decides whether the abuse throttle means
+anything at all.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
