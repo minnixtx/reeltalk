@@ -4933,31 +4933,96 @@ not the recipient. **The password is deliberately not recorded anywhere in
 this repo or in memory** — it was held in a mode-600 file under `/tmp`,
 bind-mounted read-only into the container, and deleted afterwards.
 
-**What this does NOT prove, stated plainly.**
+**What this record does NOT cover.** **The admin button itself was never
+pressed.** The instance's admin password is the owner's and was not
+supplied, so the address change and the send were driven from a server shell
+through the same production functions the button calls (`change_email` →
+`send_verification_email`), not through `UserAdmin`'s HTTP endpoint. **The
+admin surface's live behaviour still rests only on its 25 tests** — the 25
+in `test_admin_verification_surface.py` are what stands behind the button,
+the status line and the token inline. Worth one browser visit by the owner
+to confirm the rendered page matches.
 
-- **The admin button itself was never pressed.** The instance's admin
-  password is the owner's and was not supplied, so the address change and
-  the send were driven from a server shell through the same production
-  functions the button calls (`change_email` → `send_verification_email`),
-  not through `UserAdmin`'s HTTP endpoint. **The admin surface's live
-  behaviour is still test-only** — the 25 tests in
-  `test_admin_verification_surface.py` are what stands behind the button,
-  the status line and the token inline. Worth one browser visit by the owner
-  to confirm the rendered page matches.
-- **Token expiry is not proven live.** Backdating `expires_at` past the 72h
-  window and showing the refusal is still suite-only.
-- **The resend cooldown is not proven live** — neither the per-address
-  window nor the per-IP budget has been exercised against real traffic.
-- **A real password sign-in as `witness` was not performed.** The gate was
-  checked at the predicate level (`user_can_authenticate`), not through the
-  login form, because `witness`'s password is the owner's standing probe
-  credential and is not recorded here.
+Token expiry, both throttle axes, and a real login-form sign-in as `witness`
+were all outstanding when this was written and are **covered by the record
+below** — see "Live proof — expiry and both R122 throttle axes". The owner
+reset `witness`'s password themselves via `manage.py changepassword` (hidden
+prompt, value never recorded) and signed in through the form.
 
-**So: the send-and-verify chain is live-proven; 2F-4 is not fully closed.**
-What remains of 2F-4 is the expiry refusal, the two cooldown axes, and a
-login-form round trip. None of it is a mystery — all of it is suite-proven
-and unproven-live only in the sense that nobody has run it against the real
-thing yet.
+### Live proof — expiry and both R122 throttle axes, on production (2026-10-01)
+
+**This closes 2F-4.** The three live-proof items the spec listed as
+outstanding after the send-and-verify chain were token expiry, the
+per-address cooldown, and the per-source budget. All three were observed on
+the running instance rather than inferred from the suite.
+
+**Expiry.** Minted a token directly for `bait` — deliberately chosen because
+it is unverified *and* its address is a non-receivable domain, so the test
+proves the expiry path without putting anything in anyone's mailbox.
+Backdated `created_at` to −73h and `expires_at` to −1h through
+`update_fields` (which is what makes an `auto_now_add` column rewindable at
+all), then fetched the real verify URL over HTTP. Response:
+`<h1>That link did not work</h1>` with *"expired on October 1, 2026."*
+`bait` stayed `verified=False`, the token read `link_state=expired`,
+`used_at` stayed `None`. An expired token neither verifies nor spends.
+
+**Per-address cooldown.** A real logged-out `POST /account/verify/resend/`
+for `forgejo@minnix.dev` minted a token carrying
+`request_ip=192.168.1.138`, `send_state=sent`, `link_state=live`, and the
+worker logged the send. Repeating the identical POST seconds later left the
+token count **unchanged at 2** and produced the web-process line
+*"Verification resend for @witness is inside the 5-minute cooldown; no new
+mail."* No second message went out.
+
+**Per-source budget.** `RESEND_IP_LIMIT = 25` per 5 minutes, so proving it
+by actually sending 25 mails would have been 25 real emails for no extra
+knowledge. Instead the counter was seeded with 24 minted-but-never-sent rows
+carrying `request_ip=192.168.1.138`, which is exactly what
+`ip_budget_spent()` counts. **The seeding was deliberately spread across
+`witness`, `warden` and `minnix` and pointed at `bait` as the target**,
+because seeding the target's own address would have put it inside its own
+address cooldown and the two axes would have masked each other — a refusal
+would then have proved nothing about which one fired. With the target address
+clean and the source window reading 25, the POST for `bait@email.com`
+produced the `WARNING` line *"Verification resend refused:
+192.168.1.138 is over the limit of 25 per 5 minutes. Uniform response
+sent."* and `bait`'s token count did not move.
+
+**The ordering claim is now observed, not just asserted.** The code comments
+say the source limit is checked *before* the account lookup, "because it is
+the defence that has to hold even when everything behind it is being
+exercised as hard as it can." The refusal fired with no mint and no send
+attempted, which is what that ordering has to look like from outside.
+
+**Uniformity verified from the client side.** Every one of these requests —
+successful send, address cooldown, source-limited — returned the same
+`302` with an empty body. **Nothing in the HTTP response distinguishes them,
+so the only observables are the log line and the token table.** That is the
+whole of R122's enumeration defence working as designed, and it is worth
+stating explicitly here because it means these proofs *had* to be made from
+the server side; a client-side test could not have told a blocked request
+from a successful one even to look at.
+
+**One behaviour worth recording so nobody "fixes" it into a leak.**
+`request_resend` has no "already verified" check, so a resend for an
+account that is already verified still sends a fresh "verify your email"
+mail. That is not an oversight — under the uniform-response requirement,
+answering "you are already verified" would be exactly the enumeration oracle
+the whole design exists to close. Sending is the correct branch. A future
+contributor who spots this and adds a short-circuit would open the hole R122
+shut.
+
+**Cleanup.** The 24 seeded rows and the 1 backdated row were deleted after
+identification was printed and checked (24 seeded across the three named
+users, 1 bait row older than 72h, 1 bait row that had to survive and did).
+The instance is back to its pre-test shape; the source window is clear. No
+credential was created, changed, or left behind.
+
+**Mock-only vs live, final for §2F.** Everything in this section is live
+observation on `reeltalk.minnix.dev`. The suite remains the regression
+net; what it could not give — a real mail server accepting, a real link
+being followed, a real clock expiring a real token, a real counter refusing
+a real request — is now on the record here.
 
 ## 3. Host facts (this box)
 
