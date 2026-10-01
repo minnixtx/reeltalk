@@ -4654,6 +4654,63 @@ be removed**, and `witness` holds the standing probe password — ask rather
 than guess. `social.0017` adds one blank-defaulted `CharField` to an existing
 table, no backfill.
 
+### Deployed — 2F-3 is LIVE on reeltalk.minnix.dev (2026-09-30)
+
+Deployed on the owner's instruction with three pending migrations applied to
+the live database. **Fresh dump taken first**: `reeltalk-20261001T015248Z.dump`
+(7 retained), so the schema change is reversible without trusting the nightly.
+All three images rebuilt (`reeltalk-web`, `reeltalk-worker`, `reeltalk-backup`
+— not just `web`, per DEPLOYING.md §7), `migrate` applied `social.0015`/`0016`/
+`0017` clean, `up -d --force-recreate web worker backup`. All four services
+healthy, no errors in the web or worker logs.
+
+**The gate is live and the recovery path is proven end-to-end on real mail, not
+mocked.** The owner's admin account (`minnix`, id 1) was unverified by the
+migration like every other row — the verified columns did not exist beforehand —
+so rather than let them meet the lockout cold, the logged-out resend route was
+exercised over real HTTP with a real CSRF token: `POST /account/verify/resend/`
+→ `302` back to the page, token row created with `request_ip` populated,
+`sent_at` stamped, `send_error` empty, `expires_at` at the 72h TTL, the `ormq`
+queue drained to zero, and the worker logged `Verification email sent to
+minnix@minnix.dev for @minnix.` **That is the whole R119 + R122 pair proven on
+production: the door shuts, and the way back through it works without a
+session.**
+
+**Proxy-trust refactor verified against the real path, which is why this deploy
+was not a routine one.** 2F-3 extracted `client_ip` / `is_trusted_proxy` out of
+`TrustedProxySchemeMiddleware`, so the scheme handling that decides published
+identity and cookie flags was rewritten shortly before going live. Checked on the
+real stack: the published actor `id`, `inbox` and `endpoints.sharedInbox` all
+come back `https://reeltalk.minnix.dev/...` with no `:3030` leak; `csrftoken`
+carries `Secure` over public HTTPS and omits it over plain LAN HTTP, so
+`COOKIES_FOLLOW_SCHEME` still works and LAN login is not broken; `:3030`
+refuses connections from the public hostname. **One doc correction while
+verifying this: DEPLOYING.md §11.2 expects an untrusted-peer request to return
+`http://192.168.1.138:3030/...` for the actor id. That expectation is stale** —
+`identity.absolute_uri` mints from `settings.CANONICAL_ORIGIN` and never from
+the request, so a LAN request returns the canonical `https` id whether or not
+it carries a spoofed `X-Forwarded-Proto`. That is the correct behaviour and the
+identity-fragmentation fix working as designed; the middleware gate governs
+`request.is_secure()` and the cookie flags, which is where the transport
+actually matters. §11.2 should be reworded to test the cookie flag rather than
+the actor id.
+
+**Live account inventory after the gate went up** (this corrects the shape the
+2F-3 brief assumed, which was written against a different database): **6 local
+accounts and 48 remote mirrors.** The mirrors all carry blank addresses and
+never sign in, so the gate refusing them is correct and inert — the owner has
+confirmed the remote users do not matter, since this instance is a test
+instance rather than production. Of the six local accounts: `minnix` (admin,
+`minnix@minnix.dev`) can self-serve via the resend route, proven above;
+`bait` and `warden` (`danny@minnix.dev`, the moderator used for live
+moderation tests) each carry a real address and can likewise self-serve; and
+`witness`, `_instance` and `zz_dedup` have blank addresses and **cannot
+recover on their own** — no address means nothing to verify. `_instance` never
+signs in by design and must never be removed regardless. If `witness` is wanted
+for further live moderation testing it needs an address set by the admin
+followed by a resend — that is R124's path, and it is the one thing here that
+will bite someone who forgets it.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -4950,3 +5007,5 @@ not an optimisation.
 - **R124 — Typo recovery is admin-mediated; no self-service email correction and no logged-out correction endpoint (owner decision 2026-09-29, arising from the Mastodon peer read of §2F).** A member who fat-fingers their address at signup asks the site admin, who corrects it and triggers the verification mail to the corrected address. **Why this came up at all:** R123 removed the admin's ability to mark an address verified, and there is no self-service email edit (`ProfileForm` carries no `email` field), so the spec as drafted left a typo'd address with no recovery. Mastodon solves this with `Auth::SetupController#update` (`setup_controller.rb:14-25`), which lets a signed-in-but-unconfirmed member change their address **without re-entering a password** — its own comment reasons that the account has nothing to protect yet. **Why we cannot copy it:** that shape rides a session, and under R119 our unconfirmed member has none. Rebuilding it logged-out produces an unauthenticated endpoint that validates credentials — a second password oracle needing its own rate limiting and threat modelling — and the alternative that avoids it, a restricted post-signup holding state, is the option the owner already declined at R122. **What it costs, priced honestly:** one support round-trip per typo, to the owner. **What it does not cost:** the path genuinely exists, and taking it does not weaken R123, because correcting an address is not the same act as attesting it. **How to apply:** this decision is what makes the `UserAdmin` *send verification* action load-bearing rather than decorative — a status readout alone lets the admin fix the address but leaves the member stuck. If self-service email editing is ever added, it must come with its own re-verification path and must not become a way to sidestep the verified state.
 
 - **R125 — Changing an account's email address notifies the OLD address (owner decision 2026-09-29, taken from Mastodon's `email_changed` control).** The member gets a notice at the address previously on file that it has been changed. **Why this is worth more on ReelTalk than on Mastodon:** there, address changes are mostly careless self-editing, so the alert is one more notification in a stream. Here the *only* party who can change an address is the site admin, so the alert is not noise — it is the member's only signal that their mail now arrives somewhere else. **The threat it covers is a compromised admin account:** silently repointing a member's address is the obvious first move for an attacker holding admin, because it captures every subsequent mail including a password reset, and the member has no other way to notice. This is the one control that makes that visible to the person it harms rather than only to the one who did it. **Shape — a notice, not an action:** it carries **no link** that would let the recipient undo the change, revert the address, or reach anything privileged. A privileged link delivered to an address the attacker may still control is an unauthenticated change primitive, which is worse than the silence it replaces. **Single writer:** `change_email(user, new_email, *, changed_by)` is the only path that changes an address, and the alert fires from *inside* it, so no caller can change an address without producing the alert. `UserAdmin.save_model` routes through it when the address differs. This is the 2E "one call site, not several" lesson applied to a new write: an alert that lives in the admin view is an alert that a future management command or import hook silently omits. Skipped when the old address is empty — there is nobody to tell. **How to apply:** the derived verified state (R118's `verified_email == email`) already prevents anything from *trusting* a stale verification after a change; R125 is the separate control that makes the change *known*. Do not treat one as covering the other — the first protects the system, the second protects the member.
+
+- **R126 — The unverified-account signal is admin-only. No site-wide banner (owner decision 2026-09-30, taken at the 2F-3 deploy).** The spec carried "the unverified banner" as a 2F-3 surface without saying who sees it, and the increment deferred it rather than guess. Asked directly, the owner ruled: **"I don't want a site wide banner on unverified accounts. Only the admin should be able to see that."** **What this settles:** there is no global notice, no site-wide strip, and no banner shown to other members or to the public that some accounts on the instance have not confirmed their addresses. The unverified state is visible to (a) the account's own owner, on their own login page and their own verify-result page — which 2F-3 already ships, because that person is the only one who can act on it — and (b) the site admin, in the `UserAdmin` read-only status line that 2F-3b builds. **Why the distinction matters rather than being a preference:** a site-wide banner turns an individual member's unfinished signup into a public property of the instance. It tells every visitor that this place has a pile of unconfirmed accounts, which is a statement about the instance the owner never chose to make, and it is a number that can only go up as spammers and drive-by signups accumulate. The member needing help and the instance advertising its own unfinished business are different audiences. **What it costs, priced:** a member who ignores the login-page message gets no further nudge anywhere on the site, so the admin is the only path to unblocking them — which is exactly what R124 already made true, and what 2F-3b's send-verification action is for. **How to apply:** when building 2F-3b, put the unverified surface in `UserAdmin` and nowhere else in shared chrome. Do not add it to a base template, a site-wide messages block, or anything rendered for other users' pages. If a broader visibility ever seems useful, it needs the owner — this decision is specifically a refusal of that.
