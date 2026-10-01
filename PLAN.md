@@ -270,19 +270,50 @@ New and changed dependencies from the stack audit (§3.9), same method as §4.1 
 |---|---|---|
 | **postgresql-client** (Debian system package, in-image) — new, for the daily `pg_dump` backup job | PostgreSQL License (the permissive license Postgres ships under; a BSD-style grant) | ✅ Provides `pg_dump`/`pg_restore` inside the app image so the tested `backup_database` command runs in-container and from the `backup` service. Not a Python dependency (no `pyproject.toml` change); installed via apt in the Dockerfile alongside the already-present `libpq5`. |
 
-## 5. Build plan (milestones for this repo)
+## 5. Milestone status — the build sequence is complete
 
-Sizing note: federation-from-spec (M4) is the largest single chunk of new code; it was inherited for free in the legacy fork and must be written here against the W3C specs.
+**This is a status table, not a plan.** The M0–M6 sequence was written at
+M0 and has since been finished. It is kept because the milestone names are
+used throughout the other documents, not because anything here is queued.
+**Nothing in this file is "next."** For what is live and what is open, read
+the **NOW** block at the top of [PROGRESS.md](PROGRESS.md).
 
-- **M0 — Dev environment & skeleton** *(2026-09-05)*: repo scaffolding — `pyproject.toml` (lean audited dep set), Dockerfile, docker-compose stack, entrypoint with auto-migrate+collectstatic, `.env.example` + `setup.sh`, minimal Django project that passes `manage.py check` and a smoke pytest. ✅ done; the original 6-service shape was restructured the same day by the stack audit (§3.9) into the current web+db stack — see §6.
-- **M1 — Core film domain (first working version, part 1)**: User/auth (signup/login, minimal), Film model + migrations (+ MergedFilm, tsvector trigger), Shelf/ShelfFilm with the binary defaults, Status/Comment/Review/ReviewRating with the watch-state & review rules of §3.3, film pages (create/edit/view, shelve controls, finish flow with rating requirement), user films page (3 tabs), minimal feed, setup wizard, admin basics. **Stack: web + db only** (§3.8) — no new services or runtime deps are needed for M1; the frontend is Django templates + vanilla JS (§3.9). **Exit bar: owner can sign up on a local instance and run the whole watchlist→watched→review loop.**
-- **M2 — TMDB integration (first working version, part 2)**: TMDB client, global search as primary catalog + click-through + one-click Watchlist (D6/D7), suggest endpoint + dropdown, metadata lock for TMDB films (D4), backfill task (D11). **Stack: the `worker` service joins here** — Django-Q2 `qcluster` from the same image, Postgres cluster, per §3.9 (dependency already license-audited in §4.4). **Exit bar: the owner's day-to-use flow works — search "Blade Runner", add to watchlist, mark watched with a rating.**
-- **M3 — File import/export**: TMDB-CSV import (D9) + export round-trip (D10), wired to the async backfill. Exit bar: owner's real TMDB export imports cleanly and re-imports as a no-op.
-- **M4 — Federation (ActivityPub from spec)**: webfinger/nodeinfo, Person & Film wire types, inbox/outbox, follow/unfollow, status Create/Update/Delete broadcast, remote-user mirrors, graceful ignore of unknown types. Exit bar: two local ReelTalk instances follow each other and exchange reviews + film objects; a third-party AP tool (e.g. a Mastodon instance) can follow a ReelTalk user's Person without breaking.
-- **M5 — Social surface**: lists (+group lists/curation), groups, notifications, directory/discover, RSS, moderation/reports, 2FA + email verification, antispam hardening.
-- **M6 — Polish & public deploy**: artwork with the owner (D17), guided tour decision, daily `pg_dump` backup job, real-domain deployment of the same web+db(+worker) containers behind the operator's TLS proxy (§3.8 — no in-project proxy), first public instance.
+| Milestone | Status | Exit bar, as actually met |
+|---|---|---|
+| **M0** — dev environment & skeleton | ✅ Done 2026-09-05 | Restructured the same day by the stack audit (§3.9) into the current web+db shape. |
+| **M1** — core film domain | ✅ Done 2026-09-08 | Run live end-to-end over HTTP: signup → manual film → watchlist → watched + review → feed. |
+| **M2** — TMDB integration | ✅ Done 2026-09-09 | Run live against the **real TMDB API**: search → add to watchlist → mark watched with a rating. The `worker` service joined here. |
+| **M3** — file import / export | ✅ Done 2026-09-09 | Run live with the owner's real export: 1,670 rows imported cleanly, re-import a no-op. |
+| **M4** — federation (ActivityPub from spec) | ✅ Done 2026-09-12 | Two instances exchanged reviews and film objects; a Mastodon-style third party followed a ReelTalk Person and verified our signature. |
+| **M5** — social surface | ✅ Done 2026-09-14 | Four owner-set increments: profile at the actor URL, follow/discovery, blocking, review-delete. **Scope was later re-planned — see below.** |
+| **M6** — polish & public deploy | ◐ Split | **Public deploy: DONE 2026-09-21**, live at `https://reeltalk.minnix.dev`. **Artwork polish: PARKED at R73.** |
 
-**First working version = M1 + M2.** Federation (M4) is what makes it a *federated* product; everything before that must stand alone as a useful local film tracker.
+**Two things this table used to hide, stated plainly.**
+
+1. **M5 shipped far less than its original list.** Lists and group curation,
+   directory/discover, RSS and 2FA were all written under M5 and **none of
+   them exist** — there is no lists app, no syndication feed, no TOTP.
+   Notifications and moderation/reporting *were* eventually built, but not
+   as M5: they were re-planned at their own size as **§2B**
+   (notifications), **§2D/§2E** (moderation and staff email) and **§2F**
+   (email verification) in `PROGRESS.md`. **Do not read the M5 row as
+   "the social surface is finished."**
+2. **Most work since the 2026-09-21 cutover is not on this list at all.**
+   The §2A–§2F arc — feed interactions, notifications, mentions,
+   moderation, staff email, email verification — plus the deploy-readiness
+   increments were planned and tracked in `PROGRESS.md`, not here. That is
+   the actual reason this file stopped being the place to look for
+   direction, and why §7's old instruction to "start at M1" was wrong for
+   weeks before anyone noticed.
+
+**Genuinely open work, by name:** the parked M6 artwork polish (R73); user
+lists and group curation; directory/discover; RSS; 2FA; and the router-side
+WAN SNAT check recorded in `PROGRESS.md`'s NOW block.
+
+**First working version (M1 + M2) shipped 2026-09-09.** Federation (M4) is
+what made it a *federated* product; everything before that stands alone as a
+useful local film tracker. That framing is still true and still worth
+carrying.
 
 ## 6. Dev environment (set up at M0, restructured by the stack audit 2026-09-05)
 
@@ -293,12 +324,14 @@ pyproject.toml          # AGPLv3-audited dependency set ([project.dependencies] 
 uv.lock                 # committed lockfile — Docker builds use `uv sync --frozen`
 Dockerfile              # python:3.13-slim, uv venv at /app/.venv, non-root appuser;
                         # one image serves web (and the M2 worker role)
-docker-compose.yml      # web (uvicorn on :3030), db (postgres:17) — the whole stack
+docker-compose.yml      # web (uvicorn on :3030) + db (postgres:17) + worker (Django-Q2,
+                        # joined at M2) + backup (daily pg_dump, joined at M6)
 entrypoint.sh           # auto migrate + collectstatic on web start
 .env.example / setup.sh # config template + secret generation
 manage.py               # Django entry point
-reeltalk/               # Django project: settings, urls, asgi (+ app code from M1 on)
-reeltalk/tests/         # pytest suite (smoke test for now)
+reeltalk/               # Django project: settings, urls, asgi, and the apps — core,
+                        # social, activitypub, notifications, mentions, moderation
+reeltalk/tests/         # the pytest suite (see PROGRESS.md NOW for the current baseline)
 ```
 
 Run it:
@@ -315,10 +348,35 @@ Host-quirk reminders (binding on every session in this repo):
 - **Artifact volumes are re-initializable, data volumes are not.** If the image's runtime user changes (or static files get wiped), delete `static_volume`/`media_volume` and let them re-init from the image; never touch `pgdata`.
 - Test flow: `docker compose run --rm web pytest` (the dev group is installed in the image); lint/format: `ruff check . && ruff format --check .` (run inside the container, where the venv lives).
 
-## 7. Handoff notes for the next session
+## 7. How to use this file
 
-1. Start at **M1** (§5) on the audited stack — web + db, uvicorn/Django 6.1/Python 3.13/uv (§3.8/§3.9); do not re-audit or re-grow it mid-milestone. The functional contract to implement against is §3 + the decision table in §2 — those are the owner's settled requirements; anything not listed there is a new design decision to make *with the owner* (D17: no solo design decisions on UX/artwork).
-2. Clean-room discipline while working: it is fine to *read* legacy code to confirm intended behavior; it is not fine to copy. When in doubt, describe the behavior in your own terms and implement from the description + specs.
-3. Keep a `PROGRESS.md` in this repo as work happens (the legacy one is the model for what it should contain: state table, execution records with commit hashes, test baselines, decision log). Update it at each milestone boundary.
-4. Test baseline discipline: record the green suite count after each milestone; CI-faithful runs happen in Docker (see §6).
-5. The legacy stack is torn down and port 3030 is owned by this project's compose file. Legacy named volumes (`reeltalk-work_*`) are kept as insurance until the new instance is proven, then `docker volume rm`.
+**This file is the contract. `PROGRESS.md` is the log.** Read here for what
+the product is *required* to be; read there for what it currently is.
+
+- **Start every session at the `NOW` block at the top of
+  [PROGRESS.md](PROGRESS.md)**, not here. This file deliberately carries no
+  direction. Its previous instruction to "start at M1" was stale for weeks
+  before anyone noticed, which is the whole reason for this rewrite.
+- **§2 (the D-series) and §3 are binding.** They are the owner's settled
+  product requirements and are referenced constantly from the execution
+  records. Read §3 before implementing anything in its area.
+- **Anything not covered by §2 or §3 is a new design decision and must be
+  made with the owner.** D17 in particular: no solo decisions on UX or
+  artwork.
+- **§4 is a license audit, not a suggestion.** Adding a dependency without a
+  verdict in §4 is a licensing change, not a `pyproject.toml` edit.
+- **§5 is history.** See the note at its top.
+- **§6 is the dev environment.** The run commands are still accurate; the
+  service list was corrected 2026-10-01 to name all four services.
+
+**Clean-room discipline applies to everything read here.** It is fine to
+*read* the frozen legacy codebase to confirm intended behaviour; it is not
+fine to copy from it, and its files are under a different, non-OSI license.
+Describe the behaviour in your own terms and implement from the description
+plus the specs. Full rules: [REWRITE.md](REWRITE.md).
+
+**Two decision series, both binding, different numbering.** The **D-series**
+lives in §2 and is the product decisions distilled before the rewrite. The
+**R-series** lives in `PROGRESS.md` §4 and is everything decided during it.
+Where they touch the same subject the later **R** governs — read both halves
+of any pair rather than the latest line.

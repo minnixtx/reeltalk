@@ -1,11 +1,59 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-09-26
-**Audience:** any new session picking up this project. Read [REWRITE.md](REWRITE.md) first (the binding clean-room rules), then [PLAN.md](PLAN.md) (functional spec + build plan + license audit), then this file for current state.
+**Last updated:** 2026-10-01
+
+---
+
+## NOW — read this first
+
+**Rewritten at each increment rather than appended to.** If anything else in
+this file disagrees with this block, **this block is current and the other
+is history.**
+
+- **Live on `reeltalk.minnix.dev`:** everything through **§2F**. Email
+  verification is deployed and fully live-proven; sign-in is gated on a
+  verified address (R119); the admin can read the verified state and
+  trigger the mail but can never attest it (R123).
+- **§2F is COMPLETE.** Nothing inside it is outstanding — do not re-run its
+  proofs. The spec is §2F; the outcome is its "Executed" records and the
+  four "Live proof" sections at its end.
+- **Gate baseline: `1959 passed + 5 skipped`.** `ruff check`,
+  `ruff format --check` (138 files) and `makemigrations --check` all clean.
+- **git:** `main` = `81fe064`, pushed, working tree clean.
+- **Open, and it is not code:** whether the router SNATs inbound **WAN**
+  traffic. If it does, every internet user shares a single source address
+  and the per-IP resend throttle counts the wrong party. Owner-side check
+  in the NPM access log — see "The request path" at the end of §2F.
+- **Parked:** the M6 grindhouse artwork polish pass, at R73.
+
+### How to read the project's docs
+
+| Question | Where |
+|---|---|
+| Clean-room rules (binding) | `REWRITE.md` |
+| Product contract — domain model, watch state, TMDB, federation surface, deployment shape | `PLAN.md` §3 |
+| **D-series** — the original product decisions (D1–D17) | `PLAN.md` §2 |
+| License audit | `PLAN.md` §4 |
+| **R-series** — rewrite-era decisions (R1–R126) | `PROGRESS.md` §4 |
+| What was actually built, with commit hashes | `PROGRESS.md` §2 |
+| Host and deploy facts for this box | `PROGRESS.md` §3 |
+| What is live right now | the block above |
+
+**The two decision series are different numbering, and both are binding.**
+The D-series predates the rewrite; the R-series is everything decided during
+it. Where they touch the same subject the later **R** governs — R103b
+amends R103, R108 narrows R40, R109 supersedes R102's lift clause, R114
+narrows R103b. Read both halves of any pair rather than the latest line.
 
 ---
 
 ## 1. Current state
+
+> **This section is a running log, not the status report.** Its entries were
+> appended over time and the ones at the top are the *oldest*. For what is
+> true today, read **NOW** at the top of this file. The milestone table at
+> the end of this section stops at the 2026-09-21 cutover and does not cover
+> the §2A–§2F arc at all.
 
 > **✅ Federation with real Mastodon WORKS (R88, verified live 2026-09-23).** The ⚠ banner that sat here since 2026-09-22 is closed. Outgoing activities now land on Mastodon **4.7.2**, `Accept(Follow)` is emitted and cleared the owner's long-pending follow, and **both follow directions are live** against `upallnight.minnix.dev` — proved by their own `Accept(Follow)` arriving back at our inbox, not by a `202` from us. **The root cause was none of the three things this file predicted: our outbound activities carried no `@context` at all,** so Mastodon discarded every one of them at `ProcessActivityService`'s opening `return unless supported_context?(@json)` before any handler ran. Full resolution in the section at the end of §2A and the decision as **R88**. The transferable lesson is short: **`202 Accepted` is not delivery** — an inbox answers it when it *queues* the work, so a payload rejected a moment later is indistinguishable from one that landed.
 >
