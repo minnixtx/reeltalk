@@ -15,14 +15,40 @@ in one of them breaks signing or deliveries in a way that is hard to undo.
 """
 
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.core.exceptions import ValidationError
-from django.utils.html import format_html
+from django.shortcuts import redirect
+from django.urls import reverse
+from django.utils.formats import date_format
+from django.utils.html import format_html, format_html_join
+from django.utils.timesince import timesince
+from django.utils.timezone import localtime
+
+from reeltalk.moderation.representative import is_instance_actor
+from reeltalk.proxy_trust import client_ip
 
 from .forms import LOCALNAME_RE
-from .models import Invite, LinkDomain, SiteSettings, User
-from .verify import change_email
+from .models import EmailVerificationToken, Invite, LinkDomain, SiteSettings, User
+from .verify import change_email, send_verification_email
+
+# How many of an account's verification sends the inline shows. Bounded
+# because the row count is not ours to control — every resend adds one — and
+# an admin page that renders ten thousand rows is unusable for the ten that
+# matter. The total is always stated, so a cap never hides the shape of what
+# happened.
+TOKEN_INLINE_LIMIT = 15
+
+# The admin text colours, matching the ones ``report_email_status`` already
+# uses so the verification block reads as part of the same screen rather
+# than a new visual language.
+RED = "#b3261e"
+GREEN = "#237a4b"
+
+
+def redirect_to_user_change(obj):
+    """Back to this account's own change page."""
+    return redirect(reverse("admin:social_user_change", args=[obj.pk]))
 
 
 class InviteUserCreationForm(UserCreationForm):
@@ -106,10 +132,23 @@ class UserAdmin(admin.ModelAdmin):
         "date_joined",
         "last_login",
         "report_email_status",
+        "verification_status",
+        "send_verification",
+        "verification_tokens",
     ]
     fieldsets = [
         (None, {"fields": ("localname", "password")}),
         ("Profile", {"fields": ("display_name", "email", "avatar")}),
+        (
+            "Email verification",
+            {
+                "fields": (
+                    "verification_status",
+                    "send_verification",
+                    "verification_tokens",
+                )
+            },
+        ),
         (
             "Roles",
             {
@@ -194,11 +233,14 @@ class UserAdmin(admin.ModelAdmin):
         saves normally, so a profile edit that leaves the address alone
         produces no write to it, no superseded tokens, and no notice.
 
-        The **add** path deliberately does not send. R124's admin-triggered
-        *send verification* action is 2F-3's surface; an admin creating an
-        account here is not the same act as a member signing up, and
-        giving the create form a side-effecting mail would put a second
-        unsolicited sender on the instance that nobody asked for.
+        The **add** path deliberately does not send, and still does not after
+        2F-3b. An admin creating an account here is not the same act as a
+        member signing up, and a side-effecting mail on the create form
+        would put a second unsolicited sender on the instance that nobody
+        asked for — plus a checkbox left ticked sends mail the admin did not
+        mean to send at that moment. The unblock is the explicit button on
+        the account's own change page, which is a deliberate press rather
+        than a default.
         """
         if not change:
             super().save_model(request, obj, form, change)
@@ -210,6 +252,69 @@ class UserAdmin(admin.ModelAdmin):
         )
         super().save_model(request, obj, form, change)
         change_email(obj, submitted_email, changed_by=request.user)
+        if "_send_verification" in request.POST:
+            self.send_verification_now(request, obj)
+
+    def response_change(self, request, obj):
+        """Stay on the account after a send, rather than bouncing to the list.
+
+        The send button is a submit on this account's own change form, so
+        without this the admin is thrown back to the user list and loses
+        the page they were reading — including the status line that just
+        changed. Django's own ``_continue`` does exactly this for Save; the
+        send button needs the same treatment because it is pressed from the
+        middle of the page rather than from the submit row.
+        """
+        if "_send_verification" in request.POST:
+            return redirect_to_user_change(obj)
+        return super().response_change(request, obj)
+
+    def send_verification_now(self, request, obj):
+        """Trigger the verification mail for this account (R124).
+
+        **This is the same send path signup uses**, not a parallel one. It
+        calls :func:`~reeltalk.social.verify.send_verification_email`,
+        which mints a token bound to the account's current address and
+        enqueues the mail on the worker. Nothing here writes a verified
+        column, and nothing here *can* — the only writer of that state is
+        ``consume()``, reached by a human clicking the link. That is the
+        whole of R123: the admin may ask, only the click attests.
+
+        Going through the shared helper rather than a bespoke admin send is
+        also what keeps the two paths from drifting. A second send
+        implementation is a second set of guards, and the first thing a
+        future change to the send path (a new throttle, a new template, a
+        new binding rule) would miss is the copy nobody thought to update.
+
+        The address used is the one that just saved, so correcting a typo and
+        pressing send in one save mails the **corrected** address — which is
+        precisely R124's recovery flow, and works because ``change_email``
+        has already run and left ``obj.email`` at the new value.
+        """
+        if not obj.email:
+            self.message_user(
+                request,
+                "Nothing sent: this account has no email address to verify.",
+                messages.ERROR,
+            )
+            return
+        result = send_verification_email(obj, request_ip=client_ip(request))
+        if result["enqueued"]:
+            self.message_user(
+                request,
+                format_html(
+                    "Verification email queued to <strong>{}</strong>. It "
+                    "replaces any link sent before this one.",
+                    obj.email,
+                ),
+                messages.SUCCESS,
+            )
+        else:
+            self.message_user(
+                request,
+                f"Nothing sent ({result['reason']}).",
+                messages.WARNING,
+            )
 
     @admin.display(description="Report email delivery")
     def report_email_status(self, obj):
@@ -238,6 +343,241 @@ class UserAdmin(admin.ModelAdmin):
             '<span style="color:#237a4b;">Will be sent to <strong>{}</strong>.</span>',
             obj.email,
         )
+
+    # --- the 2F-3b verification surface ---------------------------------
+    #
+    # Everything the admin is allowed to know about an account's verified
+    # state, and everything they are allowed to *do* about it, in one place.
+    # R123 draws the line through the middle of this block: the admin may
+    # read the state and may trigger the mail, and may never move the state.
+    # That is why ``email_verified_at`` and ``verified_email`` appear
+    # nowhere in this class — not editable, not read-only, not at all. The
+    # only thing on screen is the read derived from them.
+
+    @admin.display(description="Verified address")
+    def verification_status(self, obj):
+        """The one line that says whether this account can sign in, and why not.
+
+        Same job ``report_email_status`` does for the report toggle: a
+        state the screen would otherwise leave the admin to guess at. Under
+        R119 the guess is expensive, because an unverified account is not
+        broken — it is unfinished, and there is exactly one way to finish
+        it, which is a click this page cannot make on anyone's behalf.
+
+        **Why the instance representative gets its own sentence.** Left to
+        the generic branch it would read as a stuck account with no address,
+        which invites an admin to "fix" it by giving it one. ``_instance``
+        is the signing identity for every outbound ``Flag`` (R111) and must
+        stay address-less, so the page says so rather than leaving the
+        inference to be drawn wrong.
+        """
+        if is_instance_actor(obj):
+            return format_html(
+                '<span class="help-text">{}</span>',
+                "Instance representative — infrastructure, not a member. "
+                "It never signs in and needs no address. Do not give it one.",
+            )
+        if not obj.local:
+            return format_html(
+                '<span class="help-text">{}</span>',
+                "Remote account — it signs in on its own home instance, so "
+                "verification does not apply here.",
+            )
+        if obj.email_verified:
+            return format_html(
+                '<span style="color:{};">Verified {}, {}</span>',
+                GREEN,
+                _stamp(obj.email_verified_at),
+                obj.email,
+            )
+        if not obj.email:
+            return format_html(
+                '<span style="color:{};font-weight:600;">{}</span>',
+                RED,
+                "Not verified, and there is no address to verify. This "
+                "account cannot sign in until an address is set above and a "
+                "link is sent to it.",
+            )
+
+        live = EmailVerificationToken.live().filter(user=obj).first()
+        if live is not None:
+            return format_html(
+                '<span style="color:{};font-weight:600;">{}</span>'
+                '<br><span class="help-text">A link was sent {} and is '
+                "still live until {}. Sending another replaces it — the one "
+                "in the mailbox stops working the moment the new one goes "
+                "out.</span>",
+                RED,
+                f"Not verified — this account cannot sign in until someone "
+                f"clicks the link sent to {obj.email}.",
+                _since(live.sent_at or live.created_at),
+                _stamp(live.expires_at),
+            )
+        return format_html(
+            '<span style="color:{};font-weight:600;">{}</span>'
+            '<br><span class="help-text">No live link. The most recent '
+            "send is in the list below.</span>",
+            RED,
+            f"Not verified — this account cannot sign in until someone "
+            f"clicks the link sent to {obj.email}.",
+        )
+
+    @admin.display(description="Send verification")
+    def send_verification(self, obj):
+        """The button that asks, and nothing more.
+
+        A plain submit on this account's own change form. That placement is
+        deliberate: the admin is already looking at the status line above,
+        so the read and the response are on the same screen rather than
+        separated by a click into a list. It also means the button inherits
+        the form's CSRF protection and its validation instead of
+        reinventing either.
+
+        The label changes when a live link already exists. Every send
+        supersedes the prior token — that is what makes single-use mean
+        anything — so pressing this twice silently kills the link the
+        member is currently holding. Saying so on the button is cheaper
+        than a rule that blocks the press, and leaves the admin free to
+        make the call when they are deliberately rotating a link.
+        """
+        if not self._may_send_verification(obj):
+            return format_html('<span class="help-text">{}</span>', _why_not(obj))
+        live = EmailVerificationToken.live().filter(user=obj).first()
+        label = (
+            "Send a new link (replaces the live one)"
+            if live is not None
+            else "Send verification email"
+        )
+        return format_html(
+            '<button type="submit" name="_send_verification" value="1"'
+            ' class="button">{}</button>',
+            label,
+        )
+
+    def _may_send_verification(self, obj) -> bool:
+        """Whether this account is one a send can actually help."""
+        return (
+            obj.pk is not None
+            and obj.local
+            and bool(obj.email)
+            and not obj.email_verified
+            and not is_instance_actor(obj)
+        )
+
+    @admin.display(description="Verification sends")
+    def verification_tokens(self, obj):
+        """Every send for this account, newest first, with what came of it.
+
+        R123's requirement is that the admin can see *exactly* what
+        happened and *why it failed*, and the two columns that answer that
+        are the derived ``send_state`` and the raw ``send_error``. The
+        error is rendered whole rather than truncated: it is an SMTP
+        diagnostic, and the 2E lesson is that the sentence explaining a
+        broken deploy is the long one.
+
+        **The code is truncated, and that is a control rather than tidiness.**
+        A full live token on a screen is a credential the admin could open
+        themselves and complete the click without the member ever seeing
+        the mail — which is hand-verify walking back in through the display
+        layer after R123 turned it off at the form layer. The eight
+        characters shown are enough to tell one send from another and not
+        enough to spend one. The invite admin already draws the same line.
+        """
+        if obj.pk is None:
+            return ""
+        sends = EmailVerificationToken.objects.filter(user=obj)
+        total = sends.count()
+        if not total:
+            return format_html(
+                '<span class="help-text">{}</span>',
+                "No verification mail has ever been sent to this account.",
+            )
+        rows = list(sends[:TOKEN_INLINE_LIMIT])
+        body = format_html_join(
+            "\n",
+            (
+                "<tr><td><code>{}…</code></td><td>{}</td><td>{}</td>"
+                "<td>{}</td><td>{}</td></tr>"
+            ),
+            (_token_cells(token) for token in rows),
+        )
+        more = (
+            ""
+            if total <= TOKEN_INLINE_LIMIT
+            else format_html(
+                '<br><span class="help-text">…and {} earlier send(s) not shown.</span>',
+                total - TOKEN_INLINE_LIMIT,
+            )
+        )
+        return format_html(
+            '<table class="verification-sends">\n'
+            "<thead><tr><th>Token</th><th>Minted</th><th>Send</th>"
+            "<th>Link</th><th>Requested from</th></tr></thead>\n"
+            "<tbody>\n{}\n</tbody>\n"
+            "</table>{}",
+            body,
+            more,
+        )
+
+
+def _why_not(obj) -> str:
+    """Why the send button is not showing for this account."""
+    if is_instance_actor(obj):
+        return "Not applicable — the instance representative has no address to verify."
+    if not obj.local:
+        return "Not applicable — this is a remote account."
+    if not obj.email:
+        return "Nothing to send — this account has no email address."
+    if obj.email_verified:
+        return "Nothing to send — this address is already verified."
+    return "Not available."
+
+
+def _since(value) -> str:
+    """'4 minutes ago'.
+
+    ``timesince`` returns the bare span ("4 minutes"), so the "ago" is ours.
+    The floor matters: it returns "" for anything under a second, and an
+    empty string where a timestamp should be reads as a bug on a page whose
+    whole job is to be the truth about when something happened.
+    """
+    if value is None:
+        return "just now"
+    span = timesince(value)
+    return f"{span} ago" if span else "just now"
+
+
+def _stamp(value) -> str:
+    """An unambiguous timestamp. ``localtime`` first so the page is readable
+    whatever ``USE_TZ`` says; the value is stored in UTC and the admin is
+    the one person who needs to line these up against mail headers."""
+    if value is None:
+        return "—"
+    return date_format(localtime(value), "Y-m-d H:i")
+
+
+def _token_cells(token):
+    """The five cells for one send row, in table order."""
+    if token.sent_at is not None:
+        send = f"sent {_stamp(token.sent_at)}"
+    elif token.send_error:
+        send = format_html("failed<br><code>{}</code>", token.send_error)
+    else:
+        send = "queued (never left the box)"
+    link = token.link_state
+    if link == "used":
+        link = f"used {_stamp(token.used_at)}"
+    elif link == "superseded":
+        link = f"superseded {_stamp(token.superseded_at)}"
+    elif link == "expired":
+        link = f"expired {_stamp(token.expires_at)}"
+    return (
+        token.code[:8],
+        _stamp(token.created_at),
+        send,
+        link,
+        token.request_ip or "—",
+    )
 
 
 @admin.register(SiteSettings)

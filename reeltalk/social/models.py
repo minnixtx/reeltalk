@@ -991,16 +991,36 @@ class EmailVerificationToken(models.Model):
     class Meta:
         ordering = ["-created_at"]
 
-    def __str__(self) -> str:
+    @property
+    def link_state(self) -> str:
+        """``"live"`` / ``"used"`` / ``"superseded"`` / ``"expired"``.
+
+        The one place the four-way read is computed. ``__str__`` below and
+        the admin's token inline (2F-3b) both need it, and a second copy of
+        the branch is a second thing that can drift from the first — the
+        same reason ``send_state`` and ``email_verified`` are derived here
+        rather than at each site that displays them.
+
+        Independent of :attr:`send_state`, which answers a different
+        question: ``link_state`` is what the link *does* if clicked now,
+        ``send_state`` is what came of *mailing* it. A token can be
+        ``superseded`` and ``sent`` at once — the mail went out, then a
+        newer send killed it — and the pair is exactly what an admin needs
+        to read together.
+        """
         if self.used_at:
-            state = "used"
-        elif self.superseded_at:
-            state = "superseded"
-        elif self.expires_at <= timezone.now():
-            state = "expired"
-        else:
-            state = "live"
-        return f"verification {self.code[:8]}… for {self.user.localname} ({state})"
+            return "used"
+        if self.superseded_at:
+            return "superseded"
+        if self.expires_at <= timezone.now():
+            return "expired"
+        return "live"
+
+    def __str__(self) -> str:
+        return (
+            f"verification {self.code[:8]}… for {self.user.localname} "
+            f"({self.link_state})"
+        )
 
     def save(self, *args, **kwargs):
         # Normalised exactly like ``User.email`` (R118), because the address
