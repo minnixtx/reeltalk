@@ -45,6 +45,7 @@ from django.contrib.auth import get_user_model
 from reeltalk.activitypub import crypto, signatures
 from reeltalk.core.models import Film, Like, Status
 from reeltalk.notifications.models import Notification
+from reeltalk.tests.members import member
 
 User = get_user_model()
 
@@ -56,12 +57,12 @@ ALICE_ACTOR = "http://testserver/user/alice/"
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
 def bob(db):
-    return User.objects.create_user(localname="bob", password="s3cretpass")
+    return member(localname="bob", password="s3cretpass")
 
 
 @pytest.fixture
@@ -347,7 +348,7 @@ def test_following_yourself_notifies_nobody(client, alice):
     assert client.post("/user/alice/follow/").status_code == 302
     assert Notification.objects.count() == 0
     # Control: the route writes for a non-self follow.
-    User.objects.create_user(localname="bob", password="s3cretpass")
+    member(localname="bob", password="s3cretpass")
     assert client.post("/user/bob/follow/").status_code == 302
     assert Notification.objects.count() == 1
 

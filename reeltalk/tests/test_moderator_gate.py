@@ -28,7 +28,8 @@ from django.contrib.staticfiles import finders
 from django.test import Client
 from django.urls import reverse
 
-from reeltalk.social.models import User
+from reeltalk.tests.members import member as create_member
+from reeltalk.tests.members import site_admin as create_site_admin
 
 PASSWORD = "s3cretpass"
 MODERATE_URL = reverse("moderation")
@@ -58,28 +59,24 @@ def logged_in_client(user):
 
 @pytest.fixture
 def site_admin(db):
-    return User.objects.create_superuser(localname="root", password=PASSWORD)
+    return create_site_admin(localname="root", password=PASSWORD)
 
 
 @pytest.fixture
 def staff(db):
     """Staff without the moderator flag — the admin side of the same surface."""
-    return User.objects.create_user(
-        localname="helper", password=PASSWORD, is_staff=True
-    )
+    return create_member(localname="helper", password=PASSWORD, is_staff=True)
 
 
 @pytest.fixture
 def moderator(db):
     """Flagged to moderate, and pointedly NOT staff (R100)."""
-    return User.objects.create_user(
-        localname="mod", password=PASSWORD, is_moderator=True
-    )
+    return create_member(localname="mod", password=PASSWORD, is_moderator=True)
 
 
 @pytest.fixture
 def member(db):
-    return User.objects.create_user(localname="member", password=PASSWORD)
+    return create_member(localname="member", password=PASSWORD)
 
 
 def change_payload(user, **overrides):

@@ -452,14 +452,24 @@ def test_the_binding_survives_a_case_difference():
     assert user.email_verified is True
 
 
-# --- 2F-1 gates nothing -------------------------------------------------
+# --- where the gate lives: the backend, not the model ------------------
+#
+# This section's premise changed in 2F-3. It used to read "2F-1 gates
+# nothing" and assert that an unverified account signs straight in. That is
+# no longer true of the system — R119 put the gate up. What is still true,
+# and still worth pinning here because it is the thing the model layer was
+# never supposed to do, is that **the model did not become the gate**. Both
+# halves are asserted side by side so neither can drift: Django's stock
+# backend still admits the account (nothing in ``User`` changed), and ours
+# refuses it (the gate exists, and lives one layer up).
 
 
 @pytest.mark.django_db
-def test_an_unverified_account_still_signs_in():
-    # The increment's own boundary, pinned rather than asserted in prose. The
-    # gate is 2F-3 and lives in a custom auth backend; if any part of it had
-    # leaked into the model layer, this is where it would show.
+def test_the_model_layer_still_admits_an_unverified_account():
+    # ``ModelBackend`` is what ``User`` would be authenticated against if
+    # 2F-3 had not replaced it. It still says yes, which proves the refusal
+    # below is a backend decision and not something that leaked into the
+    # model, ``is_active``, or a save hook.
     user = _member(localname="unverified_member")
     assert user.email_verified is False
     assert (
@@ -468,6 +478,41 @@ def test_an_unverified_account_still_signs_in():
         )
         == user
     )
+
+
+@pytest.mark.django_db
+def test_the_configured_backend_refuses_the_same_account():
+    # The mirror of the test above. Same user, same password, different
+    # backend — and the only difference in the world is R119's extra term.
+    from reeltalk.social.backends import EmailVerificationBackend
+
+    user = _member(localname="unverified_member")
+    assert (
+        EmailVerificationBackend().authenticate(
+            None, username="unverified_member", password=PASSWORD
+        )
+        is None
+    )
+    # And the same account, verified, gets through: the refusal is about the
+    # verified state and nothing else.
+    _verify(user)
+    assert (
+        EmailVerificationBackend().authenticate(
+            None, username="unverified_member", password=PASSWORD
+        )
+        == user
+    )
+
+
+@pytest.mark.django_db
+def test_the_configured_backend_is_the_one_django_uses():
+    # A gate that is written but not wired is worse than no gate, because it
+    # reads as one. This pins the setting rather than the class.
+    from django.conf import settings
+
+    assert settings.AUTHENTICATION_BACKENDS == [
+        "reeltalk.social.backends.EmailVerificationBackend"
+    ]
 
 
 @pytest.mark.django_db

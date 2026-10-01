@@ -14,13 +14,16 @@ import pytest
 from django.contrib.auth import authenticate
 
 from reeltalk.social.models import User
+from reeltalk.tests.members import member as create_member
+from reeltalk.tests.members import site_admin as create_site_admin
+from reeltalk.tests.members import verify
 
 STRONG = "a-strong-pass-phrase"
 
 
 @pytest.fixture
 def admin_user(db):
-    return User.objects.create_superuser(localname="admin", password="s3cretpass")
+    return create_site_admin(localname="admin", password="s3cretpass")
 
 
 @pytest.fixture
@@ -31,7 +34,7 @@ def admin_client(client, admin_user):
 
 @pytest.fixture
 def member(db):
-    return User.objects.create_user(
+    return create_member(
         localname="member", password="original-pass", display_name="Member"
     )
 
@@ -68,10 +71,27 @@ def test_admin_add_leaves_no_plaintext_on_the_row(admin_client):
         assert STRONG not in getattr(user, field)
 
 
-def test_admin_created_account_can_authenticate(admin_client):
+def test_admin_created_account_is_refused_until_it_verifies(admin_client):
+    # R119 makes no exception for an account the site admin minted by hand.
+    # That is the case the gate exists for most of all: the address was typed
+    # by a third party, so nothing about it has been proven by anyone. The
+    # password hashes correctly (pinned just above) and still will not open
+    # the door.
     admin_client.post("/admin/social/user/add/", add_payload())
-    assert authenticate(username="invitee", password=STRONG) is not None
+    invitee = User.objects.get(localname="invitee")
+    assert invitee.email_verified is False
+    assert authenticate(username="invitee", password=STRONG) is None
     assert authenticate(username="invitee", password="wrong") is None
+
+    # Spending a real token (R123: never a column write) makes the account
+    # work, which proves the refusal above was the gate and not a bad hash.
+    #
+    # NOTE THE HOLE THIS LEAVES OPEN: nothing sends this account its link.
+    # The admin-side "send verification" action is the 2F-3b surface that
+    # was deliberately deferred out of this increment, so until that lands an
+    # admin-created account cannot reach the site on its own.
+    verify(invitee)
+    assert authenticate(username="invitee", password=STRONG) is not None
 
 
 def test_admin_add_does_not_grant_privileges(admin_client):

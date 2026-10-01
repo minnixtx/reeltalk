@@ -17,6 +17,7 @@ import responses
 
 from reeltalk.activitypub import crypto
 from reeltalk.social.models import User
+from reeltalk.tests.members import member
 
 REMOTE_DOMAIN = "remote.example"
 REMOTE_ACTOR = f"https://{REMOTE_DOMAIN}/user/carol/"
@@ -85,7 +86,7 @@ def test_find_requires_login(client):
 
 @pytest.mark.django_db
 def test_find_renders_the_form(client):
-    User.objects.create_user(localname="alice", password="p")
+    member(localname="alice", password="p")
     client.login(username="alice", password="p")
     response = client.get("/find/")
     assert response.status_code == 200
@@ -96,7 +97,7 @@ def test_find_renders_the_form(client):
 
 @pytest.mark.django_db
 def test_find_malformed_input_renders_error(client):
-    User.objects.create_user(localname="alice", password="p")
+    member(localname="alice", password="p")
     client.login(username="alice", password="p")
     for value in ("", "no-at-sign", "@remote.example", "carol@", "a@b@c"):
         response = client.post("/find/", {"q": value})
@@ -110,8 +111,8 @@ def test_find_malformed_input_renders_error(client):
 @responses.activate
 @pytest.mark.django_db
 def test_find_local_user_redirects_to_profile_without_network(client):
-    User.objects.create_user(localname="alice", password="p")
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="alice", password="p")
+    member(localname="bob", password="p")
     client.login(username="bob", password="p")
 
     response = client.post("/find/", {"q": "alice@localhost"})
@@ -124,8 +125,8 @@ def test_find_local_user_redirects_to_profile_without_network(client):
 
 @pytest.mark.django_db
 def test_find_local_match_is_case_insensitive(client):
-    User.objects.create_user(localname="Alice", password="p")
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="Alice", password="p")
+    member(localname="bob", password="p")
     client.login(username="bob", password="p")
 
     response = client.post("/find/", {"q": "alice@localhost"})
@@ -137,7 +138,7 @@ def test_find_local_match_is_case_insensitive(client):
 
 @pytest.mark.django_db
 def test_find_unknown_local_user_renders_error(client):
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="bob", password="p")
     client.login(username="bob", password="p")
 
     response = client.post("/find/", {"q": "nobody@localhost"})
@@ -152,7 +153,7 @@ def test_find_unknown_local_user_renders_error(client):
 @responses.activate
 @pytest.mark.django_db
 def test_find_remote_user_creates_mirror_and_redirects(client, remote_keypair):
-    bob = User.objects.create_user(localname="bob", password="p")
+    bob = member(localname="bob", password="p")
     _private_pem, public_pem = remote_keypair
     responses.add(
         responses.GET,
@@ -180,7 +181,7 @@ def test_find_remote_user_creates_mirror_and_redirects(client, remote_keypair):
 @responses.activate
 @pytest.mark.django_db
 def test_find_existing_mirror_is_not_refetched(client):
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="bob", password="p")
     mirror = User(localname="carol@remote.example", local=False, actor_url=REMOTE_ACTOR)
     mirror.set_unusable_password()
     mirror.save()
@@ -203,7 +204,7 @@ def test_find_existing_mirror_is_not_refetched(client):
 @responses.activate
 @pytest.mark.django_db
 def test_find_remote_user_404_renders_error(client):
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="bob", password="p")
     responses.add(
         responses.GET,
         f"https://{REMOTE_DOMAIN}/.well-known/webfinger",
@@ -221,7 +222,7 @@ def test_find_remote_user_404_renders_error(client):
 @responses.activate
 @pytest.mark.django_db
 def test_find_unreachable_domain_renders_error(client):
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="bob", password="p")
     # Both schemes fail at the network level.
     responses.add(
         responses.GET,
@@ -245,7 +246,7 @@ def test_find_unreachable_domain_renders_error(client):
 @responses.activate
 @pytest.mark.django_db
 def test_find_webfinger_without_self_link_renders_error(client):
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="bob", password="p")
     responses.add(
         responses.GET,
         f"https://{REMOTE_DOMAIN}/.well-known/webfinger",
@@ -269,7 +270,7 @@ def test_find_explicit_port_uses_plain_http(client, remote_keypair):
     # port. Nothing is registered for https — an attempt would fail the test.
     domain = "remote.example:8443"
     actor = f"http://{domain}/user/carol/"
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="bob", password="p")
     _private_pem, public_pem = remote_keypair
     responses.add(
         responses.GET,
@@ -295,7 +296,7 @@ def test_find_explicit_port_uses_plain_http(client, remote_keypair):
 @responses.activate
 @pytest.mark.django_db
 def test_find_no_port_tries_https_first(client, remote_keypair):
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="bob", password="p")
     _private_pem, public_pem = remote_keypair
     # Both schemes registered — the order is what's under test.
     responses.add(
@@ -322,7 +323,7 @@ def test_find_no_port_tries_https_first(client, remote_keypair):
 @responses.activate
 @pytest.mark.django_db
 def test_find_no_port_falls_back_to_http(client, remote_keypair):
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="bob", password="p")
     _private_pem, public_pem = remote_keypair
     responses.add(
         responses.GET,

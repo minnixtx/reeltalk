@@ -1,5 +1,7 @@
 """Root URLconf."""
 
+import re
+
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
@@ -9,11 +11,35 @@ from django.views.static import serve
 from reeltalk.activitypub.identity import PROFILE_LOCALNAME_RE
 from reeltalk.core import admin_views as core_admin_views
 from reeltalk.social import views as social_views
+from reeltalk.social.forms import AdminVerificationLoginForm, VerificationAwareLoginForm
+from reeltalk.social.verify import VERIFY_PATH
 
 # Minimal admin site branding (PLAN.md §3.7 v0.1 admin).
 admin.site.site_header = "ReelTalk administration"
 admin.site.site_title = "ReelTalk admin"
 admin.site.index_title = "Site management"
+
+# The admin's own sign-in page gains the same "your email is unverified"
+# sentence the public one has, so an unverified admin is not told their
+# password is wrong about a password they know is right.
+#
+# It is NOT the same form object as the public login, and must not become one.
+# Django's admin defaults to ``AdminAuthenticationForm``, whose
+# ``confirm_login_allowed`` is the only thing enforcing ``is_staff`` at this
+# endpoint. Pointing ``login_form`` at the plain ``VerificationAwareLoginForm``
+# reads as "same gate, better copy" and in fact deletes that check, letting a
+# moderator — never staff, by R100's design — walk into the admin's login
+# with a correct password. ``AdminVerificationLoginForm`` keeps that base and
+# borrows only the refusal copy. There is a test on exactly this
+# (``test_the_admin_login_form_rejects_the_moderators_correct_password``).
+admin.site.login_form = AdminVerificationLoginForm
+
+# Email verification (2F-3). Django route patterns are relative and never
+# carry a leading slash, so the contract constant is stripped here rather
+# than re-typed. Binding the route to ``verify.VERIFY_PATH`` is what stops
+# the link in the mail and the page behind it drifting apart: if they ever
+# disagree the link 404s loudly instead of quietly landing somewhere wrong.
+_VERIFY_PREFIX = re.escape(VERIFY_PATH.lstrip("/"))
 
 urlpatterns = [
     path("", social_views.index, name="index"),
@@ -28,10 +54,33 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path(
         "login/",
-        auth_views.LoginView.as_view(template_name="login.html"),
+        auth_views.LoginView.as_view(
+            template_name="login.html",
+            authentication_form=VerificationAwareLoginForm,
+        ),
         name="login",
     ),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
+    # Email verification (2F-3): the logged-out recovery page and the
+    # verify-link endpoint. ``resend`` is matched first so the literal word is
+    # never swallowed as somebody's token — the same ordering reason
+    # ``invite/create/`` sits above ``invite/<code>/`` below. The token
+    # charset is what ``EmailVerificationToken._fresh_code`` emits, so junk in
+    # the URL 404s at the router instead of reaching a database lookup.
+    #
+    # Both are on ``social_views.GATED_EXEMPT_URLS``: they must stay
+    # reachable with an unverified account in the database, because they are
+    # the only way out of the gate R119 shuts.
+    path(
+        f"{VERIFY_PATH.lstrip('/')}resend/",
+        social_views.verify_resend,
+        name="verify-resend",
+    ),
+    re_path(
+        rf"^{_VERIFY_PREFIX}(?P<code>[A-Za-z0-9_-]{{8,64}})/$",
+        social_views.verify_link,
+        name="verify-link",
+    ),
     path("signup/", social_views.signup, name="signup"),
     path("setup/", social_views.setup, name="setup"),
     # Invites (R82): the mint is a POST from the inviter's own profile;

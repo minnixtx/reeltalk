@@ -34,6 +34,7 @@ from reeltalk.core.models import (
     shelve_to_watchlist,
     unshelve_from_watchlist,
 )
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 
@@ -51,7 +52,7 @@ def client():
 
 @pytest.fixture
 def user(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
@@ -69,7 +70,7 @@ def film(db):
 def admin(db):
     # R12: / is gated behind the setup wizard until a superuser exists, so
     # home-page tests need one in place.
-    return User.objects.create_superuser(localname="admin", password="s3cretpass")
+    return site_admin(localname="admin", password="s3cretpass")
 
 
 # --- model query API ----------------------------------------------------------
@@ -77,7 +78,7 @@ def admin(db):
 
 @pytest.mark.django_db
 def test_films_on_shelf_returns_only_that_shelf(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     wanted = Film.objects.create(title="Dune", year=2021)
     watched = Film.objects.create(title="Blade Runner", year=1982)
     to_read = Shelf.objects.get(user=alice, identifier=Shelf.TO_READ)
@@ -90,8 +91,8 @@ def test_films_on_shelf_returns_only_that_shelf(db):
 
 @pytest.mark.django_db
 def test_films_on_shelf_scoped_to_the_user(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
-    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
+    bob = member(localname="bob", password="s3cretpass")
     shared = Film.objects.create(title="Dune", year=2021)
     # Bob shelved it on HIS watchlist — alice's page must not show it.
     ShelfFilm.objects.create(
@@ -102,7 +103,7 @@ def test_films_on_shelf_scoped_to_the_user(db):
 
 @pytest.mark.django_db
 def test_all_films_is_shelves_plus_statuses(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     wanted = Film.objects.create(title="Dune", year=2021)
     watched = Film.objects.create(title="Blade Runner", year=1982)
     reviewed_only = Film.objects.create(title="Arrival", year=2016)
@@ -120,7 +121,7 @@ def test_all_films_is_shelves_plus_statuses(db):
 
 @pytest.mark.django_db
 def test_all_films_ignores_deleted_statuses(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     film = Film.objects.create(title="Arrival", year=2016)
     entry = Status.objects.create(
         user=alice, film=film, status_type=Status.Type.REVIEW_RATING, rating="4"
@@ -132,7 +133,7 @@ def test_all_films_ignores_deleted_statuses(db):
 
 @pytest.mark.django_db
 def test_all_films_carries_the_users_rating(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     watched = Film.objects.create(title="Dune", year=2021)
     wanted = Film.objects.create(title="Blade Runner", year=1982)
     mark_watched(alice, watched, rating="4.5")
@@ -258,9 +259,9 @@ def test_user_films_non_integer_page_falls_back_to_first(login, user):
 
 @pytest.mark.django_db
 def test_feed_for_includes_own_and_followed(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
-    bob = User.objects.create_user(localname="bob", password="s3cretpass")
-    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
+    bob = member(localname="bob", password="s3cretpass")
+    carol = member(localname="carol", password="s3cretpass")
     alice.follows.add(bob)
     dune = Film.objects.create(title="Dune", year=2021)
     blade = Film.objects.create(title="Blade Runner", year=1982)
@@ -285,7 +286,7 @@ def test_feed_for_includes_own_and_followed(db):
 
 @pytest.mark.django_db
 def test_feed_for_orders_newest_first(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     film = Film.objects.create(title="Dune", year=2021)
     old = Status.objects.create(
         user=alice,
@@ -306,8 +307,8 @@ def test_feed_for_orders_newest_first(db):
 
 @pytest.mark.django_db
 def test_feed_for_excludes_deleted(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
-    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
+    bob = member(localname="bob", password="s3cretpass")
     alice.follows.add(bob)
     film = Film.objects.create(title="Dune", year=2021)
     entry = Status.objects.create(
@@ -320,7 +321,7 @@ def test_feed_for_excludes_deleted(db):
 
 @pytest.mark.django_db
 def test_home_feed_shows_own_and_followed(login, user, film, admin):
-    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    bob = member(localname="bob", password="s3cretpass")
     user.follows.add(bob)
     mark_watched(user, film, rating="4.5")  # alice's own rating-only entry
     other = Film.objects.create(title="Blade Runner", year=1982)
@@ -338,7 +339,7 @@ def test_home_feed_shows_own_and_followed(login, user, film, admin):
 
 @pytest.mark.django_db
 def test_home_feed_excludes_strangers(login, user, film, admin):
-    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    carol = member(localname="carol", password="s3cretpass")
     Status.objects.create(
         user=carol, film=film, status_type=Status.Type.REVIEW_RATING, rating="5"
     )
@@ -360,7 +361,7 @@ def test_home_anonymous_has_no_feed(client, admin):
 
 @pytest.mark.django_db
 def test_feed_entries_shows_watchlist_addition(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     assert shelve_to_watchlist(alice, dune) == "added"
     entries = feed_entries(alice)
@@ -375,7 +376,7 @@ def test_feed_entries_shows_watchlist_addition(db):
 
 @pytest.mark.django_db
 def test_feed_entries_watched_carries_the_review(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     mark_watched(
         alice,
@@ -395,7 +396,7 @@ def test_feed_entries_watched_carries_the_review(db):
 
 @pytest.mark.django_db
 def test_feed_entries_watched_without_review_is_bare(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     mark_watched(alice, dune, rating="3")
     Status.objects.get(user=alice, film=dune).delete()  # soft delete
@@ -408,9 +409,9 @@ def test_feed_entries_watched_without_review_is_bare(db):
 
 @pytest.mark.django_db
 def test_feed_entries_membership_own_plus_followed(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
-    bob = User.objects.create_user(localname="bob", password="s3cretpass")
-    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
+    bob = member(localname="bob", password="s3cretpass")
+    carol = member(localname="carol", password="s3cretpass")
     alice.follows.add(bob)
     dune = Film.objects.create(title="Dune", year=2021)
     blade = Film.objects.create(title="Blade Runner", year=1982)
@@ -424,7 +425,7 @@ def test_feed_entries_membership_own_plus_followed(db):
 
 @pytest.mark.django_db
 def test_feed_entries_orders_newest_first_across_kinds(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     blade = Film.objects.create(title="Blade Runner", year=1982)
     to_read = Shelf.objects.get(user=alice, identifier=Shelf.TO_READ)
@@ -444,7 +445,7 @@ def test_feed_entries_orders_newest_first_across_kinds(db):
 
 @pytest.mark.django_db
 def test_feed_entries_watchlist_to_watched_transition(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     shelve_to_watchlist(alice, dune)
     assert {e.kind for e in feed_entries(alice)} == {"watchlist"}
@@ -456,7 +457,7 @@ def test_feed_entries_watchlist_to_watched_transition(db):
 
 @pytest.mark.django_db
 def test_feed_entries_unshelve_removes_the_event(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     shelve_to_watchlist(alice, dune)
     assert unshelve_from_watchlist(alice, dune) is True
@@ -467,7 +468,7 @@ def test_feed_entries_unshelve_removes_the_event(db):
 def test_feed_entries_review_without_shelf_row_stands_alone(db):
     # Not reachable locally in v0.1 (mark_watched always shelves); remote
     # mirrors may bring it — the review still shows as its own entry.
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     Status.objects.create(
         user=alice,
@@ -484,7 +485,7 @@ def test_feed_entries_review_without_shelf_row_stands_alone(db):
 
 @pytest.mark.django_db
 def test_feed_entries_comment_on_watched_film_stays_separate(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     mark_watched(alice, dune, rating="4")
     Status.objects.create(
@@ -514,7 +515,7 @@ def _remote_user(localname: str = "carol@remote.example") -> User:
 def test_feed_entry_folded_review_carries_the_review_status_id(db):
     # R83 decision 1: the R35 fold stays, and the review Status underneath
     # is what the row speaks for — a like rendered on this row points here.
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     mark_watched(alice, dune, rating="4.5", content="<p>Desert planet.</p>")
     review = Status.objects.get(user=alice, film=dune)
@@ -527,7 +528,7 @@ def test_feed_entry_folded_review_carries_the_review_status_id(db):
 
 @pytest.mark.django_db
 def test_feed_entry_bare_watched_has_no_identity_and_is_not_interactive(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     mark_watched(alice, dune, rating="3")
     Status.objects.get(user=alice, film=dune).delete()  # soft delete
@@ -539,7 +540,7 @@ def test_feed_entry_bare_watched_has_no_identity_and_is_not_interactive(db):
 
 @pytest.mark.django_db
 def test_feed_entry_watchlist_add_is_not_interactive(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     shelve_to_watchlist(alice, dune)
     entry = feed_entries(alice)[0]
@@ -553,7 +554,7 @@ def test_feed_entry_watchlist_add_is_not_interactive(db):
 def test_feed_entry_bulk_aggregate_has_no_identity(db):
     # R37's aggregated row has no single film and no single status, so under
     # R83 there is nothing for it to point at.
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     to_read = Shelf.objects.get(user=alice, identifier=Shelf.TO_READ)
     now = timezone.now()
     for offset, title in enumerate(("Dune", "Arrival", "Blade Runner")):
@@ -572,7 +573,7 @@ def test_feed_entry_bulk_aggregate_has_no_identity(db):
 
 @pytest.mark.django_db
 def test_feed_entry_standalone_status_carries_its_id(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     comment = Status.objects.create(
         user=alice, film=dune, status_type=Status.Type.COMMENT, content="<p>Hi.</p>"
@@ -590,7 +591,7 @@ def test_feed_entry_remote_mirror_is_interactive(db):
     # mirror only while this instance could not deliver them; the Like and
     # the threaded Create now federate, so the locality clause is out of
     # the property and a mirror row is interactive like a local one.
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     carol = _remote_user()
     alice.follows.add(carol)
     dune = Film.objects.create(title="Dune", year=2021)
@@ -620,7 +621,7 @@ def test_feed_entry_remote_review_folded_into_watched_is_interactive(db):
     # (R15), so this state only exists when the home instance also announced
     # the Watched shelf — hence the real federation helper rather than a
     # hand-rolled Shelf lookup.
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     carol = _remote_user()
     alice.follows.add(carol)
     dune = Film.objects.create(title="Dune", year=2021)
@@ -658,9 +659,9 @@ def test_feed_entry_interactive_is_derived_not_stored():
 
 @pytest.mark.django_db
 def test_feed_member_ids_self_plus_followed_minus_blocked(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
-    bob = User.objects.create_user(localname="bob", password="s3cretpass")
-    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
+    bob = member(localname="bob", password="s3cretpass")
+    carol = member(localname="carol", password="s3cretpass")
     alice.follows.add(bob, carol)
     assert set(alice.feed_member_ids()) == {alice.id, bob.id, carol.id}
     alice.blocks.add(bob)
@@ -669,9 +670,9 @@ def test_feed_member_ids_self_plus_followed_minus_blocked(db):
 
 @pytest.mark.django_db
 def test_feed_for_excludes_blocked_users(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
-    bob = User.objects.create_user(localname="bob", password="s3cretpass")
-    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
+    bob = member(localname="bob", password="s3cretpass")
+    carol = member(localname="carol", password="s3cretpass")
     alice.follows.add(bob, carol)
     dune = Film.objects.create(title="Dune", year=2021)
     blade = Film.objects.create(title="Blade Runner", year=1982)
@@ -688,8 +689,8 @@ def test_feed_for_excludes_blocked_users(db):
 
 @pytest.mark.django_db
 def test_feed_entries_excludes_blocked_users_shelf_events(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
-    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
+    bob = member(localname="bob", password="s3cretpass")
     alice.follows.add(bob)
     dune = Film.objects.create(title="Dune", year=2021)
     shelve_to_watchlist(bob, dune)
@@ -702,8 +703,8 @@ def test_feed_entries_excludes_blocked_users_shelf_events(db):
 def test_feed_entries_following_a_blocked_user_stays_hidden(db):
     # R50: following a blocked user is allowed — but the block still hides
     # their content (membership = followed − blocked).
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
-    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
+    bob = member(localname="bob", password="s3cretpass")
     alice.follows.add(bob)
     alice.blocks.add(bob)
     dune = Film.objects.create(title="Dune", year=2021)
@@ -713,8 +714,8 @@ def test_feed_entries_following_a_blocked_user_stays_hidden(db):
 
 @pytest.mark.django_db
 def test_feed_entries_unblocking_restores_the_user(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
-    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
+    bob = member(localname="bob", password="s3cretpass")
     alice.follows.add(bob)
     alice.blocks.add(bob)
     dune = Film.objects.create(title="Dune", year=2021)
@@ -796,7 +797,7 @@ def _bulk_shelve(user, n, at, identifier=Shelf.TO_READ, step_seconds=1):
 
 @pytest.mark.django_db
 def test_feed_entries_bulk_watchlist_is_one_entry(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     at = timezone.now() - timedelta(hours=1)
     _bulk_shelve(alice, 5, at)
     entries = feed_entries(alice)
@@ -811,7 +812,7 @@ def test_feed_entries_bulk_watchlist_is_one_entry(db):
 
 @pytest.mark.django_db
 def test_feed_entries_bulk_gap_beyond_window_stays_separate(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     at = timezone.now() - timedelta(hours=1)
     _bulk_shelve(alice, 1, at)
     # A deliberate add six minutes later is a separate event.
@@ -823,7 +824,7 @@ def test_feed_entries_bulk_gap_beyond_window_stays_separate(db):
 
 @pytest.mark.django_db
 def test_feed_entries_bulk_chain_within_window_aggregates(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     at = timezone.now() - timedelta(hours=1)
     # Each gap is 4 minutes (< the 5-minute window) but the total span is
     # 8 — chaining still makes it one bulk operation.
@@ -836,7 +837,7 @@ def test_feed_entries_bulk_chain_within_window_aggregates(db):
 
 @pytest.mark.django_db
 def test_feed_entries_bulk_watched_absorbs_rating_statuses(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     at = timezone.now() - timedelta(hours=1)
     _bulk_shelve(alice, 3, at, identifier=Shelf.READ)
     # A rated import also creates one rating-only status per film — those must
@@ -858,7 +859,7 @@ def test_feed_entries_bulk_watched_absorbs_rating_statuses(db):
 
 @pytest.mark.django_db
 def test_feed_entries_bulk_with_written_review_stays_separate(db):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     at = timezone.now() - timedelta(hours=1)
     _bulk_shelve(alice, 2, at, identifier=Shelf.READ)
     reviewed = Film.objects.get(title="Bulk Film 01")

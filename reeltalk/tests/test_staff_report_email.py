@@ -49,6 +49,7 @@ from reeltalk.moderation.tasks import SEND_FUNC, send_report_email
 from reeltalk.notifications.models import Notification
 from reeltalk.social.admin import UserAdmin
 from reeltalk.social.models import User
+from reeltalk.tests.members import site_admin as create_site_admin
 
 NOTIFY_LOGGER = "reeltalk.moderation.notify"
 
@@ -729,7 +730,13 @@ def test_a_reporter_who_blocked_every_moderator_still_triggers_the_email(
 
 @pytest.fixture
 def admin_user(db):
-    return User.objects.create_superuser(localname="chiefadmin", password="s3cretpass")
+    # Verified, not merely created. Under R119 an unverified superuser has no
+    # session to hand over, so ``force_login`` below would leave the client
+    # anonymous and every admin-page assertion would then be reading a redirect
+    # to the login page rather than the page it names.
+    return create_site_admin(
+        localname="chiefadmin", password="s3cretpass", email="chiefadmin@example.test"
+    )
 
 
 @pytest.fixture

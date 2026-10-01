@@ -16,6 +16,7 @@ from PIL import Image
 
 from reeltalk.core.catalog import search_local
 from reeltalk.core.models import Film, ShelfFilm, mark_watched, shelve_to_watchlist
+from reeltalk.tests.members import member
 
 User = get_user_model()
 
@@ -95,7 +96,7 @@ def client():
 
 @pytest.fixture
 def user(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture

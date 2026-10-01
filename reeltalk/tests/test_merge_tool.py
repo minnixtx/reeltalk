@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 
 from reeltalk.core.models import Film, MergedFilm, Shelf, ShelfFilm, Status
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 
@@ -21,7 +22,7 @@ def client():
 
 @pytest.fixture
 def staff(db):
-    return User.objects.create_superuser(localname="admin", password="s3cretpass")
+    return site_admin(localname="admin", password="s3cretpass")
 
 
 @pytest.fixture
@@ -68,7 +69,7 @@ def test_merge_tool_requires_login(client, staff):
 def test_merge_tool_sends_non_staff_to_admin_login(client, db):
     # staff_member_required redirects any non-staff user (logged in or not)
     # to the admin login rather than serving the page.
-    User.objects.create_user(localname="alice", password="s3cretpass")
+    member(localname="alice", password="s3cretpass")
     assert client.login(username="alice", password="s3cretpass")
     resp = client.get("/admin/films/merge/")
     assert resp.status_code == 302
@@ -87,8 +88,8 @@ def test_merge_tool_renders_for_staff(staff_client, canonical, duplicate):
 
 @pytest.mark.django_db
 def test_merge_backfills_and_repoints(staff_client, canonical, duplicate):
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
-    bob = User.objects.create_user(localname="bob", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
+    bob = member(localname="bob", password="s3cretpass")
     watchlist = Shelf.objects.get(user=alice, identifier=Shelf.TO_READ)
     ShelfFilm.objects.create(shelf=watchlist, film=duplicate)
     Status.objects.create(

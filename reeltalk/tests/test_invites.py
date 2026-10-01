@@ -15,13 +15,23 @@ instance that is an extra account the owner never approved.
 from datetime import timedelta
 
 import pytest
+from django.contrib.auth import SESSION_KEY
 from django.contrib.auth.models import AnonymousUser
 from django.db import transaction
 from django.db.transaction import TransactionManagementError
 from django.test import Client
+from django.urls import reverse
 from django.utils import timezone
 
-from reeltalk.social.models import INVITE_TTL_DAYS, Invite, SiteSettings, User
+from reeltalk.social.models import (
+    INVITE_TTL_DAYS,
+    EmailVerificationToken,
+    Invite,
+    SiteSettings,
+    User,
+)
+from reeltalk.tests.members import member as create_member
+from reeltalk.tests.members import site_admin as create_site_admin
 
 # What ``secrets.token_urlsafe`` can emit. The route's charset matches it, so
 # a code outside this set cannot be a real one.
@@ -30,7 +40,9 @@ CODE_ALPHABET = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456
 SIGNUP_PAYLOAD = {
     "localname": "joiner",
     "display_name": "",
-    "email": "",
+    # Required since R118. An empty address here would create an account that
+    # can never be verified, and so can never sign in under R119.
+    "email": "joiner@example.test",
     "password1": "s3cretpass",
     "password2": "s3cretpass",
 }
@@ -40,12 +52,12 @@ PITCH = "Invite a fellow movie freak to ReelTalk"
 
 @pytest.fixture
 def member(db):
-    return User.objects.create_user(localname="member", password="s3cretpass")
+    return create_member(localname="member", password="s3cretpass")
 
 
 @pytest.fixture
 def owner(db):
-    return User.objects.create_superuser(localname="owner", password="s3cretpass")
+    return create_site_admin(localname="owner", password="s3cretpass")
 
 
 def _expire(invite):
@@ -87,7 +99,7 @@ def test_a_new_invite_lives_for_the_ttl(member):
 @pytest.mark.django_db
 def test_redeeming_spends_the_invite(member):
     invite = Invite.mint(member)
-    joiner = User.objects.create_user(localname="joiner", password="s3cretpass")
+    joiner = create_member(localname="joiner", password="s3cretpass")
     invite.redeem(joiner)
     invite.refresh_from_db()
     assert invite.used_by == joiner
@@ -108,7 +120,7 @@ def test_lock_live_refuses_unknown_used_and_expired(member):
     assert Invite.lock_live("no-such-code-000") is None
 
     used = Invite.mint(member)
-    used.redeem(User.objects.create_user(localname="joiner", password="s3cretpass"))
+    used.redeem(create_member(localname="joiner", password="s3cretpass"))
     with transaction.atomic():
         assert Invite.lock_live(used.code) is None
 
@@ -132,7 +144,7 @@ def test_lock_live_is_a_real_row_lock_not_a_plain_filter():
     # error in Django. If lock_live were a bare .filter().first() this would
     # return quietly, and "exactly one account per invite" would be a
     # comment rather than a property of the code.
-    joiner = User.objects.create_user(localname="joiner", password="s3cretpass")
+    joiner = create_member(localname="joiner", password="s3cretpass")
     invite = Invite.mint(joiner)
     with pytest.raises(TransactionManagementError):
         Invite.lock_live(invite.code)
@@ -143,7 +155,7 @@ def test_lock_live_is_a_real_row_lock_not_a_plain_filter():
 @pytest.mark.django_db
 def test_deleting_the_invited_account_does_not_reopen_the_link(owner):
     invite = Invite.mint(owner)
-    joiner = User.objects.create_user(localname="joiner", password="s3cretpass")
+    joiner = create_member(localname="joiner", password="s3cretpass")
     invite.redeem(joiner)
     joiner.delete()
     invite.refresh_from_db()
@@ -254,10 +266,19 @@ def test_a_link_opens_signup_on_an_invite_only_instance(client, owner):
     invite = Invite.mint(owner)
     resp = client.post(f"/invite/{invite.code}/", SIGNUP_PAYLOAD)
     assert resp.status_code == 302
-    assert resp["Location"] == "/welcome/"
+    # R119: a redeemed invite is a seat, not a proven mailbox. The invitee is
+    # sent to the same recovery page every other new member is, not into a
+    # session.
+    assert resp["Location"] == reverse("verify-resend")
+    joiner = User.objects.get(localname="joiner")
+    assert SESSION_KEY not in client.session
+    assert joiner.email_verified is False
     invite.refresh_from_db()
-    assert invite.used_by == User.objects.get(localname="joiner")
+    assert invite.used_by == joiner
     assert invite.used_at is not None
+    # The seat is spent AND a verification link exists for the new account,
+    # so the invitee is not left holding a used link and no way in.
+    assert EmailVerificationToken.objects.filter(user=joiner).count() == 1
 
 
 @pytest.mark.django_db
@@ -267,7 +288,14 @@ def test_a_link_cannot_open_a_second_account(owner):
     assert Client().post(url, SIGNUP_PAYLOAD).status_code == 302
 
     second = Client()
-    resp = second.post(url, dict(SIGNUP_PAYLOAD, localname="second"))
+    # A different address as well as a different localname. Reusing
+    # SIGNUP_PAYLOAD's would make the *duplicate email* the thing that
+    # refuses here (R118 makes the field required and unique), so the form
+    # would never reach the spent-invite check and this test would pass for
+    # the wrong reason while looking like it proved the seat was spent.
+    resp = second.post(
+        url, dict(SIGNUP_PAYLOAD, localname="second", email="second@example.test")
+    )
     assert resp.status_code == 200
     assert not User.objects.filter(localname="second").exists()
     assert "already been used" in resp.content.decode()
@@ -277,7 +305,7 @@ def test_a_link_cannot_open_a_second_account(owner):
 @pytest.mark.django_db
 def test_a_used_link_offers_no_form(client, owner):
     invite = Invite.mint(owner)
-    invite.redeem(User.objects.create_user(localname="joiner", password="s3cretpass"))
+    invite.redeem(create_member(localname="joiner", password="s3cretpass"))
     body = client.get(f"/invite/{invite.code}/").content.decode()
     assert 'name="password1"' not in body
     assert "already been used" in body

@@ -14,6 +14,7 @@ import responses
 
 from reeltalk.activitypub import crypto
 from reeltalk.social.models import User
+from reeltalk.tests.members import member
 
 REMOTE_ACTOR = "https://remote.example:8443/user/carol/"
 REMOTE_INBOX = REMOTE_ACTOR + "inbox/"
@@ -43,7 +44,7 @@ def _mirror(public_pem: str) -> User:
 
 @pytest.mark.django_db
 def test_block_button_hidden_on_own_profile(client):
-    User.objects.create_user(localname="alice", password="p")
+    member(localname="alice", password="p")
     client.login(username="alice", password="p")
     content = client.get("/user/alice/").content
     assert b"/block/" not in content
@@ -52,7 +53,7 @@ def test_block_button_hidden_on_own_profile(client):
 
 @pytest.mark.django_db
 def test_block_button_hidden_for_anonymous(client):
-    User.objects.create_user(localname="alice", password="p")
+    member(localname="alice", password="p")
     content = client.get("/user/alice/").content
     assert b"/block/" not in content
     assert b"/unblock/" not in content
@@ -60,8 +61,8 @@ def test_block_button_hidden_for_anonymous(client):
 
 @pytest.mark.django_db
 def test_block_button_shows_for_other_users(client):
-    User.objects.create_user(localname="alice", password="p")
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="alice", password="p")
+    member(localname="bob", password="p")
     client.login(username="bob", password="p")
     content = client.get("/user/alice/").content
     assert b"/user/alice/block/" in content
@@ -71,8 +72,8 @@ def test_block_button_shows_for_other_users(client):
 
 @pytest.mark.django_db
 def test_blocked_button_shows_when_already_blocked(client):
-    alice = User.objects.create_user(localname="alice", password="p")
-    bob = User.objects.create_user(localname="bob", password="p")
+    alice = member(localname="alice", password="p")
+    bob = member(localname="bob", password="p")
     bob.blocks.add(alice)
     client.login(username="bob", password="p")
     content = client.get("/user/alice/").content
@@ -86,8 +87,8 @@ def test_blocked_button_shows_when_already_blocked(client):
 @responses.activate
 @pytest.mark.django_db
 def test_block_local_target_records_m2m_without_delivery(client):
-    alice = User.objects.create_user(localname="alice", password="p")
-    bob = User.objects.create_user(localname="bob", password="p")
+    alice = member(localname="alice", password="p")
+    bob = member(localname="bob", password="p")
     client.login(username="bob", password="p")
 
     response = client.post("/user/alice/block/")
@@ -101,8 +102,8 @@ def test_block_local_target_records_m2m_without_delivery(client):
 
 @pytest.mark.django_db
 def test_unblock_local_target_removes_m2m(client):
-    alice = User.objects.create_user(localname="alice", password="p")
-    bob = User.objects.create_user(localname="bob", password="p")
+    alice = member(localname="alice", password="p")
+    bob = member(localname="bob", password="p")
     bob.blocks.add(alice)
     client.login(username="bob", password="p")
 
@@ -114,7 +115,7 @@ def test_unblock_local_target_removes_m2m(client):
 
 @pytest.mark.django_db
 def test_block_self_is_rejected(client):
-    User.objects.create_user(localname="alice", password="p")
+    member(localname="alice", password="p")
     client.login(username="alice", password="p")
 
     response = client.post("/user/alice/block/")
@@ -130,7 +131,7 @@ def test_block_self_is_rejected(client):
 @responses.activate
 @pytest.mark.django_db
 def test_block_remote_target_records_m2m_without_delivery(client, remote_keypair):
-    bob = User.objects.create_user(localname="bob", password="p")
+    bob = member(localname="bob", password="p")
     _private_pem, public_pem = remote_keypair
     mirror = _mirror(public_pem)  # discovery created the mirror earlier
     client.login(username="bob", password="p")
@@ -149,7 +150,7 @@ def test_block_remote_target_records_m2m_without_delivery(client, remote_keypair
 @responses.activate
 @pytest.mark.django_db
 def test_unblock_remote_target_removes_m2m_without_delivery(client, remote_keypair):
-    bob = User.objects.create_user(localname="bob", password="p")
+    bob = member(localname="bob", password="p")
     _private_pem, public_pem = remote_keypair
     mirror = _mirror(public_pem)
     bob.blocks.add(mirror)
@@ -168,15 +169,15 @@ def test_unblock_remote_target_removes_m2m_without_delivery(client, remote_keypa
 
 @pytest.mark.django_db
 def test_block_get_is_not_allowed(client):
-    User.objects.create_user(localname="alice", password="p")
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="alice", password="p")
+    member(localname="bob", password="p")
     client.login(username="bob", password="p")
     assert client.get("/user/alice/block/").status_code == 405
 
 
 @pytest.mark.django_db
 def test_block_requires_login(client):
-    User.objects.create_user(localname="alice", password="p")
+    member(localname="alice", password="p")
     response = client.post("/user/alice/block/")
     assert response.status_code == 302
     assert "/login/" in response["Location"]
@@ -184,7 +185,7 @@ def test_block_requires_login(client):
 
 @pytest.mark.django_db
 def test_block_unknown_user_404(client):
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="bob", password="p")
     client.login(username="bob", password="p")
     assert client.post("/user/nobody/block/").status_code == 404
 
@@ -193,7 +194,7 @@ def test_block_unknown_user_404(client):
 @pytest.mark.django_db
 def test_block_unknown_remote_404(client):
     # No mirror on this instance — only resolvable profiles can be blocked.
-    bob = User.objects.create_user(localname="bob", password="p")
+    bob = member(localname="bob", password="p")
     client.login(username="bob", password="p")
 
     response = client.post("/user/carol@remote.example:8443/block/")

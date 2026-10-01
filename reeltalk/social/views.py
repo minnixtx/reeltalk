@@ -27,7 +27,6 @@ from urllib.parse import urlparse
 import requests
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.db import transaction
@@ -35,6 +34,7 @@ from django.http import (
     Http404,
     HttpResponse,
     HttpResponseGone,
+    HttpResponseNotAllowed,
     JsonResponse,
 )
 from django.shortcuts import redirect, render, reverse
@@ -58,10 +58,38 @@ from reeltalk.core.utils import render_markdown
 from reeltalk.moderation.decorators import can_act_on
 from reeltalk.moderation.models import report_state
 from reeltalk.notifications.models import Notification, notify
+from reeltalk.proxy_trust import client_ip
 
-from .forms import ProfileForm, SignupForm
-from .models import Invite, SiteSettings, User
-from .verify import send_verification_email
+from .forms import (
+    ProfileForm,
+    ResendVerificationForm,
+    SignupForm,
+)
+from .models import (
+    AddressMismatchError,
+    EmailVerificationToken,
+    Invite,
+    SiteSettings,
+    User,
+)
+from .verify import RESEND_PATH, request_resend, send_verification_email
+
+# The routes that must stay reachable through R119's gate, by name.
+#
+# The gate lives in ``user_can_authenticate``, so by construction it does not
+# intercept a logged-out route — and "by construction" is precisely the kind
+# of thing that stops being true the day someone adds ``login_required`` to
+# the resend view to "tidy it up", silently deleting the only exit from the
+# lockout. The peer read of Mastodon is why this list exists: its gate is
+# global and every page an unconfirmed user must reach is carved out
+# explicitly, including the sign-in page itself, *"so the gate can't bounce
+# you out of the login flow itself"*.
+#
+# A test walks this list and drives each route anonymously with an unverified
+# account in the database, asserting none of them bounce to the login page.
+# Adding one of these verbs to any of these routes turns that test red, which
+# is the whole point of naming the exemption rather than relying on it.
+GATED_EXEMPT_URLS = ("login", "verify-link", "verify-resend", "signup", "setup")
 
 
 def has_admin() -> bool:
@@ -136,11 +164,24 @@ def signup(request):
         # — the account still appears, it just never gets a link. Nothing
         # sends in this request; the guard that shouts when the backend
         # cannot deliver is the only part that runs here.
-        send_verification_email(user)
-        login(request, user)
-        messages.success(request, f"Welcome, {user.localname}!")
-        # New users land on the getting-started page (M6), not the feed.
-        return redirect("welcome")
+        send_verification_email(user, request_ip=client_ip(request))
+        # **Signup no longer logs you in** (R119). It cannot: the account has
+        # no proof of its address yet, and the gate that refuses it is the
+        # same one this feature exists to make meaningful. Logging in here
+        # would mean either an account that gets a session it is not allowed
+        # to have, or a gate with a hole punched in its own creation path.
+        #
+        # The person who just signed up is sent to the resend page, which is
+        # deliberately the same page that recovers a lost link — so the first
+        # thing a new member sees is the thing they will need if the mail
+        # never arrives. R119 and R122 are a pair: the gate is only
+        # acceptable because this exit exists.
+        messages.success(
+            request,
+            "Almost there — we sent a verification link to your email "
+            "address. Click it to finish, or ask for another one below.",
+        )
+        return redirect(RESEND_PATH)
     return render(request, "signup.html", {"form": form})
 
 
@@ -163,10 +204,22 @@ def setup(request):
         # has to be in place before it runs, because with the console
         # backend the guard shouts here — in the request the admin is
         # standing in — rather than three increments later.
-        send_verification_email(user)
-        login(request, user)
-        messages.success(request, "Instance set up — you are now the admin.")
-        return redirect("index")
+        send_verification_email(user, request_ip=client_ip(request))
+        # The wizard no longer logs the new admin in, and **this is the
+        # sharpest edge in the whole increment**. ``has_admin()`` is now true,
+        # so the wizard is gone; the admin cannot sign in until they click
+        # the link; and if ``EMAIL_*`` was not configured before this ran,
+        # there is no /admin/ to go configure it from. The guard above is
+        # what makes that loud rather than silent, and the resend page below
+        # is the way back out — but the requirement is to configure mail
+        # *first*, not to recover afterwards.
+        messages.success(
+            request,
+            "Instance set up. Check the email address you used to create "
+            "this admin account and click the verification link — you "
+            "cannot sign in until you do.",
+        )
+        return redirect(RESEND_PATH)
     return render(request, "social/setup.html", {"form": form})
 
 
@@ -260,10 +313,149 @@ def invite_accept(request, code):
         # helper means the mail is only queued if the account and the
         # invite's redemption both landed. A send scheduled before the
         # commit could go out for an account that never existed.
-        send_verification_email(user)
-    login(request, user)
-    messages.success(request, f"Welcome, {user.localname}!")
-    return redirect("welcome")
+        send_verification_email(user, request_ip=client_ip(request))
+    # No ``login()`` here either (R119). A redeemed invite is a seat, not a
+    # proven mailbox — the invite proved that *someone* was sent the link, and
+    # this account's address still has to be proved by its own click. An
+    # invite-only instance is exactly where this matters most: without the
+    # gate the seat is live on the inviter's word alone.
+    messages.success(
+        request,
+        "Your invite is used and your account is created. Check your email "
+        "and click the verification link to sign in.",
+    )
+    return redirect(RESEND_PATH)
+
+
+def verify_link(request, code):
+    """Spend a verification link: ``GET /account/verify/<code>/``.
+
+    The whole point of the feature is the click, so this view is the moment
+    R123's provenance is actually created — every verified flag on this
+    instance traces to a request that landed here with a real token.
+
+    **Reachable while logged out, by necessity** — see ``GATED_EXEMPT_URLS``
+    below for the exemption this depends on and why naming it matters.
+
+    **The copy here is specific, and the resend page's is not.** That
+    asymmetry is deliberate (peer finding 8): enumeration risk lives where an
+    unauthenticated caller submits an *address*. Reaching this page at all
+    requires a ~192-bit token nobody can guess, so whoever reads "your link
+    expired on such-and-such a date" already holds a real credential and is
+    entitled to know what is wrong with it. Telling them that, with a link
+    to get a new one, is the difference between a recoverable annoyance and
+    a dead end.
+
+    **Single-use is enforced by the row lock, not by a check.** ``lock_live``
+    takes a write lock inside the transaction across the liveness test and the
+    spend, because two things click verification links at once all the time
+    in practice — a person and their mail client's link scanner.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(permitted_methods=["GET"])
+
+    verified_localname = None
+    problem = None
+    # A machine-readable outcome so the template can give the *right* help
+    # rather than pattern-matching on sentence text. "already used" in
+    # particular needs different advice from "invalid": a mail client's link
+    # scanner spends a single-use token without a human ever seeing it, and a
+    # member who is told they used their own link when they did not will not
+    # believe it.
+    outcome = "verified"
+    with transaction.atomic():
+        token = EmailVerificationToken.lock_live(code)
+        if token is None:
+            # ``lock_live`` is deliberately silent about *why*. Look the row
+            # up to report it; an unknown code and an unusable one get
+            # different sentences, and both are safe to say because both
+            # required a token to ask.
+            looked_up = EmailVerificationToken.objects.filter(code=code).first()
+            if looked_up is None:
+                outcome = "invalid"
+                problem = "That verification link is not valid."
+            else:
+                reason = looked_up.unusable_reason()
+                problem = reason or "That verification link is not valid."
+                if looked_up.used_at is not None:
+                    outcome = "used"
+                elif looked_up.superseded_at is not None:
+                    outcome = "superseded"
+                elif not looked_up.is_live:
+                    outcome = "expired"
+                else:
+                    outcome = "invalid"
+        else:
+            try:
+                token.consume()
+            except AddressMismatchError:
+                # The address moved after this link was sent (R120's binding).
+                # The member is not stranded — the resend page mints against
+                # whatever the address is now.
+                outcome = "mismatch"
+                problem = (
+                    "That link was sent to a different address than the one "
+                    "on this account now. Ask for a new link and it will go "
+                    "to the current one."
+                )
+            else:
+                verified_localname = token.user.localname
+                # Anti-session-fixation across the boundary the peer applies
+                # (finding 4): verification changes what the account *is*,
+                # so the session that arrived with it should not survive
+                # unchanged. In our shape the clicker is usually logged out
+                # — R119 makes that so — but the policy is applied rather
+                # than skipped because "usually" is not "always": a signed-in
+                # visitor can open one of these too, and a key that predates
+                # a privilege change is a key that should not be reused.
+                request.session.cycle_key()
+
+    return render(
+        request,
+        "social/verify_result.html",
+        {
+            "ok": verified_localname is not None,
+            "reason": problem,
+            "outcome": outcome,
+        },
+    )
+
+
+def verify_resend(request):
+    """The logged-out recovery page: ``/account/verify/resend/`` (R122).
+
+    Two jobs in one page. Its **GET** half is where signup, the setup wizard
+    and invite acceptance now send a person — "check your email" — and its
+    **POST** half is the rate-limited resend that rescues a lost or expired
+    link. They are the same page because they are the same moment: someone who
+    does not have a session and needs a link.
+
+    **Every POST outcome renders the same sentence.** Not "similar" copy —
+    the same page with the same words, whether the address exists, was just
+    sent a link, is inside its cooldown, or tripped the per-source limit.
+    This is the one surface in the increment where an anonymous caller
+    submits an address, so anything that varies here becomes an oracle for
+    whether an address is registered. The cost is real and accepted: someone
+    who mistypes their address here gets no signal that they did. Where that
+    information *does* live is the admin's token view, which is the point of
+    recording the reason in the log rather than showing it.
+    """
+    if request.method == "POST":
+        form = ResendVerificationForm(request.POST)
+        if form.is_valid():
+            request_resend(form.cleaned_data["email"], client_ip(request))
+            # Redirect rather than render, so refreshing the page cannot fire
+            # a second send. The uniform sentence rides in the flash message.
+            messages.success(
+                request,
+                "If that address has an account here, a verification link "
+                "is on its way. If it does not arrive within a few minutes, "
+                "try again.",
+            )
+            return redirect(RESEND_PATH)
+    else:
+        form = ResendVerificationForm()
+    return render(request, "social/verify_form.html", {"form": form})
 
 
 def _invite_context(request, profile_user) -> dict:

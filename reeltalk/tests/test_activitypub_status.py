@@ -32,6 +32,7 @@ from reeltalk.activitypub.models import DeliveredActivity
 from reeltalk.activitypub.statuses import RemoteObjectError
 from reeltalk.core.models import Film, Shelf, ShelfFilm, Status
 from reeltalk.social.models import User
+from reeltalk.tests.members import member
 
 REMOTE_ACTOR = "https://remote.example/user/carol/"
 REMOTE_KEY_ID = f"{REMOTE_ACTOR}#main-key"
@@ -779,8 +780,8 @@ def test_inbox_create_note_end_to_end(client, remote_keypair, person_doc):
 
 
 def _alice_with_followers():
-    alice = User.objects.create_user(localname="alice", password="p")
-    bob = User.objects.create_user(localname="bob", password="p")
+    alice = member(localname="alice", password="p")
+    bob = member(localname="bob", password="p")
     carol = _carol()
     carol.save()
     bob.follows.add(alice)  # local follower — never delivered to
@@ -932,8 +933,8 @@ def test_broadcast_drops_unreachable_follower():
 @responses.activate
 @pytest.mark.django_db
 def test_broadcast_no_remote_followers_is_a_noop():
-    alice = User.objects.create_user(localname="alice", password="p")
-    bob = User.objects.create_user(localname="bob", password="p")
+    alice = member(localname="alice", password="p")
+    bob = member(localname="bob", password="p")
     bob.follows.add(alice)  # local only
     film = Film.objects.create(title="Arrival", year=2016)
     status = Status.objects.create(
@@ -952,7 +953,7 @@ def test_broadcast_no_remote_followers_is_a_noop():
 @responses.activate
 @pytest.mark.django_db
 def test_mark_watched_view_broadcasts_create_and_watchlist_removal(client):
-    alice = User.objects.create_user(localname="alice", password="p")
+    alice = member(localname="alice", password="p")
     carol = _carol()
     carol.save()
     carol.follows.add(alice)
@@ -981,7 +982,7 @@ def test_mark_watched_view_broadcasts_create_and_watchlist_removal(client):
 @responses.activate
 @pytest.mark.django_db
 def test_mark_watched_view_broadcasts_update_on_refinish(client):
-    alice = User.objects.create_user(localname="alice", password="p")
+    alice = member(localname="alice", password="p")
     carol = _carol()
     carol.save()
     carol.follows.add(alice)
@@ -1009,7 +1010,7 @@ def test_mark_watched_view_broadcasts_update_on_refinish(client):
 @responses.activate
 @pytest.mark.django_db
 def test_shelve_view_broadcasts_create(client):
-    alice = User.objects.create_user(localname="alice", password="p")
+    alice = member(localname="alice", password="p")
     carol = _carol()
     carol.save()
     carol.follows.add(alice)
@@ -1029,7 +1030,7 @@ def test_shelve_view_broadcasts_create(client):
 @responses.activate
 @pytest.mark.django_db
 def test_unshelve_view_broadcasts_delete(client):
-    alice = User.objects.create_user(localname="alice", password="p")
+    alice = member(localname="alice", password="p")
     carol = _carol()
     carol.save()
     carol.follows.add(alice)
@@ -1050,8 +1051,8 @@ def test_unshelve_view_broadcasts_delete(client):
 @responses.activate
 @pytest.mark.django_db
 def test_delete_review_view_broadcasts_delete(client):
-    alice = User.objects.create_user(localname="alice", password="p")
-    bob = User.objects.create_user(localname="bob", password="p")
+    alice = member(localname="alice", password="p")
+    bob = member(localname="bob", password="p")
     carol = _carol()
     carol.save()
     bob.follows.add(alice)  # local follower — never delivered to
@@ -1084,7 +1085,7 @@ def test_delete_review_view_broadcasts_delete(client):
 @responses.activate
 @pytest.mark.django_db
 def test_search_watchlist_broadcasts(client):
-    alice = User.objects.create_user(localname="alice", password="p")
+    alice = member(localname="alice", password="p")
     carol = _carol()
     carol.save()
     carol.follows.add(alice)
@@ -1108,7 +1109,7 @@ def test_search_watchlist_broadcasts(client):
 
 @pytest.mark.django_db
 def test_status_detail_serves_note_document_to_ap_clients(client):
-    alice = User.objects.create_user(localname="alice", password="p")
+    alice = member(localname="alice", password="p")
     film = Film.objects.create(title="Arrival", year=2016)
     status = Status.objects.create(
         user=alice,
@@ -1131,7 +1132,7 @@ def test_status_detail_ap_arm_404s_for_deleted_and_mirrors(client):
     # R83 decision 3 keeps the AP arm local-only: we never mint identity for
     # another instance's object. The browser arm now serves mirrors too —
     # that is test_status_page.py's job, not this one.
-    alice = User.objects.create_user(localname="alice", password="p")
+    alice = member(localname="alice", password="p")
     film = Film.objects.create(title="Arrival", year=2016)
     status = Status.objects.create(
         user=alice,

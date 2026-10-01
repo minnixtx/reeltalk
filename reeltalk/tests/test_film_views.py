@@ -7,6 +7,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 
 from reeltalk.core.models import Film, Shelf, ShelfFilm, Status
+from reeltalk.tests.members import member
 
 User = get_user_model()
 
@@ -18,7 +19,7 @@ def client():
 
 @pytest.fixture
 def user(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
@@ -63,7 +64,7 @@ def test_film_detail_renders_metadata(client, film):
 
 @pytest.mark.django_db
 def test_film_detail_shows_all_users_reviews(client, user, film):
-    other = User.objects.create_user(localname="bob", password="s3cretpass")
+    other = member(localname="bob", password="s3cretpass")
     review(user, film, rating="4.5", content="<p>Great.</p>")
     review(other, film, rating="3", content="<p>Meh.</p>")
     resp = client.get(f"/film/{film.id}/")
@@ -333,7 +334,7 @@ def test_detail_shows_block_button_and_toggles(login, film):
 
 @pytest.mark.django_db
 def test_film_detail_hides_blocked_users_reviews(login, user, film):
-    other = User.objects.create_user(localname="bob", password="s3cretpass")
+    other = member(localname="bob", password="s3cretpass")
     review(user, film, rating="4.5", content="<p>Great.</p>")
     review(other, film, rating="2", content="<p>Meh.</p>")
     user.blocks.add(other)
@@ -345,7 +346,7 @@ def test_film_detail_hides_blocked_users_reviews(login, user, film):
 
 @pytest.mark.django_db
 def test_film_detail_anonymous_sees_all_reviews(client, user, film):
-    other = User.objects.create_user(localname="bob", password="s3cretpass")
+    other = member(localname="bob", password="s3cretpass")
     review(user, film, rating="4.5", content="<p>Great.</p>")
     review(other, film, rating="2", content="<p>Meh.</p>")
     user.blocks.add(other)  # blocking is per-logged-in-user; anonymous sees all
@@ -357,7 +358,7 @@ def test_film_detail_anonymous_sees_all_reviews(client, user, film):
 
 @pytest.mark.django_db
 def test_film_detail_unblocking_shows_reviews_again(login, user, film):
-    other = User.objects.create_user(localname="bob", password="s3cretpass")
+    other = member(localname="bob", password="s3cretpass")
     review(other, film, rating="2", content="<p>Meh.</p>")
     user.blocks.add(other)
     assert "Meh." not in login.get(f"/film/{film.id}/").content.decode()
@@ -404,7 +405,7 @@ def test_delete_review_soft_deletes_and_keeps_watched(login, user, film):
 
 @pytest.mark.django_db
 def test_delete_review_cannot_delete_others_review(login, user, film):
-    other = User.objects.create_user(localname="bob", password="s3cretpass")
+    other = member(localname="bob", password="s3cretpass")
     theirs = review(other, film, rating="2", content="<p>Meh.</p>")
     # alice (the `login` fixture) tries to delete bob's review.
     resp = login.post(f"/status/{theirs.id}/delete/")
@@ -425,7 +426,7 @@ def test_delete_review_already_deleted_404s(login, user, film):
 
 @pytest.mark.django_db
 def test_detail_shows_delete_button_on_own_review_only(login, user, film):
-    other = User.objects.create_user(localname="bob", password="s3cretpass")
+    other = member(localname="bob", password="s3cretpass")
     mine = review(user, film, rating="4.5", content="<p>Great.</p>")
     theirs = review(other, film, rating="2", content="<p>Meh.</p>")
     body = login.get(f"/film/{film.id}/").content.decode()

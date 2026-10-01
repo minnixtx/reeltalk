@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}{% if ok %}Email verified — ReelTalk{% else %}Verification link — ReelTalk{% endif %}{% endblock %}
+
+{% block content %}
+{% if ok %}
+<h1>Email verified</h1>
+<p>Your address is confirmed. You can sign in now.</p>
+<p><a class="btn" href="{% url 'login' %}">Log in</a></p>
+{% else %}
+<h1>That link did not work</h1>
+<p>{{ reason }}</p>
+
+{% if outcome == "used" %}
+{% comment %}
+The mail-client case, and it is common: a link scanner GETs the URL before
+a human ever opens the mail, which spends the single-use token. Saying
+"you already used this" to someone who did not is a dead end unless the
+page explains that a scanner can do it and offers the way out.
+{% endcomment %}
+<p>
+  If you did not use it yourself, a mail client or a security scanner almost
+  certainly opened it for you. That is not a problem — ask for a fresh link
+  below and it will be good for one click.
+</p>
+{% endif %}
+
+{% if outcome == "superseded" %}
+<p>Use the most recent link we sent you rather than this one.</p>
+{% endif %}
+
+<p><a class="btn" href="{% url 'verify-resend' %}">Send me a new link</a></p>
+<p><a href="{% url 'login' %}">Back to log in</a></p>
+{% endif %}
+{% endblock %}

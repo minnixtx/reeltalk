@@ -36,6 +36,8 @@ from reeltalk.activitypub.broadcast import broadcast_actor_update
 from reeltalk.core.models import Film, Status
 from reeltalk.moderation.models import Report
 from reeltalk.notifications.models import Notification
+from reeltalk.tests.members import member as create_member
+from reeltalk.tests.members import site_admin as create_site_admin
 
 User = get_user_model()
 PASSWORD = "s3cretpass"
@@ -47,52 +49,46 @@ REMOTE_INBOX = "https://remote.example/users/dana/inbox"
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password=PASSWORD)
+    return create_member(localname="alice", password=PASSWORD)
 
 
 @pytest.fixture
 def bob(db):
     """The reporting member."""
-    return User.objects.create_user(localname="bob", password=PASSWORD)
+    return create_member(localname="bob", password=PASSWORD)
 
 
 @pytest.fixture
 def rob(db):
     """A second reporter, for the pile tests."""
-    return User.objects.create_user(localname="rob", password=PASSWORD)
+    return create_member(localname="rob", password=PASSWORD)
 
 
 @pytest.fixture
 def viewer(db):
-    return User.objects.create_user(localname="viewer", password=PASSWORD)
+    return create_member(localname="viewer", password=PASSWORD)
 
 
 @pytest.fixture
 def mod(db):
-    return User.objects.create_user(
-        localname="mod", password=PASSWORD, is_moderator=True
-    )
+    return create_member(localname="mod", password=PASSWORD, is_moderator=True)
 
 
 @pytest.fixture
 def mod2(db):
-    return User.objects.create_user(
-        localname="mod2", password=PASSWORD, is_moderator=True
-    )
+    return create_member(localname="mod2", password=PASSWORD, is_moderator=True)
 
 
 @pytest.fixture
 def siteadmin(db):
-    return User.objects.create_superuser(localname="root", password=PASSWORD)
+    return create_site_admin(localname="root", password=PASSWORD)
 
 
 @pytest.fixture
 def admin_door(db):
     """Holds Django's /admin/ door without being the site admin — R103b
     puts it on the admin's side of the line."""
-    return User.objects.create_user(
-        localname="doorkeeper", password=PASSWORD, is_staff=True
-    )
+    return create_member(localname="doorkeeper", password=PASSWORD, is_staff=True)
 
 
 @pytest.fixture
@@ -259,10 +255,8 @@ def test_a_moderator_cannot_suspend_an_account_holding_the_admin_door(
 
 
 def test_a_moderator_cannot_suspend_themselves(dune):
-    actor = User.objects.create_user(
-        localname="selfmod", password=PASSWORD, is_moderator=True
-    )
-    other = User.objects.create_user(localname="filer", password=PASSWORD)
+    actor = create_member(localname="selfmod", password=PASSWORD, is_moderator=True)
+    other = create_member(localname="filer", password=PASSWORD)
     status = Status.objects.create(
         user=actor,
         film=dune,
@@ -291,7 +285,7 @@ def test_the_site_admin_cannot_suspend_themselves(dune, siteadmin):
     view is where the refusal has to be *said*. The model-level backstop is
     ``AdminImmunityError``.
     """
-    other = User.objects.create_user(localname="filer2", password=PASSWORD)
+    other = create_member(localname="filer2", password=PASSWORD)
     status = Status.objects.create(
         user=siteadmin,
         film=dune,
@@ -533,7 +527,7 @@ def test_the_actor_update_is_signed_as_the_suspended_user_not_the_moderator(
 @responses.activate
 def test_a_local_follower_gets_no_delivery(alice, bob, review, mod):
     """Local followers read the local rows; a POST would tell them nothing."""
-    local = User.objects.create_user(localname="localfan", password=PASSWORD)
+    local = create_member(localname="localfan", password=PASSWORD)
     local.follows.add(alice)
     report = report_a_post(bob, review)
     responses.add(responses.POST, REMOTE_INBOX)
@@ -588,8 +582,8 @@ def test_a_moderator_lifts_a_suspension_from_the_profile(alice, siteadmin):
 
 def test_a_member_cannot_unsuspend(alice):
     alice.suspend()
-    member = User.objects.create_user(localname="member", password=PASSWORD)
-    assert logged_in(member).post(unsuspend_url(alice)).status_code == 403
+    joiner = create_member(localname="member", password=PASSWORD)
+    assert logged_in(joiner).post(unsuspend_url(alice)).status_code == 403
     alice.refresh_from_db()
     assert alice.suspended_at is not None
 

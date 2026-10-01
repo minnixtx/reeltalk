@@ -35,18 +35,19 @@ from django.test.utils import CaptureQueriesContext
 
 from reeltalk.core.models import Film, Status
 from reeltalk.notifications.models import Notification, mark_all_read, notify
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
 def bob(db):
-    return User.objects.create_user(localname="bob", password="s3cretpass")
+    return member(localname="bob", password="s3cretpass")
 
 
 @pytest.fixture
@@ -66,7 +67,7 @@ def post(db, alice, dune):
 
 @pytest.fixture
 def admin_client(client, db):
-    admin = User.objects.create_superuser(localname="root", password="s3cretpass")
+    admin = site_admin(localname="root", password="s3cretpass")
     client.force_login(admin)
     return client
 
@@ -211,7 +212,7 @@ def test_the_composite_index_exists_in_the_database(db):
 def test_deleting_a_recipient_takes_their_ledger_and_a_deleted_actor_does_not(
     bob,
 ):
-    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    carol = member(localname="carol", password="s3cretpass")
     # Django clears the pk off a deleted instance, so the id has to be
     # captured before the delete or the query below cannot name her at all.
     carol_id = carol.pk

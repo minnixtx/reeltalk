@@ -53,6 +53,7 @@ from reeltalk.social.verify import (
     send_verification_email,
     verification_url,
 )
+from reeltalk.tests.members import site_admin as create_site_admin
 
 VERIFY_LOGGER = "reeltalk.social.verify"
 
@@ -92,7 +93,12 @@ def _member(localname="member", email=None):
 
 
 def _admin(localname="overlord"):
-    return User.objects.create_superuser(
+    # Verified. ``admin_client`` force-logs this account in, and under R119 an
+    # unverified superuser has no session to give — the client would be
+    # anonymous and the admin POSTs below would come back as a redirect to the
+    # login page with the row untouched, which reads exactly like a broken
+    # save rather than a missing identity.
+    return create_site_admin(
         localname=localname, password=PASSWORD, email=f"{localname}@example.test"
     )
 
@@ -161,9 +167,11 @@ def test_nothing_leaves_the_box_inside_the_signup_request(client):
     client.post("/signup/", SIGNUP)
     assert mail.outbox == []
     assert OrmQ.objects.count() == 0
-    # ...while the account and its token really were created.
+    # ...while the account and its token really were created. Scoped to the
+    # joiner because ``_admin()`` is itself verified and so already holds a
+    # spent token of its own — a global count would be measuring two people.
     assert User.objects.filter(localname="joiner").exists()
-    assert EmailVerificationToken.objects.count() == 1
+    assert EmailVerificationToken.objects.filter(user__localname="joiner").count() == 1
 
 
 @pytest.mark.django_db
@@ -174,16 +182,19 @@ def test_the_helper_reports_the_send_it_queued(db):
 
 
 @pytest.mark.django_db
-def test_an_addressless_signup_still_creates_its_account_and_sends_nothing(client):
-    # ``SignupForm.email`` is still ``required=False`` until a later
-    # increment, so an address-less signup is a normal working thing today
-    # and must not 500. The helper delegates the check to ``mint()`` and
-    # translates its refusal into a logged no-op rather than a crash.
+def test_an_addressless_signup_is_refused_rather_than_built_unverifiable(client):
+    # This test used to prove the opposite: that ``SignupForm.email`` was
+    # ``required=False`` and an address-less signup was a normal working
+    # thing. R118 closed that, and 2F-3 is the increment that made it
+    # necessary rather than merely tidy — with the gate up, an account with no
+    # address can never be verified, so it can never sign in. Accepting such a
+    # signup would be manufacturing a brick one row at a time and charging the
+    # member for it later.
     _admin()
     resp = client.post("/signup/", dict(SIGNUP, email=""))
-    assert resp.status_code == 302
-    assert User.objects.filter(localname="joiner", email="").exists()
-    assert EmailVerificationToken.objects.count() == 0
+    assert resp.status_code == 200  # re-rendered with the field error
+    assert not User.objects.filter(localname="joiner").exists()
+    assert not EmailVerificationToken.objects.filter(user__localname="joiner").exists()
     assert OrmQ.objects.count() == 0
     assert mail.outbox == []
 
@@ -783,6 +794,10 @@ def test_the_admin_add_path_sends_no_verification_mail(admin_client):
     assert User.objects.filter(localname="madebyadmin").exists()
     # The commit callbacks were captured and run, so "nothing was queued"
     # is a proof here rather than an artifact of nobody having run them.
-    assert EmailVerificationToken.objects.count() == 0
+    # Scoped to the created account: the admin in ``admin_client`` is itself
+    # verified and carries a spent token of its own.
+    assert not EmailVerificationToken.objects.filter(
+        user__localname="madebyadmin"
+    ).exists()
     assert OrmQ.objects.count() == 0
     assert mail.outbox == []

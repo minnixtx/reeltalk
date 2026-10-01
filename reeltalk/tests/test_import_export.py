@@ -32,13 +32,14 @@ from reeltalk.core.import_export import (
     parse_tmdb_rating,
 )
 from reeltalk.core.models import Film, Shelf, ShelfFilm, Status
+from reeltalk.tests.members import member, verify
 
 User = get_user_model()
 
 
 @pytest.fixture
 def user(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return member(localname="alice", password="s3cretpass")
 
 
 def shelf_of(user, identifier):
@@ -629,7 +630,21 @@ def test_export_page_and_download(login, user):
 
 @pytest.mark.django_db
 def test_import_non_local_user_is_redirected(db, client):
-    User.objects.create_user(localname="remote", password="s3cretpass", local=False)
+    # The thing under test is the import view's guard for a non-local (mirror)
+    # account, not that account's ability to sign in — but reaching the guard
+    # means arriving authenticated as it, and under R119 that takes a verified
+    # address like anyone else. So the mirror row gets an address and spends a
+    # real token (R123: never a column write). Stated plainly because it is a
+    # fiction: a mirror account verifying its mail is not a thing that happens
+    # in production, where non-local rows never sign in at all. It is the cost
+    # of exercising the guard from the inside rather than around it.
+    mirror = User.objects.create_user(
+        localname="remote",
+        password="s3cretpass",
+        email="remote@example.test",
+        local=False,
+    )
+    verify(mirror)
     assert client.login(username="remote", password="s3cretpass")
     resp = client.get(reverse("import-films"))
     assert resp.status_code == 302

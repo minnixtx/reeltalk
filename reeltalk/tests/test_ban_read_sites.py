@@ -37,6 +37,7 @@ from reeltalk.mentions.models import sync_status_mentions
 from reeltalk.moderation.models import Report
 from reeltalk.social.models import AdminImmunityError
 from reeltalk.social.views import has_admin
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 PASSWORD = "s3cretpass"
@@ -45,24 +46,22 @@ SIGNUP_PASSWORD = "correct-horse-battery-9"
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password=PASSWORD)
+    return member(localname="alice", password=PASSWORD)
 
 
 @pytest.fixture
 def bob(db):
-    return User.objects.create_user(localname="bob", password=PASSWORD)
+    return member(localname="bob", password=PASSWORD)
 
 
 @pytest.fixture
 def mod(db):
-    return User.objects.create_user(
-        localname="mod", password=PASSWORD, is_moderator=True
-    )
+    return member(localname="mod", password=PASSWORD, is_moderator=True)
 
 
 @pytest.fixture
 def siteadmin(db):
-    return User.objects.create_superuser(localname="root", password=PASSWORD)
+    return site_admin(localname="root", password=PASSWORD)
 
 
 @pytest.fixture
@@ -316,7 +315,7 @@ def test_a_banned_localname_cannot_be_re_registered_exactly(client, siteadmin, b
         {
             "localname": "alice",
             "display_name": "New Alice",
-            "email": "",
+            "email": "newalice@example.test",
             "password1": SIGNUP_PASSWORD,
             "password2": SIGNUP_PASSWORD,
         },
@@ -341,7 +340,7 @@ def test_a_banned_localname_cannot_be_re_registered_as_a_case_variant(
         {
             "localname": "Alice",
             "display_name": "Not Alice",
-            "email": "",
+            "email": "notalice@example.test",
             "password1": SIGNUP_PASSWORD,
             "password2": SIGNUP_PASSWORD,
         },
@@ -366,7 +365,7 @@ def test_the_reservation_holds_because_the_row_is_kept(client, siteadmin, banned
         {
             "localname": "ALICE",
             "display_name": "Squat",
-            "email": "",
+            "email": "squat@example.test",
             "password1": SIGNUP_PASSWORD,
             "password2": SIGNUP_PASSWORD,
         },
@@ -381,7 +380,7 @@ def test_an_unrelated_name_still_signs_up_fine(client, siteadmin, banned):
         {
             "localname": "carol",
             "display_name": "Carol",
-            "email": "",
+            "email": "carol@example.test",
             "password1": SIGNUP_PASSWORD,
             "password2": SIGNUP_PASSWORD,
         },

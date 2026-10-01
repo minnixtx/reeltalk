@@ -24,6 +24,7 @@ from reeltalk.core.models import (
     trending_films,
 )
 from reeltalk.social.models import SiteSettings
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 
@@ -36,17 +37,17 @@ def client():
 @pytest.fixture
 def admin(db):
     # R12: / is gated behind the setup wizard until a superuser exists.
-    return User.objects.create_superuser(localname="admin", password="s3cretpass")
+    return site_admin(localname="admin", password="s3cretpass")
 
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
 def bob(db):
-    return User.objects.create_user(localname="bob", password="s3cretpass")
+    return member(localname="bob", password="s3cretpass")
 
 
 def review(user, film, *, content="", rating=Decimal("4.00"), age_days=0):
@@ -176,7 +177,7 @@ def test_anonymous_home_shows_the_rail_and_a_cta(client, admin):
     site.name = "My Film Club"
     site.save()
     film = Film.objects.create(title="Alien", year=1979, genres=["Horror"])
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     review(alice, film)
 
     body = client.get("/").content.decode()
@@ -207,7 +208,7 @@ def test_anonymous_rail_rows_are_spans_not_anchors(client, admin):
     target in the status bar; a ``<span>`` takes neither, which is the point.
     """
     film = Film.objects.create(title="Alien", year=1979, genres=["Horror"])
-    alice = User.objects.create_user(localname="alice", password="s3cretpass")
+    alice = member(localname="alice", password="s3cretpass")
     review(alice, film)
 
     body = client.get("/").content.decode()

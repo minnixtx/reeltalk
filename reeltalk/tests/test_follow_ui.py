@@ -18,6 +18,7 @@ import responses
 
 from reeltalk.activitypub import crypto
 from reeltalk.social.models import User
+from reeltalk.tests.members import member
 
 REMOTE_ACTOR = "https://remote.example:8443/user/carol/"
 REMOTE_INBOX = REMOTE_ACTOR + "inbox/"
@@ -47,7 +48,7 @@ def _mirror(public_pem: str) -> User:
 
 @pytest.mark.django_db
 def test_follow_button_hidden_on_own_profile(client):
-    User.objects.create_user(localname="alice", password="p")
+    member(localname="alice", password="p")
     client.login(username="alice", password="p")
     content = client.get("/user/alice/").content
     assert b"/follow/" not in content
@@ -56,7 +57,7 @@ def test_follow_button_hidden_on_own_profile(client):
 
 @pytest.mark.django_db
 def test_follow_button_hidden_for_anonymous(client):
-    User.objects.create_user(localname="alice", password="p")
+    member(localname="alice", password="p")
     content = client.get("/user/alice/").content
     assert b"/follow/" not in content
     assert b"/unfollow/" not in content
@@ -64,8 +65,8 @@ def test_follow_button_hidden_for_anonymous(client):
 
 @pytest.mark.django_db
 def test_follow_button_shows_for_other_users(client):
-    User.objects.create_user(localname="alice", password="p")
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="alice", password="p")
+    member(localname="bob", password="p")
     client.login(username="bob", password="p")
     content = client.get("/user/alice/").content
     assert b"/user/alice/follow/" in content
@@ -75,8 +76,8 @@ def test_follow_button_shows_for_other_users(client):
 
 @pytest.mark.django_db
 def test_following_button_shows_when_already_following(client):
-    alice = User.objects.create_user(localname="alice", password="p")
-    bob = User.objects.create_user(localname="bob", password="p")
+    alice = member(localname="alice", password="p")
+    bob = member(localname="bob", password="p")
     bob.follows.add(alice)
     client.login(username="bob", password="p")
     content = client.get("/user/alice/").content
@@ -90,8 +91,8 @@ def test_following_button_shows_when_already_following(client):
 @responses.activate
 @pytest.mark.django_db
 def test_follow_local_target_records_m2m_without_delivery(client):
-    alice = User.objects.create_user(localname="alice", password="p")
-    bob = User.objects.create_user(localname="bob", password="p")
+    alice = member(localname="alice", password="p")
+    bob = member(localname="bob", password="p")
     client.login(username="bob", password="p")
 
     response = client.post("/user/alice/follow/")
@@ -105,8 +106,8 @@ def test_follow_local_target_records_m2m_without_delivery(client):
 
 @pytest.mark.django_db
 def test_unfollow_local_target_removes_m2m(client):
-    alice = User.objects.create_user(localname="alice", password="p")
-    bob = User.objects.create_user(localname="bob", password="p")
+    alice = member(localname="alice", password="p")
+    bob = member(localname="bob", password="p")
     bob.follows.add(alice)
     client.login(username="bob", password="p")
 
@@ -118,7 +119,7 @@ def test_unfollow_local_target_removes_m2m(client):
 
 @pytest.mark.django_db
 def test_follow_self_is_rejected(client):
-    User.objects.create_user(localname="alice", password="p")
+    member(localname="alice", password="p")
     client.login(username="alice", password="p")
 
     response = client.post("/user/alice/follow/")
@@ -134,7 +135,7 @@ def test_follow_self_is_rejected(client):
 @responses.activate
 @pytest.mark.django_db
 def test_follow_remote_target_records_and_delivers(client, remote_keypair):
-    bob = User.objects.create_user(localname="bob", password="p")
+    bob = member(localname="bob", password="p")
     _private_pem, public_pem = remote_keypair
     # Discovery (/find/ or first contact) created the mirror earlier — the
     # follow route only acts on resolvable profiles.
@@ -159,7 +160,7 @@ def test_follow_remote_target_records_and_delivers(client, remote_keypair):
 @responses.activate
 @pytest.mark.django_db
 def test_unfollow_remote_target_delivers_undo(client, remote_keypair):
-    bob = User.objects.create_user(localname="bob", password="p")
+    bob = member(localname="bob", password="p")
     _private_pem, public_pem = remote_keypair
     mirror = _mirror(public_pem)
     bob.follows.add(mirror)
@@ -182,7 +183,7 @@ def test_unfollow_remote_target_delivers_undo(client, remote_keypair):
 @responses.activate
 @pytest.mark.django_db
 def test_unfollow_remote_target_not_following_is_a_noop(client, remote_keypair):
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="bob", password="p")
     _private_pem, public_pem = remote_keypair
     _mirror(public_pem)  # the mirror exists, but bob does not follow it
     client.login(username="bob", password="p")
@@ -198,7 +199,7 @@ def test_unfollow_remote_target_not_following_is_a_noop(client, remote_keypair):
 def test_follow_unknown_remote_404s(client):
     # No mirror on this instance — you can only follow users whose profile
     # resolves (discovery at /find/ creates an unknown remote's mirror first).
-    bob = User.objects.create_user(localname="bob", password="p")
+    bob = member(localname="bob", password="p")
     client.login(username="bob", password="p")
 
     response = client.post("/user/carol@remote.example:8443/follow/")
@@ -215,7 +216,7 @@ def test_follow_down_instance_records_locally_with_warning(client, remote_keypai
     # The mirror exists (first contact happened earlier) but the home
     # instance is down now: the follow is recorded locally and a warning
     # surfaces instead of a 500 — v0.1 has no retry queue.
-    bob = User.objects.create_user(localname="bob", password="p")
+    bob = member(localname="bob", password="p")
     _private_pem, public_pem = remote_keypair
     mirror = _mirror(public_pem)
     responses.add(
@@ -238,15 +239,15 @@ def test_follow_down_instance_records_locally_with_warning(client, remote_keypai
 
 @pytest.mark.django_db
 def test_follow_get_is_not_allowed(client):
-    User.objects.create_user(localname="alice", password="p")
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="alice", password="p")
+    member(localname="bob", password="p")
     client.login(username="bob", password="p")
     assert client.get("/user/alice/follow/").status_code == 405
 
 
 @pytest.mark.django_db
 def test_follow_requires_login(client):
-    User.objects.create_user(localname="alice", password="p")
+    member(localname="alice", password="p")
     response = client.post("/user/alice/follow/")
     assert response.status_code == 302
     assert "/login/" in response["Location"]
@@ -254,6 +255,6 @@ def test_follow_requires_login(client):
 
 @pytest.mark.django_db
 def test_follow_unknown_user_404(client):
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="bob", password="p")
     client.login(username="bob", password="p")
     assert client.post("/user/nobody/follow/").status_code == 404

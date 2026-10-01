@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from reeltalk.core.models import Film, Status
 from reeltalk.core.views import GENRE_PAGE_SIZE
+from reeltalk.tests.members import member
 
 User = get_user_model()
 
@@ -28,12 +29,12 @@ def client():
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
 def bob(db):
-    return User.objects.create_user(localname="bob", password="s3cretpass")
+    return member(localname="bob", password="s3cretpass")
 
 
 def review(user, film, *, content="", age_days=0):
@@ -110,7 +111,7 @@ def test_genre_page_paginates(client, db):
         for i in range(GENRE_PAGE_SIZE + 1)
     ]
     for index, film in enumerate(films):
-        review(User.objects.create_user(localname=f"viewer{index}"), film)
+        review(member(localname=f"viewer{index}"), film)
 
     first = client.get("/genre/horror/").content.decode()
     second = client.get("/genre/horror/?page=2").content.decode()

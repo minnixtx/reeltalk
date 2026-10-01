@@ -123,7 +123,11 @@ def signup_post(client, localname="newbie"):
         {
             "localname": localname,
             "display_name": "",
-            "email": "",
+            # R118 made the address required, and with good reason now: an
+            # account with no address can never be verified, so under R119 it
+            # could never sign in. A signup test that omitted it would be
+            # testing a thing that is no longer allowed to exist.
+            "email": f"{localname}@example.test",
             "password1": "s3cretpass",
             "password2": "s3cretpass",
         },

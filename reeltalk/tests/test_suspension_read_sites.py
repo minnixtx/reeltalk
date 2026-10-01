@@ -46,6 +46,7 @@ from reeltalk.mentions.models import StatusMention
 from reeltalk.mentions.parser import resolve_typed_handle
 from reeltalk.moderation.models import Report
 from reeltalk.notifications.models import Notification, notify
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 PASSWORD = "s3cretpass"
@@ -59,25 +60,23 @@ AP = {"HTTP_ACCEPT": "application/activity+json"}
 @pytest.fixture
 def alice(db):
     """The member who gets suspended."""
-    return User.objects.create_user(localname="alice", password=PASSWORD)
+    return member(localname="alice", password=PASSWORD)
 
 
 @pytest.fixture
 def viewer(db):
     """A plain member who follows alice and has content of their own."""
-    return User.objects.create_user(localname="viewer", password=PASSWORD)
+    return member(localname="viewer", password=PASSWORD)
 
 
 @pytest.fixture
 def third(db):
-    return User.objects.create_user(localname="third", password=PASSWORD)
+    return member(localname="third", password=PASSWORD)
 
 
 @pytest.fixture
 def mod(db):
-    return User.objects.create_user(
-        localname="mod", password=PASSWORD, is_moderator=True
-    )
+    return member(localname="mod", password=PASSWORD, is_moderator=True)
 
 
 @pytest.fixture
@@ -88,7 +87,7 @@ def siteadmin(db):
     ``filter(is_superuser=True).exists()`` and knows nothing about
     suspension, so a suspended-only admin would send every page to
     ``/setup/`` for the same reason these tests were doing."""
-    return User.objects.create_superuser(localname="root", password=PASSWORD)
+    return site_admin(localname="root", password=PASSWORD)
 
 
 @pytest.fixture
@@ -163,7 +162,7 @@ def test_is_active_tracks_the_state_without_a_column(alice):
 
 def test_a_suspended_user_cannot_log_in_through_the_real_backend(db):
     """Driven through the actual auth backend, not by reading the flag."""
-    user = User.objects.create_user(localname="loginme", password=PASSWORD)
+    user = member(localname="loginme", password=PASSWORD)
     assert authenticate(username="loginme", password=PASSWORD) is not None
     user.suspend()
     assert authenticate(username="loginme", password=PASSWORD) is None
@@ -248,7 +247,7 @@ def test_the_admin_cannot_be_suspended_so_the_lockout_state_is_unreachable(
     from reeltalk.social.models import AdminImmunityError
     from reeltalk.social.views import has_admin
 
-    admin = User.objects.create_superuser(localname="lonely_root", password=PASSWORD)
+    admin = site_admin(localname="lonely_root", password=PASSWORD)
     assert has_admin() is True
     with pytest.raises(AdminImmunityError):
         admin.suspend()
@@ -271,7 +270,7 @@ def test_has_admin_still_counts_a_suspended_superuser_written_in_by_hand(db):
 
     from reeltalk.social.views import has_admin
 
-    admin = User.objects.create_superuser(localname="lonely_root", password=PASSWORD)
+    admin = site_admin(localname="lonely_root", password=PASSWORD)
     User.objects.filter(pk=admin.pk).update(suspended_at=timezone.now())
     admin.refresh_from_db()
     assert has_admin() is True
@@ -585,7 +584,7 @@ def test_a_suspended_authors_post_page_404s_to_everyone(alice, review):
 
 
 def third_user():
-    return User.objects.create_user(localname="anoncheck", password=PASSWORD)
+    return member(localname="anoncheck", password=PASSWORD)
 
 
 def test_a_suspended_authors_note_document_404s_too(alice, review):
@@ -705,9 +704,7 @@ def test_the_moderator_queue_keeps_showing_a_suspended_target(alice, viewer, rev
 
 
 def mod_account():
-    return User.objects.create_user(
-        localname="queue_mod", password=PASSWORD, is_moderator=True
-    )
+    return member(localname="queue_mod", password=PASSWORD, is_moderator=True)
 
 
 def logged_in_mod():

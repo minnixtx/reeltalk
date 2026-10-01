@@ -37,6 +37,7 @@ from django.urls import reverse
 
 from reeltalk.core.models import Film, Status
 from reeltalk.notifications.models import Notification, mark_all_read, notify
+from reeltalk.tests.members import member as create_member
 
 User = get_user_model()
 
@@ -53,12 +54,12 @@ ANONYMOUS_PAGE = reverse("about")
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return create_member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
 def bob(db):
-    return User.objects.create_user(localname="bob", password="s3cretpass")
+    return create_member(localname="bob", password="s3cretpass")
 
 
 @pytest.fixture

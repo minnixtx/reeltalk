@@ -970,6 +970,23 @@ class EmailVerificationToken(models.Model):
     # broken deploy in 2E, and truncating it would amputate the part that
     # names the cause.
     send_error = models.TextField(blank=True, default="")
+    # Where the mint was asked for (2F-3). This exists for one reason: R122's
+    # second throttle axis has to count *mails sent from a source*, and the
+    # only durable, shared record of a mail being sent is this table. Putting
+    # the per-IP counter in the cache instead would mean one axis of one
+    # control lives in Postgres and the other in a process-memory store the
+    # project itself describes as a nicety — wiped by every deploy, invisible
+    # to the other web process, and unreadable by the admin who is trying to
+    # work out why a member keeps getting links.
+    #
+    # It is also the audit answer R123's token inline wants: not just which
+    # send happened, but who asked for it and from where. Blank means "not
+    # from a request" — a fixture or a management command.
+    #
+    # Stored as text rather than ``GenericIPAddressField`` on purpose: an
+    # unknown or malformed source must be recordable rather than rejected, and
+    # nothing here queries by subnet.
+    request_ip = models.CharField(max_length=45, blank=True, default="")
 
     class Meta:
         ordering = ["-created_at"]
@@ -1055,8 +1072,13 @@ class EmailVerificationToken(models.Model):
         return "queued"
 
     @classmethod
-    def mint(cls, user) -> "EmailVerificationToken":
+    def mint(cls, user, request_ip: str = "") -> "EmailVerificationToken":
         """Open a fresh verification token for ``user``'s current address.
+
+        ``request_ip`` is recorded for R122's per-source throttle and for the
+        admin's audit view of who asked for a send. It is optional because
+        not every mint comes from a request — a fixture or a management
+        command has no source to name.
 
         Supersedes the user's prior live tokens first (R120). That clause is
         not tidiness: without it N tokens stay live per account and "strictly
@@ -1085,6 +1107,7 @@ class EmailVerificationToken(models.Model):
                 code=cls._fresh_code(),
                 user=user,
                 email=user.email,
+                request_ip=request_ip or "",
                 expires_at=now + timedelta(hours=EMAIL_VERIFICATION_TTL_HOURS),
             )
 

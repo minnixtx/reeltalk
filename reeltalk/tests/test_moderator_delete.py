@@ -50,6 +50,7 @@ from reeltalk.moderation.models import (
     file_report,
 )
 from reeltalk.notifications.models import Notification
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 PASSWORD = "s3cretpass"
@@ -61,40 +62,36 @@ OTHER_INBOX = "https://other.example/users/eve/inbox"
 @pytest.fixture
 def alice(db):
     """The author of the reported post."""
-    return User.objects.create_user(localname="alice", password=PASSWORD)
+    return member(localname="alice", password=PASSWORD)
 
 
 @pytest.fixture
 def bob(db):
     """The reporting member."""
-    return User.objects.create_user(localname="bob", password=PASSWORD)
+    return member(localname="bob", password=PASSWORD)
 
 
 @pytest.fixture
 def rob(db):
     """A second reporting member, for cases where bob is already taken."""
-    return User.objects.create_user(localname="rob", password=PASSWORD)
+    return member(localname="rob", password=PASSWORD)
 
 
 @pytest.fixture
 def mod(db):
     """A moderator — deliberately NOT staff, so R100's decoupling holds."""
-    return User.objects.create_user(
-        localname="mod", password=PASSWORD, is_moderator=True
-    )
+    return member(localname="mod", password=PASSWORD, is_moderator=True)
 
 
 @pytest.fixture
 def siteadmin(db):
-    return User.objects.create_superuser(localname="root", password=PASSWORD)
+    return site_admin(localname="root", password=PASSWORD)
 
 
 @pytest.fixture
 def mod2(db):
     """A second moderator, for the peer case: peers do not moderate peers."""
-    return User.objects.create_user(
-        localname="mod2", password=PASSWORD, is_moderator=True
-    )
+    return member(localname="mod2", password=PASSWORD, is_moderator=True)
 
 
 @pytest.fixture
@@ -106,9 +103,7 @@ def admin_door(db):
     ``is_staff`` puts an account on for R103b, and it is on the admin's
     side: a moderator never touches it.
     """
-    return User.objects.create_user(
-        localname="doorkeeper", password=PASSWORD, is_staff=True
-    )
+    return member(localname="doorkeeper", password=PASSWORD, is_staff=True)
 
 
 @pytest.fixture
@@ -598,11 +593,9 @@ def test_a_deletion_writes_no_notification(bob, review, mod):
 @responses.activate
 @pytest.mark.django_db
 def test_a_local_authors_delete_is_broadcast_to_their_remote_followers():
-    alice = User.objects.create_user(localname="alice", password=PASSWORD)
-    bob = User.objects.create_user(localname="bob", password=PASSWORD)
-    mod = User.objects.create_user(
-        localname="mod", password=PASSWORD, is_moderator=True
-    )
+    alice = member(localname="alice", password=PASSWORD)
+    bob = member(localname="bob", password=PASSWORD)
+    mod = member(localname="mod", password=PASSWORD, is_moderator=True)
     follower = mirror_account("dana", "remote.example")
     follower.follows.add(alice)
     film = Film.objects.create(title="Dune", year=2021)
@@ -633,11 +626,9 @@ def test_the_delete_is_signed_as_the_author_not_the_moderator():
     claiming to delete someone else's Note, and the author's followers would
     be receiving it from an actor they never subscribed to.
     """
-    alice = User.objects.create_user(localname="alice", password=PASSWORD)
-    bob = User.objects.create_user(localname="bob", password=PASSWORD)
-    mod = User.objects.create_user(
-        localname="mod", password=PASSWORD, is_moderator=True
-    )
+    alice = member(localname="alice", password=PASSWORD)
+    bob = member(localname="bob", password=PASSWORD)
+    mod = member(localname="mod", password=PASSWORD, is_moderator=True)
     follower = mirror_account("dana", "remote.example")
     follower.follows.add(alice)
     film = Film.objects.create(title="Dune", year=2021)
@@ -672,10 +663,8 @@ def test_a_mirrored_authors_post_is_removed_here_without_a_broadcast(remote_foll
     # The mirror's own followers are non-local, so had the broadcast run it
     # would be *recorded* here. Zero calls is the proof it never did.
     remote_follower.follows.add(mirror)
-    bob = User.objects.create_user(localname="bob", password=PASSWORD)
-    mod = User.objects.create_user(
-        localname="mod", password=PASSWORD, is_moderator=True
-    )
+    bob = member(localname="bob", password=PASSWORD)
+    mod = member(localname="mod", password=PASSWORD, is_moderator=True)
     report = report_a_post(bob, status)
     responses.add(responses.POST, REMOTE_INBOX)
     responses.add(responses.POST, OTHER_INBOX)
@@ -716,11 +705,9 @@ def test_broadcasting_a_mirrored_delete_raises_without_the_locality_guard(
 @responses.activate
 @pytest.mark.django_db
 def test_an_unreachable_follower_does_not_lose_the_deletion():
-    alice = User.objects.create_user(localname="alice", password=PASSWORD)
-    bob = User.objects.create_user(localname="bob", password=PASSWORD)
-    mod = User.objects.create_user(
-        localname="mod", password=PASSWORD, is_moderator=True
-    )
+    alice = member(localname="alice", password=PASSWORD)
+    bob = member(localname="bob", password=PASSWORD)
+    mod = member(localname="mod", password=PASSWORD, is_moderator=True)
     follower = mirror_account("dana", "remote.example")
     follower.follows.add(alice)
     film = Film.objects.create(title="Dune", year=2021)

@@ -56,18 +56,19 @@ from reeltalk.core.models import (
     reply_counts,
     shelve_to_watchlist,
 )
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
 def bob(db):
-    return User.objects.create_user(localname="bob", password="s3cretpass")
+    return member(localname="bob", password="s3cretpass")
 
 
 @pytest.fixture
@@ -78,7 +79,7 @@ def dune(db):
 @pytest.fixture
 def admin(db):
     # R12: / redirects to /setup/ until a superuser exists.
-    return User.objects.create_superuser(localname="admin", password="s3cretpass")
+    return site_admin(localname="admin", password="s3cretpass")
 
 
 def _remote_user(localname: str = "carol@remote.example") -> User:
@@ -369,7 +370,7 @@ def test_a_folded_row_counts_the_replies_on_the_review_it_stands_for(alice, dune
     entry = next(e for e in feed_entries(alice) if e.status_id == review.pk)
     assert entry.kind == "watched"
     assert entry.reply_count == 0
-    User.objects.create_user(localname="zoe", password="s3cretpass")
+    member(localname="zoe", password="s3cretpass")
     zoe = User.objects.get(localname="zoe")
     _reply(zoe, review)
     entry = next(e for e in feed_entries(alice) if e.status_id == review.pk)
@@ -442,7 +443,7 @@ def test_reply_endpoint_rejects_blank_content(alice, dune):
 
 @pytest.mark.django_db
 def test_reply_endpoint_requires_login(dune):
-    parent = _review(User.objects.create_user(localname="zed", password="s3c"), dune)
+    parent = _review(member(localname="zed", password="s3c"), dune)
     response = Client().post(f"/status/{parent.pk}/reply/", {"content": "hi"})
     assert response.status_code == 302
     assert "/login/" in response["Location"]
@@ -624,7 +625,7 @@ def test_a_mirror_row_shows_its_reply_count_and_now_its_controls(alice, dune, ad
     # other row that has a post behind it.
     carol, mirror = _mirror(dune)
     alice.follows.add(carol)
-    zoe = User.objects.create_user(localname="zoe", password="s3cretpass")
+    zoe = member(localname="zoe", password="s3cretpass")
     _reply(zoe, mirror)
     own = _review(alice, Film.objects.create(title="Alice film", year=1999))
     body = _home(_login("alice"))

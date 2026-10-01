@@ -50,18 +50,19 @@ from reeltalk.core.models import (
     shelve_to_watchlist,
     toggle_like,
 )
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
 def bob(db):
-    return User.objects.create_user(localname="bob", password="s3cretpass")
+    return member(localname="bob", password="s3cretpass")
 
 
 @pytest.fixture
@@ -72,7 +73,7 @@ def dune(db):
 @pytest.fixture
 def admin(db):
     # R12: / redirects to /setup/ until a superuser exists.
-    return User.objects.create_superuser(localname="admin", password="s3cretpass")
+    return site_admin(localname="admin", password="s3cretpass")
 
 
 def _remote_user(localname: str = "carol@remote.example") -> User:
@@ -349,7 +350,7 @@ def test_like_endpoint_accepts_a_remote_mirror(dune):
     # test from making a real network call.
     responses.add(responses.POST, re.compile(r"https://remote\.example/.*"))
     _, mirror = _mirror(dune)
-    User.objects.create_user(localname="dave", password="s3cretpass")
+    member(localname="dave", password="s3cretpass")
     assert _login("dave").post(f"/status/{mirror.pk}/like/").status_code == 200
     assert Like.objects.count() == 1
 
@@ -477,7 +478,7 @@ def test_post_page_shows_the_control_for_a_remote_mirror(dune):
     # page offers the button. The count-without-button shape stays for the
     # anonymous reader, who has no account to like with.
     _, mirror = _mirror(dune)
-    User.objects.create_user(localname="dave", password="s3cretpass")
+    member(localname="dave", password="s3cretpass")
     body = _login("dave").get(f"/status/{mirror.pk}/").content.decode()
     assert "Their review of Dune." in body
     assert f'data-url="/status/{mirror.pk}/like/"' in body

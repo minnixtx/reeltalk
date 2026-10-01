@@ -28,6 +28,7 @@ synchronously is the warning.
 """
 
 import logging
+from datetime import timedelta
 
 from django.core.mail import EmailMessage
 from django.db import transaction
@@ -48,6 +49,31 @@ logger = logging.getLogger("reeltalk.social.verify")
 # increments** — the thing a test can pin so that 2F-3's route and 2F-2's
 # mail cannot silently drift apart.
 VERIFY_PATH = "/account/verify/"
+
+# The path of the logged-out resend page, which is also where signup, the
+# setup wizard and invite acceptance send a person once they have stopped
+# logging people in (R119). A constant for the same reason as ``VERIFY_PATH``:
+# three creation routes and one recovery page have to agree on it without any
+# of them hard-coding a string.
+RESEND_PATH = "/account/verify/resend/"
+
+# R122's two throttle axes. Both are floors under the abuse surface this
+# increment creates, and neither is the antispam system ``PLAN.md`` §5
+# describes — R107 established that dedup is not rate limiting, and the same
+# distinction applies here: five minutes per address still admits roughly 288
+# mails a day to one victim from a caller who wants them.
+#
+# The per-address window is deliberately short rather than generous. It is not
+# protecting the mailbox from volume — the per-IP axis is closer to that — it
+# is protecting the *member* from a page that can be pressed repeatedly and
+# from a mail client that fires the form more than once.
+RESEND_ADDRESS_COOLDOWN_MINUTES = 5
+# Per-source, shaped on Mastodon's ``rack_attack.rb`` 25-per-5-minutes. This
+# is the axis the per-address one does not have: a caller cycling through many
+# addresses is completely unthrottled by a cooldown keyed on the address, and
+# that is the cheap direction for an abuse caller.
+RESEND_IP_LIMIT = 25
+RESEND_IP_WINDOW_MINUTES = 5
 
 
 def verification_url(token) -> str:
@@ -132,7 +158,7 @@ def build_verification_email(user, token) -> EmailMessage:
     )
 
 
-def send_verification_email(user) -> dict:
+def send_verification_email(user, request_ip: str = "") -> dict:
     """Ask ``user`` to prove the address on their account, if we can.
 
     The single entry point. Returns a small dict — ``{"enqueued": n,
@@ -149,9 +175,12 @@ def send_verification_email(user) -> dict:
     not the point — **logging it loudly is**, because that account is the
     one that will not be able to sign in once 2F-3 goes up, and the operator
     needs to have been told at the moment it was created.
+
+    ``request_ip`` rides through to the token row so the per-source throttle
+    and the admin's audit view can see who asked.
     """
     try:
-        token = EmailVerificationToken.mint(user)
+        token = EmailVerificationToken.mint(user, request_ip=request_ip)
     except ValueError as exc:
         logger.warning(
             "No verification email for @%s: %s The account was created "
@@ -175,6 +204,108 @@ def send_verification_email(user) -> dict:
         token.code[:8],
     )
     return {"enqueued": 1, "reason": ""}
+
+
+def address_in_cooldown(email: str) -> bool:
+    """True when a verification mail for ``email`` is too recent to send another.
+
+    The cooldown is the token table itself, which is what makes it unbypassable
+    by clearing cookies: it is keyed server-side on the address, not on
+    anything the client holds.
+
+    **Why ``send_error=""`` is in the filter, and why that is not an oddity.**
+    The window counts a mail that was sent *or is still on its way*, and
+    excludes one that already failed. A failed send must not make the member
+    wait out a window for mail that never arrived — that is the reason
+    ``sent_at`` was added in 2F-2 rather than reading ``created_at`` alone.
+    Excluding failures does not open a bypass, because a failed send is not a
+    thing the caller can arrange: it takes a broken transport, which is the
+    one state this page is not trying to throttle.
+    """
+    if not email:
+        return False
+    since = timezone.now() - timedelta(minutes=RESEND_ADDRESS_COOLDOWN_MINUTES)
+    return EmailVerificationToken.objects.filter(
+        email=email, created_at__gt=since, send_error=""
+    ).exists()
+
+
+def ip_budget_spent(ip: str) -> bool:
+    """True when this source has already minted its limit of mails recently.
+
+    Counted from the token table rather than a cache so the limit survives a
+    deploy and is shared by every web process — see
+    ``EmailVerificationToken.request_ip`` for why that mattered more than the
+    simplicity of ``cache.incr``.
+    """
+    if not ip:
+        return False
+    since = timezone.now() - timedelta(minutes=RESEND_IP_WINDOW_MINUTES)
+    return (
+        EmailVerificationToken.objects.filter(
+            request_ip=ip, created_at__gt=since, send_error=""
+        ).count()
+        >= RESEND_IP_LIMIT
+    )
+
+
+def request_resend(raw_email: str, ip: str) -> dict:
+    """A logged-out request to re-send a verification link (R122).
+
+    **The caller's response must never vary with whether the address exists.**
+    This function therefore returns a reason for the *log*, and the view
+    renders one uniform sentence whatever comes back. Several of the reasons
+    below are indistinguishable from outside by design: ``no-account`` and
+    ``address-cooldown`` cannot both be visible, because "we just sent one"
+    is a confirmation that the address is registered, and that is the one
+    enumeration surface R122 exists to close.
+
+    **What the per-IP axis bounds, precisely.** It bounds *mail* from a
+    source, because that is the cost worth bounding and the thing the token
+    table can count. A flood of addresses that match no account mints
+    nothing, so it never trips this axis — each such request costs one
+    indexed lookup and gets the same uniform page. Request-level flooding of a
+    near-noop endpoint is the separate, still-unbuilt antispam layer R107
+    points at, and this increment does not pretend to have answered it.
+    """
+    email = (raw_email or "").strip().lower()
+    if not email:
+        return {"enqueued": 0, "reason": "no-address-given"}
+
+    # The source limit is checked before the account lookup on purpose: it is
+    # the defence that has to hold even when everything behind it is being
+    # exercised as hard as it can.
+    if ip_budget_spent(ip):
+        logger.warning(
+            "Verification resend refused: %s is over the limit of %d per %d "
+            "minutes. Uniform response sent.",
+            ip or "(unknown source)",
+            RESEND_IP_LIMIT,
+            RESEND_IP_WINDOW_MINUTES,
+        )
+        return {"enqueued": 0, "reason": "ip-limited"}
+
+    user = User.objects.filter(email=email).first()
+    if user is None:
+        # Silent by design. This is the branch that must be indistinguishable
+        # from a successful send, so it logs at info and says nothing more
+        # than the fact.
+        logger.info("Verification resend requested for an unknown address.")
+        return {"enqueued": 0, "reason": "no-account"}
+
+    if address_in_cooldown(email):
+        logger.info(
+            "Verification resend for @%s is inside the %d-minute cooldown; "
+            "no new mail.",
+            user.localname,
+            RESEND_ADDRESS_COOLDOWN_MINUTES,
+        )
+        return {"enqueued": 0, "reason": "address-cooldown"}
+
+    result = send_verification_email(user, request_ip=ip)
+    if result["enqueued"]:
+        logger.info("Verification resend queued for @%s.", user.localname)
+    return result
 
 
 def _enqueue_send(token_pk: int) -> None:

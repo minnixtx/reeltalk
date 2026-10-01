@@ -51,6 +51,7 @@ from reeltalk.moderation.models import (
 )
 from reeltalk.notifications.models import Notification
 from reeltalk.social.models import SuspensionOrigin
+from reeltalk.tests.members import member as create_member
 
 User = get_user_model()
 PASSWORD = "s3cretpass"
@@ -114,14 +115,12 @@ def flag_activity(target_uris, comment="this looks like spam", actor=None):
 
 @pytest.fixture
 def member(db):
-    return User.objects.create_user(localname="member", password=PASSWORD)
+    return create_member(localname="member", password=PASSWORD)
 
 
 @pytest.fixture
 def mod(db):
-    return User.objects.create_user(
-        localname="queue_mod", password=PASSWORD, is_moderator=True
-    )
+    return create_member(localname="queue_mod", password=PASSWORD, is_moderator=True)
 
 
 # --- registration ----------------------------------------------------------
@@ -353,7 +352,7 @@ def test_the_longest_matching_block_wins():
 @pytest.mark.django_db
 def test_local_users_have_no_host_candidates(db):
     """A domain block is about somebody else's server, never our own."""
-    local = User.objects.create_user(localname="localone", password=PASSWORD)
+    local = create_member(localname="localone", password=PASSWORD)
     assert account_host_candidates(local) == set()
 
 
@@ -592,7 +591,7 @@ def test_refusing_broadcasts_nothing(mod, member):
 @pytest.mark.django_db
 def test_refusing_a_local_target_is_refused(mod, member):
     """Refuse is the mirror-only verb; a local account goes through suspend."""
-    local = User.objects.create_user(localname="filer", password=PASSWORD)
+    local = create_member(localname="filer", password=PASSWORD)
     made, _ = file_report(reporter=local, target_user=member, category="spam")
     response = logged_in(mod).post(reverse("moderation-refuse", args=[made.pk]), {})
     assert response.status_code == 404
@@ -692,7 +691,7 @@ def test_the_refuse_control_is_drawn_for_a_remote_target_and_not_a_local_one(
     remote = mirror()
     remote_report, _ = file_report(reporter=member, target_user=remote, category="spam")
     local_report, _ = file_report(
-        reporter=User.objects.create_user(localname="filer", password=PASSWORD),
+        reporter=create_member(localname="filer", password=PASSWORD),
         target_user=member,
         category="spam",
     )

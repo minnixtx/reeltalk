@@ -41,6 +41,7 @@ from reeltalk.activitypub.objects import mention_tag, note_document
 from reeltalk.core.models import Film, Status
 from reeltalk.mentions.models import sync_status_mentions
 from reeltalk.social.models import User
+from reeltalk.tests.members import member
 
 HOST = "testserver"
 ZED_ACTOR = "https://remote.example/users/zed"
@@ -61,13 +62,13 @@ def req(db):
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password="p")
+    return member(localname="alice", password="p")
 
 
 @pytest.fixture
 def carol(db):
     """A local member: mentionable, taggable, never a delivery target."""
-    return User.objects.create_user(localname="carol", password="p")
+    return member(localname="carol", password="p")
 
 
 def _mirror(localname, actor_url, inbox_url):

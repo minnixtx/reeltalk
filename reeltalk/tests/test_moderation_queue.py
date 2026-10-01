@@ -29,6 +29,7 @@ from django.urls import reverse
 from reeltalk.core.models import Film, Status
 from reeltalk.moderation.models import Report, dismiss_report
 from reeltalk.notifications.models import Notification
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 PASSWORD = "s3cretpass"
@@ -37,26 +38,24 @@ PASSWORD = "s3cretpass"
 @pytest.fixture
 def alice(db):
     """The author of the reported post."""
-    return User.objects.create_user(localname="alice", password=PASSWORD)
+    return member(localname="alice", password=PASSWORD)
 
 
 @pytest.fixture
 def bob(db):
     """The reporting member."""
-    return User.objects.create_user(localname="bob", password=PASSWORD)
+    return member(localname="bob", password=PASSWORD)
 
 
 @pytest.fixture
 def carol(db):
     """A second reporting member."""
-    return User.objects.create_user(localname="carol", password=PASSWORD)
+    return member(localname="carol", password=PASSWORD)
 
 
 @pytest.fixture
 def mod(db):
-    return User.objects.create_user(
-        localname="mod", password=PASSWORD, is_moderator=True
-    )
+    return member(localname="mod", password=PASSWORD, is_moderator=True)
 
 
 @pytest.fixture
@@ -326,7 +325,7 @@ def test_anonymous_is_sent_to_log_in_from_the_queue():
 
 
 def test_a_superuser_sees_the_queue(db):
-    admin = User.objects.create_superuser(localname="root", password=PASSWORD)
+    admin = site_admin(localname="root", password=PASSWORD)
     assert logged_in(admin).get(QUEUE).status_code == 200
 
 

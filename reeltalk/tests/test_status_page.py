@@ -32,6 +32,7 @@ from reeltalk.core.models import (
     mark_watched,
     shelve_to_watchlist,
 )
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 
@@ -40,12 +41,12 @@ AP = {"HTTP_ACCEPT": "application/activity+json"}
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
 def bob(db):
-    return User.objects.create_user(localname="bob", password="s3cretpass")
+    return member(localname="bob", password="s3cretpass")
 
 
 @pytest.fixture
@@ -58,7 +59,7 @@ def admin(db):
     # R12: / redirects to /setup/ until a superuser exists, so every test
     # that reads the home page needs one — otherwise the body is an empty
     # 302 and an absence assertion on it proves nothing.
-    return User.objects.create_superuser(localname="admin", password="s3cretpass")
+    return site_admin(localname="admin", password="s3cretpass")
 
 
 def _remote_user(localname: str = "carol@remote.example") -> User:
@@ -177,7 +178,7 @@ def test_post_page_still_visible_to_others_when_the_author_is_blocked(alice, bob
     status = _review(alice, dune)
     bob.blocks.add(alice)
     assert Client().get(f"/status/{status.pk}/").status_code == 200
-    User.objects.create_user(localname="dave", password="s3cretpass")
+    member(localname="dave", password="s3cretpass")
     assert _login("dave").get(f"/status/{status.pk}/").status_code == 200
 
 

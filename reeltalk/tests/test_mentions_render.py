@@ -29,6 +29,7 @@ from reeltalk.core.forms import FilmForm
 from reeltalk.core.models import Film, Status
 from reeltalk.core.utils import render_markdown, sanitize_html
 from reeltalk.social.models import LinkDomain
+from reeltalk.tests.members import member
 
 User = get_user_model()
 
@@ -38,12 +39,12 @@ MIRROR_HANDLE = "minnix@upallnight.minnix.dev"
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
 def bob(db):
-    return User.objects.create_user(localname="bob", password="s3cretpass")
+    return member(localname="bob", password="s3cretpass")
 
 
 @pytest.fixture

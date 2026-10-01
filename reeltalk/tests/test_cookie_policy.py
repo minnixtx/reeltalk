@@ -13,6 +13,8 @@ from django.contrib.auth import get_user_model
 from django.test import override_settings
 from django.urls import reverse
 
+from reeltalk.tests.members import site_admin as create_site_admin
+
 User = get_user_model()
 
 TRUSTED_PROXY = override_settings(
@@ -23,7 +25,15 @@ TRUSTED_PROXY = override_settings(
 
 @pytest.fixture
 def admin_user(db):
-    return User.objects.create_superuser(localname="admin", password="s3cretpass")
+    # Verified, and it matters here specifically: every test in this file
+    # reads the session cookie off a login that has to succeed. An
+    # unverified superuser is refused under R119, so the response carries no
+    # session cookie at all and the assertion fails with a KeyError about
+    # "sessionid" that says nothing about the transport question actually
+    # under test.
+    return create_site_admin(
+        localname="admin", password="s3cretpass", email="admin@example.test"
+    )
 
 
 def wire_value(response, name):

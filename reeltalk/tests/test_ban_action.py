@@ -40,6 +40,7 @@ from reeltalk.core.models import Film, Status
 from reeltalk.mentions.models import sync_status_mentions
 from reeltalk.moderation.models import Report, ban_reported_member
 from reeltalk.notifications.models import Notification, notify
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 PASSWORD = "s3cretpass"
@@ -53,47 +54,41 @@ ACTOR = "http://testserver/user/alice/"
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password=PASSWORD)
+    return member(localname="alice", password=PASSWORD)
 
 
 @pytest.fixture
 def bob(db):
     """The reporting member."""
-    return User.objects.create_user(localname="bob", password=PASSWORD)
+    return member(localname="bob", password=PASSWORD)
 
 
 @pytest.fixture
 def rob(db):
     """A second reporter, for the pile tests."""
-    return User.objects.create_user(localname="rob", password=PASSWORD)
+    return member(localname="rob", password=PASSWORD)
 
 
 @pytest.fixture
 def mod(db):
-    return User.objects.create_user(
-        localname="mod", password=PASSWORD, is_moderator=True
-    )
+    return member(localname="mod", password=PASSWORD, is_moderator=True)
 
 
 @pytest.fixture
 def mod2(db):
-    return User.objects.create_user(
-        localname="mod2", password=PASSWORD, is_moderator=True
-    )
+    return member(localname="mod2", password=PASSWORD, is_moderator=True)
 
 
 @pytest.fixture
 def siteadmin(db):
-    return User.objects.create_superuser(localname="root", password=PASSWORD)
+    return site_admin(localname="root", password=PASSWORD)
 
 
 @pytest.fixture
 def admin_door(db):
     """Holds Django's /admin/ door without being the site admin — R103b
     puts it on the admin's side of the line."""
-    return User.objects.create_user(
-        localname="doorkeeper", password=PASSWORD, is_staff=True
-    )
+    return member(localname="doorkeeper", password=PASSWORD, is_staff=True)
 
 
 @pytest.fixture

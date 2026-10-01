@@ -4,6 +4,9 @@ import pytest
 from django.contrib.auth import SESSION_KEY, get_user_model
 from django.urls import reverse
 
+from reeltalk.social.models import EmailVerificationToken
+from reeltalk.tests.members import site_admin
+
 User = get_user_model()
 
 VALID_SIGNUP = {
@@ -17,7 +20,7 @@ VALID_SIGNUP = {
 
 @pytest.fixture
 def admin_user(db):
-    return User.objects.create_superuser(localname="admin", password="s3cretpass")
+    return site_admin(localname="admin", password="s3cretpass")
 
 
 # --- first-run setup wizard -------------------------------------------------
@@ -44,15 +47,27 @@ def test_setup_get_renders_form_on_fresh_instance(client):
 
 
 @pytest.mark.django_db
-def test_setup_post_creates_admin_and_logs_in(client):
+def test_setup_post_creates_admin_but_does_not_log_it_in(client):
+    # R119: the wizard no longer logs the new admin in, and this is the
+    # sharpest edge of the whole increment rather than a detail of it. The
+    # admin is created, ``has_admin()`` is immediately true so the wizard is
+    # gone, and the only way into /admin/ is the link in the mail. Which is
+    # why EMAIL_* has to be configured *before* the wizard runs.
     response = client.post(reverse("setup"), VALID_SIGNUP)
     assert response.status_code == 302
     admin = User.objects.get(localname="alice")
     assert admin.is_superuser is True
     assert admin.is_staff is True
-    # The session now holds the new admin (SESSION_KEY is the stable public
-    # name for Django's private "_auth_user_id" session key).
-    assert client.session[SESSION_KEY] == str(admin.id)
+    # The session holds nobody. Asserting the absence is the point: a test
+    # that only checked the redirect would pass against a view that logged the
+    # admin in and redirected anyway.
+    assert SESSION_KEY not in client.session
+    assert response.url == reverse("verify-resend")
+    # And a real token was minted against the address, so the admin is not
+    # stranded — the mail is the way back in.
+    token = EmailVerificationToken.objects.get(user=admin)
+    assert token.email == "alice@example.com"
+    assert token.is_live
 
 
 @pytest.mark.django_db
@@ -74,15 +89,47 @@ def test_signup_blocked_before_setup(client):
 
 
 @pytest.mark.django_db
-def test_signup_creates_local_user_and_logs_in(client, admin_user):
+def test_signup_creates_local_user_but_does_not_log_it_in(client, admin_user):
+    # R119: signup stops logging you in. The account exists and is fully
+    # created; what it does not have is proof it can receive mail, which is
+    # now the price of a session.
     response = client.post(reverse("signup"), VALID_SIGNUP)
     assert response.status_code == 302
-    # New users land on the getting-started page (M6), not the feed.
-    assert response.url == reverse("welcome")
+    # New members land on the resend page, not the feed and not /welcome/ —
+    # the first thing they see is the thing they need if the mail is lost.
+    assert response.url == reverse("verify-resend")
     user = User.objects.get(localname="alice")
     assert user.local is True
     assert user.is_superuser is False
-    assert client.session[SESSION_KEY] == str(user.id)
+    assert SESSION_KEY not in client.session
+    assert user.email_verified is False
+    assert EmailVerificationToken.objects.filter(user=user).count() == 1
+
+
+@pytest.mark.django_db
+def test_signup_requires_an_email_address(client, admin_user):
+    # R118, and the reason it is not optional any more: an account with no
+    # address can never be verified, so an optional field here would be
+    # manufacturing members who can never sign in.
+    response = client.post(reverse("signup"), {**VALID_SIGNUP, "email": ""})
+    assert response.status_code == 200
+    assert "email" in response.context["form"].errors
+    assert not User.objects.filter(localname="alice").exists()
+
+
+@pytest.mark.django_db
+def test_signup_rejects_an_address_another_account_already_has(client, admin_user):
+    # Told at the form rather than as a database error. The partial unique
+    # index is still the real guard; this is the human-facing half.
+    User.objects.create_user(
+        localname="existing",
+        email="alice@example.com",
+        password="s3cretpass",
+    )
+    response = client.post(reverse("signup"), VALID_SIGNUP)
+    assert response.status_code == 200
+    assert "email" in response.context["form"].errors
+    assert not User.objects.filter(localname="alice").exists()
 
 
 @pytest.mark.django_db

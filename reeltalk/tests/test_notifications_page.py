@@ -38,18 +38,19 @@ from reeltalk.notifications.models import (
     notify,
 )
 from reeltalk.notifications.views import NOTIFICATIONS_PAGE_SIZE
+from reeltalk.tests.members import member as create_member
 
 User = get_user_model()
 
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return create_member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
 def bob(db):
-    return User.objects.create_user(localname="bob", password="s3cretpass")
+    return create_member(localname="bob", password="s3cretpass")
 
 
 @pytest.fixture
@@ -333,7 +334,7 @@ def test_the_mark_all_read_control_is_a_button_in_a_post_form(member, alice, bob
     # The badge in increment 4 must be an <a> because it only navigates;
     # this one really acts, so a <button> inside a CSRF POST form is the
     # correct shape and a link would be the wrong one.
-    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    carol = create_member(localname="carol", password="s3cretpass")
     notify(alice, bob, Notification.Kind.LIKE, post)
     notify(alice, carol, Notification.Kind.LIKE, post)
     content = member.get("/notifications/").content.decode()
@@ -348,7 +349,7 @@ def test_the_mark_all_read_control_is_a_button_in_a_post_form(member, alice, bob
 
 
 def test_the_page_paginates_at_the_named_size(alice):
-    other = User.objects.create_user(localname="other", password="s3cretpass")
+    other = create_member(localname="other", password="s3cretpass")
     film = Film.objects.create(title="Dune", year=2021)
     status = Status.objects.create(
         user=alice, film=film, status_type=Status.Type.REVIEW, content="r"

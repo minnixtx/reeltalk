@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 
 from reeltalk.social.models import SiteSettings
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 
@@ -22,7 +23,7 @@ def client():
 @pytest.fixture
 def admin(db):
     # R12: / is gated behind the setup wizard until a superuser exists.
-    return User.objects.create_superuser(localname="admin", password="s3cretpass")
+    return site_admin(localname="admin", password="s3cretpass")
 
 
 @pytest.mark.django_db
@@ -83,7 +84,7 @@ def test_footer_links_to_about_on_every_page(client, admin):
 def test_logged_in_home_leads_with_the_feed(client, admin):
     # M6 artwork C (R64): the wordmark lives in the header, so the signed-in
     # home opens on the "Now Playing" feed instead of the landing intro.
-    User.objects.create_user(localname="alice", password="s3cretpass")
+    member(localname="alice", password="s3cretpass")
     assert client.login(username="alice", password="s3cretpass")
     body = client.get("/").content.decode()
     assert "Now Playing" in body

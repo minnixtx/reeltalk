@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Check your email — ReelTalk{% endblock %}
+
+{% block content %}
+<h1>Check your email</h1>
+<p>
+  We send a link to your email address to confirm it is really yours.
+  You cannot sign in until you click it — that is the whole of it.
+</p>
+<p>
+  If the link has not arrived, or the one you have has expired, ask for a new
+  one below. It works whether or not you are signed in, so a lost link is
+  never a dead end.
+</p>
+
+<form method="post" action="{% url 'verify-resend' %}">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit">Send me a verification link</button>
+</form>
+
+<p><a href="{% url 'login' %}">Back to log in</a></p>
+{% endblock %}

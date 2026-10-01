@@ -20,6 +20,7 @@ from PIL import Image
 
 from reeltalk.activitypub.crypto import generate_keypair
 from reeltalk.social.models import User
+from reeltalk.tests.members import member
 
 
 def _tiny_jpeg() -> bytes:
@@ -58,9 +59,7 @@ def _clear_cache():
 
 @pytest.mark.django_db
 def test_profile_page_renders_identity(client):
-    user = User.objects.create_user(
-        localname="alice", password="p", display_name="Alice A."
-    )
+    user = member(localname="alice", password="p", display_name="Alice A.")
     user.summary = "<p>Into the <strong>void</strong>.</p>"
     user.save()
     response = client.get("/user/alice/")
@@ -74,12 +73,12 @@ def test_profile_page_renders_identity(client):
 
 @pytest.mark.django_db
 def test_profile_page_avatar_and_placeholder(client):
-    user = User.objects.create_user(localname="alice", password="p")
+    user = member(localname="alice", password="p")
     user.avatar.save("a.jpg", SimpleUploadedFile("a.jpg", _tiny_jpeg()), save=True)
     # The stored name (get_available_name may suffix it on collision).
     assert user.avatar.url.encode() in client.get("/user/alice/").content
 
-    bare = User.objects.create_user(localname="bob", password="p")
+    bare = member(localname="bob", password="p")
     page = client.get(f"/user/{bare.localname}/").content
     assert b"avatar-placeholder" in page
 
@@ -87,7 +86,7 @@ def test_profile_page_avatar_and_placeholder(client):
 @pytest.mark.django_db
 def test_profile_page_localname_case_insensitive(client):
     # R40: case variants are one identity; the stored spelling is canonical.
-    User.objects.create_user(localname="Alice", password="p")
+    member(localname="Alice", password="p")
     response = client.get("/user/alice/")
     assert response.status_code == 200
     assert b"@Alice@localhost" in response.content
@@ -95,7 +94,7 @@ def test_profile_page_localname_case_insensitive(client):
 
 @pytest.mark.django_db
 def test_profile_page_edit_button_only_for_self(client):
-    User.objects.create_user(localname="alice", password="p")
+    member(localname="alice", password="p")
     anonymous = client.get("/user/alice/").content
     assert b"profile-edit" not in anonymous
 
@@ -103,7 +102,7 @@ def test_profile_page_edit_button_only_for_self(client):
     own = client.get("/user/alice/").content
     assert b"/preferences/profile/" in own
 
-    User.objects.create_user(localname="bob", password="p")
+    member(localname="bob", password="p")
     client.login(username="bob", password="p")
     assert b"/preferences/profile/" not in client.get("/user/alice/").content
 
@@ -268,9 +267,7 @@ def test_profile_edit_requires_login(client):
 
 @pytest.mark.django_db
 def test_profile_edit_renders_prefilled(client):
-    user = User.objects.create_user(
-        localname="alice", password="p", display_name="Alice A."
-    )
+    user = member(localname="alice", password="p", display_name="Alice A.")
     user.raw_summary = "Into the *void*."
     user.save()
     client.login(username="alice", password="p")
@@ -284,7 +281,7 @@ def test_profile_edit_renders_prefilled(client):
 
 @pytest.mark.django_db
 def test_profile_edit_saves_name_bio_and_avatar(client):
-    user = User.objects.create_user(localname="alice", password="p")
+    user = member(localname="alice", password="p")
     client.login(username="alice", password="p")
     response = client.post(
         "/preferences/profile/",
@@ -309,7 +306,7 @@ def test_profile_edit_saves_name_bio_and_avatar(client):
 
 @pytest.mark.django_db
 def test_profile_edit_keeps_existing_avatar_when_none_uploaded(client):
-    user = User.objects.create_user(localname="alice", password="p")
+    user = member(localname="alice", password="p")
     user.avatar.save("old.jpg", SimpleUploadedFile("old.jpg", _tiny_jpeg()), save=True)
     client.login(username="alice", password="p")
     client.post(

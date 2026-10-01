@@ -11,6 +11,8 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
 
+from reeltalk.tests.members import member, site_admin
+
 User = get_user_model()
 
 
@@ -23,7 +25,7 @@ def client():
 def admin(db):
     # R12: the index and other pages are gated behind the setup wizard until a
     # superuser exists; the footer-link test walks those pages.
-    return User.objects.create_superuser(localname="admin", password="s3cretpass")
+    return site_admin(localname="admin", password="s3cretpass")
 
 
 @pytest.mark.django_db
@@ -53,7 +55,7 @@ def test_welcome_walks_the_core_loop_in_order(client, admin):
 
 @pytest.mark.django_db
 def test_welcome_signed_in_shows_handle_and_find_people(client, admin):
-    User.objects.create_user(localname="alice", password="s3cretpass")
+    member(localname="alice", password="s3cretpass")
     assert client.login(username="alice", password="s3cretpass")
     body = client.get(reverse("welcome")).content.decode()
     assert "alice" in body

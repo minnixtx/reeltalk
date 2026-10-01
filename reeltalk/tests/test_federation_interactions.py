@@ -45,6 +45,7 @@ from django.test import Client, RequestFactory
 from reeltalk.activitypub import crypto, signatures
 from reeltalk.activitypub.objects import like_activity, note_document, note_reference
 from reeltalk.core.models import Film, Like, Status, feed_entries
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 
@@ -59,12 +60,12 @@ MIRROR_NOTE_URL = "https://remote.example/status/carol-review-1"
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
 def bob(db):
-    return User.objects.create_user(localname="bob", password="s3cretpass")
+    return member(localname="bob", password="s3cretpass")
 
 
 @pytest.fixture
@@ -75,7 +76,7 @@ def dune(db):
 @pytest.fixture
 def admin(db):
     # R12: / redirects to /setup/ until a superuser exists.
-    return User.objects.create_superuser(localname="admin", password="s3cretpass")
+    return site_admin(localname="admin", password="s3cretpass")
 
 
 @pytest.fixture()
@@ -263,7 +264,7 @@ def test_a_local_reply_to_a_mirror_serialises_the_parents_home_url():
     film = Film.objects.create(title="Dune", year=2021)
     mirror = _mirror_review(film, carol)
     reply = Status.objects.create(
-        user=User.objects.create_user(localname="alice", password="p"),
+        user=member(localname="alice", password="p"),
         film=film,
         status_type=Status.Type.COMMENT,
         content="<p>Agreed.</p>",
@@ -380,7 +381,7 @@ def test_an_unreachable_author_does_not_fail_the_like_request(alice, dune):
 @responses.activate
 @pytest.mark.django_db
 def test_inbound_undo_like_removes_the_senders_like(client, remote_keypair, person_doc):
-    alice = User.objects.create_user(localname="alice", password="p")
+    alice = member(localname="alice", password="p")
     responses.add(responses.GET, REMOTE_ACTOR, json=person_doc)
     responses.add(responses.POST, REMOTE_INBOX, status=202)  # the Accept (R88)
     private_pem, _public_pem = remote_keypair
@@ -429,8 +430,8 @@ def test_inbound_undo_like_uses_the_verified_sender_not_the_declared_actor(
     # named as the ``actor`` throughout the activity, a real and resolvable
     # local user, so if the handler ever trusted the wire over the
     # signature it would delete the wrong person's like and this fails.
-    alice = User.objects.create_user(localname="alice", password="p")
-    bob = User.objects.create_user(localname="bob", password="p")
+    alice = member(localname="alice", password="p")
+    bob = member(localname="bob", password="p")
     responses.add(responses.GET, REMOTE_ACTOR, json=person_doc)
     responses.add(responses.POST, REMOTE_INBOX, status=202)  # the Accept (R88)
     private_pem, _public_pem = remote_keypair
@@ -473,7 +474,7 @@ def test_inbound_undo_like_uses_the_verified_sender_not_the_declared_actor(
 def test_inbound_undo_like_leaves_another_users_like_alone(
     client, remote_keypair, person_doc
 ):
-    alice = User.objects.create_user(localname="alice", password="p")
+    alice = member(localname="alice", password="p")
     responses.add(responses.GET, REMOTE_ACTOR, json=person_doc)
     responses.add(responses.POST, REMOTE_INBOX, status=202)  # the Accept (R88)
     private_pem, _public_pem = remote_keypair
@@ -487,7 +488,7 @@ def test_inbound_undo_like_leaves_another_users_like_alone(
     _post_inbox(client, body, _signed_post("/inbox/", body, private_pem))
     carol = User.objects.get(local=False)
     status = _review(alice, Film.objects.create(title="D"))
-    bob = User.objects.create_user(localname="bob", password="p")
+    bob = member(localname="bob", password="p")
     Like.objects.create(user=bob, status=status)
     Like.objects.create(user=carol, status=status)
 

@@ -59,6 +59,7 @@ from reeltalk.notifications.models import (
     mark_all_read,
     notify,
 )
+from reeltalk.tests.members import member as create_member
 
 User = get_user_model()
 
@@ -71,13 +72,13 @@ UNKNOWN_ACTOR = "https://never-mentioned-before.example/users/nobody"
 
 @pytest.fixture
 def alice(db):
-    return User.objects.create_user(localname="alice", password="s3cretpass")
+    return create_member(localname="alice", password="s3cretpass")
 
 
 @pytest.fixture
 def bob(db):
     """A local member who writes the posts under test — the mention *actor*."""
-    return User.objects.create_user(localname="bob", password="s3cretpass")
+    return create_member(localname="bob", password="s3cretpass")
 
 
 @pytest.fixture
@@ -274,7 +275,7 @@ def test_the_author_being_replied_to_is_suppressed(db, alice, bob, alice_post):
 
 
 def test_only_the_person_being_replied_to_is_suppressed(db, alice, bob, alice_post):
-    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    carol = create_member(localname="carol", password="s3cretpass")
     reply = Status.objects.create(
         user=bob,
         film=alice_post.film,
@@ -325,7 +326,7 @@ def test_repeated_calls_for_one_status_notify_once(db, alice, their_post):
     assert rows(alice, "mention", their_post).count() == 1
     # Control: the guard is per recipient, not a one-shot per status — a
     # member nobody has been told about yet still gets told on the third call.
-    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    carol = create_member(localname="carol", password="s3cretpass")
     assert len(record_mentions(their_post, [alice, carol])) == 1
     assert rows(carol, "mention", their_post).count() == 1
     assert rows(alice, "mention", their_post).count() == 1
@@ -397,9 +398,9 @@ def test_notify_still_decides_who_may_be_told(db, alice, their_post):
     remote = User.objects.create_user(
         localname="someone@elsewhere.example", password="s3cretpass", local=False
     )
-    blocked = User.objects.create_user(localname="blocked", password="s3cretpass")
+    blocked = create_member(localname="blocked", password="s3cretpass")
     blocked.blocks.add(their_post.user)
-    bystander = User.objects.create_user(localname="bystander", password="s3cretpass")
+    bystander = create_member(localname="bystander", password="s3cretpass")
 
     made = record_mentions(their_post, [their_post.user, remote, blocked, bystander])
 
@@ -514,7 +515,7 @@ def test_a_reply_mentioning_the_parent_author_notifies_once(
 
 @responses.activate
 def test_a_reply_mentioning_a_third_member_notifies_them(db, client, alice, bob):
-    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    carol = create_member(localname="carol", password="s3cretpass")
     own = Status.objects.create(
         user=alice,
         film=Film.objects.create(title="Arrival", year=2016),
@@ -590,7 +591,7 @@ def test_re_finishing_a_review_does_not_notify_the_same_member_twice(
 def test_editing_a_review_to_add_a_mention_notifies_the_new_member(
     db, client, alice, bob, dune
 ):
-    carol = User.objects.create_user(localname="carol", password="s3cretpass")
+    carol = create_member(localname="carol", password="s3cretpass")
     client.force_login(bob)
     client.post(
         f"/film/{dune.pk}/watched/",

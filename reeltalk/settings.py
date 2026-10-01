@@ -192,6 +192,19 @@ Q_CLUSTER = {
 # in reeltalk.social.models.
 AUTH_USER_MODEL = "social.User"
 
+# R119: an account whose address has not been proven cannot sign in, with no
+# exception for the admin. Our backend *replaces* Django's ``ModelBackend``
+# rather than sitting alongside it, and that is the whole point — listing both
+# would let Django fall through to the un-gated backend and admit an
+# unverified account on the second try, which is a control that only looks
+# enforced. ``EmailVerificationBackend`` subclasses ``ModelBackend``, so every
+# other part of authentication is unchanged.
+#
+# This gates ``/admin/`` too, by the same code path: Django's admin logs in
+# through the configured backends, so an unverified admin cannot reach it
+# either. Recovery is R122's logged-out resend route, not an exemption.
+AUTHENTICATION_BACKENDS = ["reeltalk.social.backends.EmailVerificationBackend"]
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},

@@ -48,6 +48,7 @@ from reeltalk.moderation.representative import (
 )
 from reeltalk.notifications.models import Notification
 from reeltalk.social.forms import SignupForm
+from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
 PASSWORD = "s3cretpass"
@@ -88,19 +89,17 @@ def mirror_post(author, film, *, note_id=9001):
 @pytest.fixture
 def reporter(db):
     """The member who filed the report — the identity that must not travel."""
-    return User.objects.create_user(localname="reporter_zoe", password=PASSWORD)
+    return member(localname="reporter_zoe", password=PASSWORD)
 
 
 @pytest.fixture
 def mod(db):
-    return User.objects.create_user(
-        localname="moderator_yan", password=PASSWORD, is_moderator=True
-    )
+    return member(localname="moderator_yan", password=PASSWORD, is_moderator=True)
 
 
 @pytest.fixture
 def siteadmin(db):
-    return User.objects.create_superuser(localname="root_admin", password=PASSWORD)
+    return site_admin(localname="root_admin", password=PASSWORD)
 
 
 @pytest.fixture
@@ -234,9 +233,7 @@ def test_the_representative_shield_sits_before_the_admin_short_circuit(mod):
     localname* and asserts the shield still holds, so moving the
     representative check below the superuser short-circuit goes red.
     """
-    fake = User.objects.create_superuser(
-        localname=INSTANCE_ACTOR_LOCALNAME + "_x", password=PASSWORD
-    )
+    fake = site_admin(localname=INSTANCE_ACTOR_LOCALNAME + "_x", password=PASSWORD)
     fake.localname = INSTANCE_ACTOR_LOCALNAME
     fake.save(update_fields=["localname"])
     assert can_act_on(fake, fake) is False
@@ -351,7 +348,7 @@ def test_the_forward_goes_to_the_targets_home_inbox_and_nowhere_else(report, mod
 
 @pytest.mark.django_db
 def test_a_local_target_cannot_be_forwarded(reporter, mod):
-    local = User.objects.create_user(localname="someone", password=PASSWORD)
+    local = member(localname="someone", password=PASSWORD)
     made, _ = file_report(reporter=reporter, target_user=local, category="spam")
     response = logged_in(mod).post(forward_url(made), {})
     assert response.status_code == 404
@@ -420,7 +417,7 @@ def test_the_outcome_is_written_to_the_open_rows_only(db, reporter):
     no-op that returns the first row, and the forward would then 404 on a
     resolved report while looking like it had tested the right thing.
     """
-    witness = User.objects.create_user(localname="witness_ivy", password=PASSWORD)
+    witness = member(localname="witness_ivy", password=PASSWORD)
     target = mirror_account()
     old = Report.objects.create(
         reporter=reporter,
@@ -438,11 +435,9 @@ def test_the_outcome_is_written_to_the_open_rows_only(db, reporter):
     assert created and fresh.pk != old.pk
 
     responses.add(responses.POST, target.inbox_url, status=202)
-    logged_in(
-        User.objects.create_user(
-            localname="mod_two", password=PASSWORD, is_moderator=True
-        )
-    ).post(forward_url(fresh), {})
+    logged_in(member(localname="mod_two", password=PASSWORD, is_moderator=True)).post(
+        forward_url(fresh), {}
+    )
 
     old.refresh_from_db()
     fresh.refresh_from_db()
@@ -500,7 +495,7 @@ def test_the_forward_control_is_drawn_for_a_remote_target(mod, report):
 
 @pytest.mark.django_db
 def test_the_forward_control_is_not_drawn_for_a_local_target(reporter, mod):
-    local = User.objects.create_user(localname="neighbor", password=PASSWORD)
+    local = member(localname="neighbor", password=PASSWORD)
     made, _ = file_report(reporter=reporter, target_user=local, category="spam")
     page = logged_in(mod).get(reverse("moderation"))
     assert reverse("moderation-forward", args=[made.pk]) not in page.content.decode()
