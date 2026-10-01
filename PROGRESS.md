@@ -4881,6 +4881,84 @@ change form, so pressing it saves the form too. Verified in the suite, but
 it is the kind of behaviour worth seeing once in a browser before anyone
 relies on it.
 
+### Live proof — 2F-3b deployed, and the admin-side send proven on real mail (2026-10-01)
+
+**Deployed on the owner's instruction.** Fresh dump first:
+`reeltalk-20261001T142639Z.dump` (7 retained), all three images rebuilt
+(`web`/`worker`/`backup`, per §7 — not `web` alone), `showmigrations`
+confirmed all 17 `social` migrations already applied and **nothing to
+apply** — as expected for an increment that adds no migration. `up -d
+--force-recreate web worker backup`; all four services healthy, landing /
+`/admin/login/` / `/account/verify/resend/` all `200`, no errors in the
+web or worker logs.
+
+**`witness` recovered through R124's path, and it worked exactly as
+designed.** `change_email(witness, "forgejo@minnix.dev", changed_by=minnix)`
+returned `{'changed': True, 'notified': '', 'reason': '', 'superseded': 0}`
+— the R125 tamper notice **correctly skipped** because there was no prior
+address to tell, which is the empty-old-address branch the spec calls for and
+which had only ever been exercised in the suite until now. Then
+`send_verification_email()` minted token `CgWA8Xlu…` bound to the new
+address, the worker stamped `sent_at` with empty `send_error`, and the
+`ormq` queue drained to zero.
+
+**Proven from the received message, never from a status code.** Read over
+**IMAPS 993** with `select(readonly=True)` and `BODY.PEEK[]` throughout, so
+nothing in the mailbox was touched — confirmed afterwards by the mailbox
+still reporting `unseen=1`. The message was there: `from:
+minnix@minnix.dev`, `subject: [ReelTalk] Verify your email address`, dated
+`Thu, 01 Oct 2026 14:29:32 +0000`, carrying the link whose prefix matches
+the token row. Following that link **as received** returned
+`<h1>Email verified</h1>`, and the database then read
+`witness: verified=True verified_email='forgejo@minnix.dev'
+verified_at=2026-10-01 14:32:51`, with the token at `link_state=used` and
+`used_at` at the same instant as the verification — which is 2F-1's
+"the consume stamps the pair at the same instant as the spend" property
+observed on production rather than on locmem. `EmailVerificationBackend
+.user_can_authenticate(witness)` returns `True`, where before this it could
+not have: the account had a blank address and no proof.
+
+**Single-use proven by replay, not by assertion.** The same link a second
+time returned `<h1>That link did not work</h1>` with *"already been used"*,
+and the token row was **unchanged** — same `used_at`, and still exactly one
+token row for the account. A replay neither re-verifies nor mints.
+
+**A fact worth recording about the mail server:** `forgejo@minnix.dev` is
+**its own IMAP mailbox with its own password**, not an alias of
+`minnix@minnix.dev` — the supplied credential authenticates only as
+`forgejo@minnix.dev` and fails as `minnix@minnix.dev` and as `minnix`. It
+receives mail sent by the instance's `minnix@minnix.dev` sender without
+tripping the anti-spoof rule, because that rule constrains the *sender*,
+not the recipient. **The password is deliberately not recorded anywhere in
+this repo or in memory** — it was held in a mode-600 file under `/tmp`,
+bind-mounted read-only into the container, and deleted afterwards.
+
+**What this does NOT prove, stated plainly.**
+
+- **The admin button itself was never pressed.** The instance's admin
+  password is the owner's and was not supplied, so the address change and
+  the send were driven from a server shell through the same production
+  functions the button calls (`change_email` → `send_verification_email`),
+  not through `UserAdmin`'s HTTP endpoint. **The admin surface's live
+  behaviour is still test-only** — the 25 tests in
+  `test_admin_verification_surface.py` are what stands behind the button,
+  the status line and the token inline. Worth one browser visit by the owner
+  to confirm the rendered page matches.
+- **Token expiry is not proven live.** Backdating `expires_at` past the 72h
+  window and showing the refusal is still suite-only.
+- **The resend cooldown is not proven live** — neither the per-address
+  window nor the per-IP budget has been exercised against real traffic.
+- **A real password sign-in as `witness` was not performed.** The gate was
+  checked at the predicate level (`user_can_authenticate`), not through the
+  login form, because `witness`'s password is the owner's standing probe
+  credential and is not recorded here.
+
+**So: the send-and-verify chain is live-proven; 2F-4 is not fully closed.**
+What remains of 2F-4 is the expiry refusal, the two cooldown axes, and a
+login-form round trip. None of it is a mystery — all of it is suite-proven
+and unproven-live only in the sense that nobody has run it against the real
+thing yet.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
