@@ -431,12 +431,37 @@ do.
 
 **2. A spoofed header from an untrusted peer does nothing.**
 
+Check the **cookie flags**, not the actor ID. `absolute_uri()` mints every
+published identifier from `settings.CANONICAL_ORIGIN` and never from the
+request, so an actor ID served over LAN already reads
+`https://reeltalk.minnix.dev/...` whether or not a forwarded header was
+believed — probing `"id"` here proves nothing and has misled people into
+reporting a takeover that was never happening. What the trust gate actually
+governs is `request.is_secure()`, and with `COOKIES_FOLLOW_SCHEME=true` that
+shows up on the cookie:
+
 ```bash
-# From the LAN (NOT the terminator), the scheme must stay http:
-curl -s -H 'Accept: application/activity+json' -H 'X-Forwarded-Proto: https' \
-  http://192.168.1.138:3030/user/<localname>/ | grep '"id"'
-# expect http://192.168.1.138:3030/... — the header is inert
+# Neither of these may carry the Secure flag — plain HTTP from an untrusted peer:
+curl -s -D - -o /dev/null http://192.168.1.138:3030/login/ | grep -i '^set-cookie'
+curl -s -D - -o /dev/null -H 'X-Forwarded-Proto: https' \
+  http://192.168.1.138:3030/login/ | grep -i '^set-cookie'
+# expect NO "Secure" on either. If the spoofed request gains "Secure" while the
+# clean one does not, the header is being believed from a peer that is not in
+# TRUSTED_PROXIES — that is the actual bug.
 ```
+
+And confirm the positive case, that the real terminator *is* trusted:
+
+```bash
+# Over the public path the cookies must be Secure:
+curl -s -D - -o /dev/null https://reeltalk.minnix.dev/login/ | grep -i '^set-cookie'
+```
+
+Verified live 2026-10-02: neither LAN request carries `Secure`, the public
+one does, and the actor document reports
+`https://reeltalk.minnix.dev/user/<localname>/` with
+`endpoints.sharedInbox = https://reeltalk.minnix.dev/inbox/` from both
+origins.
 
 **3. LAN plain-HTTP login still works.** Load `http://192.168.1.138:3030/login/`,
 log in, confirm the redirect and the signed-in page. If `csrftoken` never appears
