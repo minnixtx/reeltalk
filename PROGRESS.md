@@ -10,27 +10,25 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **Live on `reeltalk.minnix.dev`:** everything through **§2G**, plus the
-  R127/R128 client-address work. Deployed 2026-10-02; `social.0018_passwordresettoken`
-  applied cleanly on the web container's own `migrate`. Email verification is
-  live-proven; sign-in is gated on a verified address (R119); the admin can
-  read the verified state and trigger the mail but can never attest it
-  (R123); the reset route answers on both origins.
-- **Still outstanding for §2G: the live browser proof, which is the owner's
-  to drive.** What was verified from the shell is the wiring — route 200 on
-  LAN and public https, the uniform no-account answer, no token and no queue
-  entry for an unknown address, the new tasks importable in the worker, the
-  published actor ID still https with no `:3030`. What has **not** been done
-  in a browser: receiving a real reset mail and completing a reset through
-  the page, and the admin's newly writable password field. **No live
-  account's password has been changed by this deploy or its checks** — the
-  only POST made was for an address that does not exist.
+- **Live on `reeltalk.minnix.dev` and proven there:** everything through
+  **§2G**, plus the R127/R128 client-address work. Deployed 2026-10-02;
+  `social.0018_passwordresettoken` applied cleanly on the web container's
+  own `migrate`. Email verification is live-proven; sign-in is gated on a
+  verified address (R119); the admin can read the verified state and
+  trigger the mail but can never attest it (R123); and password recovery
+  works end to end over real mail.
 - **§2F is COMPLETE.** Nothing inside it is outstanding — do not re-run its
   proofs. The spec is §2F; the outcome is its "Executed" records and the
   four "Live proof" sections at its end.
-- **§2G is COMPLETE in code and gate-verified; its live proof is
-  outstanding, and it is the owner's to drive.** The record is the "Executed
-  — §2G is DONE" section at the end of §2F.
+- **§2G is COMPLETE and live-proven — no work remains.** The owner drove the
+  browser proof on 2026-10-02: reset by email link and reset by the admin's
+  new field both worked against a live account, and the instance's own
+  records back it up — one spent token with no send error, **one**
+  password-changed notice queued for the admin change and **none** for the
+  self-service one, and the session picture consistent with the auth-hash
+  eviction (the only live warden session postdates the change; all the
+  admin's sessions untouched). The record is the "Executed — §2G is DONE"
+  section at the end of §2F, including the live-proof detail.
 - **Gate baseline: `2062 passed + 5 skipped`.** `ruff check`,
   `ruff format --check` and `makemigrations --check` all clean. One new
   migration shipped with this increment (`social 0018`), now applied.
@@ -5587,12 +5585,37 @@ log is normal, not a stalled queue: `qcluster` runs five processes in the
 image and `ps` is not installed, so a `grep qcluster` there measures
 nothing — read `/proc/*/cmdline` instead.
 
-**What is NOT done.** Live proof, and it is the owner's to drive as always:
-the reset flow end to end through real mail in a browser, the admin's new
-writable password field in a real browser. **No live account's password was
-changed by the deploy or its checks** — the only POST made was for an
-address that does not exist, so nothing was reset and there is no credential
-to hand over.
+**Live proof, driven by the owner in a real browser (2026-10-02).** Both
+paths were exercised against the live `warden` account and both worked, and
+the instance's own records say more than "the page accepted it":
+
+- **Reset by email link.** Exactly one `PasswordResetToken` row, `link_state
+  = used`, `sent_at` set, `send_error` empty, `request_ip` recorded. The
+  mail left through the worker at 18:33:48 and the link spent on first use.
+- **Reset by the admin's new writable field.** Worked, and it queued
+  **exactly one** `send_password_changed_notice` for warden at 18:35:42 —
+  while the self-service reset two minutes earlier queued **none**. That is
+  the self-change suppression rule observed on a real instance rather than
+  only under a mock: a member changing their own password is not mailed a
+  warning about it, an outside change is. Zero task failures across both.
+- **Session eviction — the thing R130 claimed while writing no code for it.**
+  After the admin change there is exactly one live warden session, created
+  18:36:36, i.e. *after* the 18:35:42 change: the pre-change session is
+  gone and the fresh login legitimately carries the new hash. The bystander
+  property held as well — all eleven `minnix` sessions are still valid, so
+  changing one member's password touched nobody else's.
+- **Corroborated by an unrelated leftover.** Two `witness` sessions from an
+  earlier password reset still sit in the table with a stored
+  `_auth_user_hash` that no longer matches that user's current one, so they
+  are permanently dead and flush on presentation. The flush path is visible
+  on this instance without taking anyone's word for it.
+
+**No credential was orphaned by any of this.** The owner performed both
+resets and holds both values; nothing was generated here, nothing was left
+unknown to the person who needs it.
+
+**§2G has no remaining work.** Built, gate-verified, deployed, and proven in
+a real browser on both the self-service and the admin path.
 
 ## 3. Host facts (this box)
 
