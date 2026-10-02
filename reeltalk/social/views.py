@@ -60,6 +60,7 @@ from reeltalk.moderation.models import report_state
 from reeltalk.notifications.models import Notification, notify
 from reeltalk.proxy_trust import client_ip
 
+from . import attempts
 from .forms import (
     PasswordResetConfirmForm,
     PasswordResetRequestForm,
@@ -69,6 +70,7 @@ from .forms import (
 )
 from .models import (
     AddressMismatchError,
+    CredentialAttempt,
     EmailVerificationToken,
     Invite,
     SiteSettings,
@@ -174,8 +176,39 @@ def signup(request):
         # something to send, so the closed notice now says where the link
         # comes from instead of just refusing.
         return render(request, "signup.html", {"closed": True})
-    form = SignupForm(request.POST or None)
-    if request.method == "POST" and form.is_valid():
+
+    if request.method == "POST":
+        ip = client_ip(request)
+        # Refuse before counting or creating anything once this address has
+        # spent the signup budget. The page is rendered from a fresh, empty
+        # form with the wait as a flash message — NOT the submitted form
+        # re-bound and re-validated — because re-validating would run the
+        # name/email uniqueness checks and print "that name is already
+        # taken", which is exactly the enumeration answer the throttle
+        # exists to stop being harvested at volume. The empty form discards
+        # the typed values: an accepted cost of a blocked state.
+        if attempts.attempts_blocked(CredentialAttempt.SIGNUP, ip):
+            messages.error(
+                request,
+                attempts.reveal_message(
+                    attempts.retry_at(CredentialAttempt.SIGNUP, ip)
+                ),
+            )
+            return render(request, "signup.html", {"form": SignupForm()})
+
+        form = SignupForm(request.POST)
+        valid = form.is_valid()
+        # Count the attempt whenever it reached a uniqueness lookup —
+        # whether the name came back free or taken — so a bot walking a
+        # list of names through the oracle is bounded on the walk itself,
+        # not only on the accounts it actually manages to create. A
+        # submission that never reached a lookup (a name that failed the
+        # format regex first) set no flag and is not counted.
+        if form.reached_uniqueness_check:
+            attempts.record_attempt(CredentialAttempt.SIGNUP, ip)
+        if not valid:
+            return render(request, "signup.html", {"form": form})
+
         data = form.cleaned_data
         user = User.objects.create_user(
             localname=data["localname"],
@@ -189,7 +222,7 @@ def signup(request):
         # — the account still appears, it just never gets a link. Nothing
         # sends in this request; the guard that shouts when the backend
         # cannot deliver is the only part that runs here.
-        send_verification_email(user, request_ip=client_ip(request))
+        send_verification_email(user, request_ip=ip)
         # **Signup no longer logs you in** (R119). It cannot: the account has
         # no proof of its address yet, and the gate that refuses it is the
         # same one this feature exists to make meaningful. Logging in here
@@ -207,7 +240,7 @@ def signup(request):
             "address. Click it to finish, or ask for another one below.",
         )
         return redirect(RESEND_PATH)
-    return render(request, "signup.html", {"form": form})
+    return render(request, "signup.html", {"form": SignupForm()})
 
 
 def setup(request):

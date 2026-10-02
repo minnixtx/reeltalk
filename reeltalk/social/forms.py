@@ -10,8 +10,11 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.views.decorators.debug import sensitive_variables
 
+from reeltalk.proxy_trust import client_ip
+from reeltalk.social import attempts
+
 from .backends import REFUSAL_INACTIVE, REFUSAL_UNVERIFIED, EmailVerificationBackend
-from .models import User
+from .models import CredentialAttempt, User
 
 # Letters/digits plus '.', '_', '-'; must start with a letter or digit.
 LOCALNAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
@@ -41,6 +44,17 @@ class SignupForm(forms.Form):
         widget=forms.PasswordInput,
     )
 
+    # Whether this submission reached a name/email uniqueness check — the
+    # enumeration surface the signup throttle bounds. Set the moment either
+    # ``clean_localname`` or ``clean_email`` gets far enough to run its
+    # ``User.objects.filter(...)`` lookup, and read by the view to decide
+    # whether to count the attempt. A submission that never reaches a
+    # lookup (empty, or a malformed name that fails the format regex before
+    # the query) does not set it and is not counted — it learned nothing
+    # about which names exist. Defaults False so a form that never ran
+    # either clean method reads as "no attempt to count".
+    reached_uniqueness_check = False
+
     def clean_localname(self):
         localname = self.cleaned_data["localname"].strip()
         if not LOCALNAME_RE.match(localname):
@@ -48,6 +62,9 @@ class SignupForm(forms.Form):
                 "Use 1-30 characters: letters, numbers, '.', '_' or '-', "
                 "starting with a letter or number."
             )
+        # Past the format check, the lookup below is the oracle: its answer
+        # ("taken" / "free") is a fact about the account set. Count it.
+        self.reached_uniqueness_check = True
         # Case-insensitive uniqueness: "Alice" and "alice" would be the same
         # federated identity to other instances.
         if User.objects.filter(localname__iexact=localname).exists():
@@ -56,6 +73,9 @@ class SignupForm(forms.Form):
 
     def clean_email(self):
         email = self.cleaned_data["email"].strip().lower()
+        # Same: this lookup answers whether an address has an account, so
+        # reaching it is a counted attempt whether or not it finds one.
+        self.reached_uniqueness_check = True
         # Checked here as well as by the partial unique index so a person gets
         # told at the form rather than a 500 from the database. The index is
         # still the real guard — a management command or a fixture bypasses
@@ -124,12 +144,31 @@ class VerificationRefusalMixin:
         self.not_verified = False
         super().__init__(*args, **kwargs)
 
+    # Which credential surface this form throttles against. Set on each
+    # concrete form below and deliberately left ``None`` here: a login form
+    # that forgets to name its surface raises in ``_budget`` rather than
+    # running silently unthrottled, so the half-finished "two of three
+    # surfaces covered" state cannot come back unnoticed.
+    throttle_surface = None
+
     @sensitive_variables()
     def clean(self):
         username = self.cleaned_data.get("username")
         password = self.cleaned_data.get("password")
         if username is None or not password:
             return self.cleaned_data
+
+        # Refuse before touching the password once this address is spent.
+        # There is no work worth doing on a blocked address, and skipping
+        # the credential check denies an attacker the timing difference a
+        # real password verification makes. The address is always
+        # ``client_ip()``, never a header read here.
+        ip = client_ip(self.request) if self.request is not None else ""
+        if attempts.attempts_blocked(self.throttle_surface, ip):
+            raise ValidationError(
+                attempts.reveal_message(attempts.retry_at(self.throttle_surface, ip)),
+                code="throttled",
+            )
 
         self.user_cache = authenticate(
             self.request, username=username, password=password
@@ -138,6 +177,13 @@ class VerificationRefusalMixin:
             # ``confirm_login_allowed`` is where the subclass's own requirement
             # lives, so it runs here rather than being reimplemented.
             self.confirm_login_allowed(self.user_cache)
+            # A correct credential that actually got through resets the
+            # address's budget, so a person who knows their password is
+            # never punished for the failures that came before it. Cleared
+            # only after ``confirm_login_allowed`` passes: a correct password
+            # on an account this door still refuses (a non-staff user at the
+            # admin) is not a success to reward with a fresh budget.
+            attempts.clear_attempts(self.throttle_surface, ip)
             return self.cleaned_data
 
         # Nothing got through. Ask the gate which of its terms refused rather
@@ -150,6 +196,12 @@ class VerificationRefusalMixin:
             )
         if reason == REFUSAL_INACTIVE:
             raise ValidationError(self.error_messages["inactive"], code="inactive")
+        # Only a wrong password (or no such account) is counted against the
+        # budget. An unverified or suspended account got its password right,
+        # so it is not a guess — counting it would let someone testing their
+        # own not-yet-verified account drain their address's budget for a
+        # reason unrelated to guessing at anything.
+        attempts.record_attempt(self.throttle_surface, ip)
         raise self.get_invalid_login_error()
 
     def name_the_gate(self, user) -> bool:
@@ -177,6 +229,7 @@ class VerificationAwareLoginForm(VerificationRefusalMixin, AuthenticationForm):
         **AuthenticationForm.error_messages,
         "not_verified": NOT_VERIFIED_MESSAGE,
     }
+    throttle_surface = CredentialAttempt.LOGIN
 
 
 class AdminVerificationLoginForm(VerificationRefusalMixin, AdminAuthenticationForm):
@@ -197,6 +250,7 @@ class AdminVerificationLoginForm(VerificationRefusalMixin, AdminAuthenticationFo
         **AdminAuthenticationForm.error_messages,
         "not_verified": NOT_VERIFIED_MESSAGE,
     }
+    throttle_surface = CredentialAttempt.ADMIN
 
     def name_the_gate(self, user) -> bool:
         return bool(user and user.is_staff)

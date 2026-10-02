@@ -1360,3 +1360,69 @@ class LinkDomain(models.Model):
             return False
         allowed = set(cls.objects.values_list("domain", flat=True))
         return any(host == d or host.endswith("." + d) for d in allowed)
+
+
+class CredentialAttempt(models.Model):
+    """One counted attempt at a credential surface, keyed on its source address.
+
+    The mail throttles (§2F/§2G) count **token rows** because the thing they
+    bound is a send — a verification or reset mail is itself the row they
+    count. A failed sign-in mints nothing, so the credential surfaces
+    (login, admin login, signup) have no row to count and need one of their
+    own. Same Postgres, same restart-proof, same shared-across-every-web-process
+    property that made the token-table shape the right call for mail: a
+    LocMemCache counter would reset on every deploy and disagree between
+    processes, which is a throttle that reads as protection while handing an
+    attacker a fresh budget each time.
+
+    **One row per counted attempt, not one row per address.** The window is
+    read from ``created_at`` at query time rather than accumulated into a
+    counter, so the sliding window needs no reset job and a lock expires on
+    its own the moment its oldest counted row ages out of the window. There
+    is deliberately no "locked until" column: a stored lock is a state an
+    admin has to clear, and with one admin and no second admin that is a
+    denial-of-service lever left in the attacker's hands. The window is the
+    only thing that expires a lock here.
+
+    ``surface`` keeps the three budgets separate. Login, admin login and
+    signup each get their own count and their own limit (see
+    :mod:`reeltalk.social.attempts`), so one surface can never drain
+    another — the availability lesson §2G learned when reset and resend had
+    to be given separate counters.
+
+    ``source_ip`` is always the value from ``client_ip()``, never a raw
+    header. A per-source budget keyed on a forgeable address is worse than
+    no budget — it punishes only the honest — which is why this whole
+    feature was sequenced after R127's trusted-proxy walk.
+    """
+
+    LOGIN = "login"
+    ADMIN = "admin_login"
+    SIGNUP = "signup"
+    SURFACES = (
+        (LOGIN, "Sign-in"),
+        (ADMIN, "Admin sign-in"),
+        (SIGNUP, "Signup"),
+    )
+
+    surface = models.CharField(max_length=20, choices=SURFACES)
+    # 45 chars is the widest textual IPv6 address; IPv4 fits with room to
+    # spare. Kept a plain string rather than a generic IP field so it stores
+    # exactly the string ``client_ip()`` returned, including the empty
+    # string for an unparseable source (which is never throttled).
+    source_ip = models.CharField(max_length=45)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            # Every throttle query filters on (surface, source_ip) and reads
+            # the window by created_at; the clear-on-login deletes on
+            # (surface, source_ip). One composite serves both.
+            models.Index(
+                fields=["surface", "source_ip", "created_at"],
+                name="credattempt_surface_ip_created",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.surface} attempt from {self.source_ip or '(unknown)'}"
