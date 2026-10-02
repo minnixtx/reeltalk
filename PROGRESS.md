@@ -10,29 +10,30 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **Live on `reeltalk.minnix.dev`:** everything through **§2F** except the
-  R127/R128 client-address work. Email verification is deployed and
-  fully live-proven; sign-in is gated on a verified address (R119); the
-  admin can read the verified state and trigger the mail but can never
-  attest it (R123).
-- **Committed and gate-verified, NOT deployed: §2G (password reset) and
-  R127/R128 (`client_ip`).** Nobody has been asked to deploy either. A
-  deploy is a rebuild + restart **plus `migrate`** — `social 0018` adds
-  the `PasswordResetToken` table, so `--no-migrate` is not an option here.
-  Until then the instance has no reset routes at all and still resolves
-  client addresses by the old leftmost rule. Check the live state with
-  `git log -n 4 --oneline` against what the web container is running.
+- **Live on `reeltalk.minnix.dev`:** everything through **§2G**, plus the
+  R127/R128 client-address work. Deployed 2026-10-02; `social.0018_passwordresettoken`
+  applied cleanly on the web container's own `migrate`. Email verification is
+  live-proven; sign-in is gated on a verified address (R119); the admin can
+  read the verified state and trigger the mail but can never attest it
+  (R123); the reset route answers on both origins.
+- **Still outstanding for §2G: the live browser proof, which is the owner's
+  to drive.** What was verified from the shell is the wiring — route 200 on
+  LAN and public https, the uniform no-account answer, no token and no queue
+  entry for an unknown address, the new tasks importable in the worker, the
+  published actor ID still https with no `:3030`. What has **not** been done
+  in a browser: receiving a real reset mail and completing a reset through
+  the page, and the admin's newly writable password field. **No live
+  account's password has been changed by this deploy or its checks** — the
+  only POST made was for an address that does not exist.
 - **§2F is COMPLETE.** Nothing inside it is outstanding — do not re-run its
   proofs. The spec is §2F; the outcome is its "Executed" records and the
   four "Live proof" sections at its end.
 - **§2G is COMPLETE in code and gate-verified; its live proof is
-  outstanding, and it is the owner's to drive.** What has not been done in
-  a real browser: the reset flow end to end through real mail, and the
-  admin's newly writable password field. The record is the "Executed — §2G
-  is DONE" section at the end of §2F.
+  outstanding, and it is the owner's to drive.** The record is the "Executed
+  — §2G is DONE" section at the end of §2F.
 - **Gate baseline: `2062 passed + 5 skipped`.** `ruff check`,
   `ruff format --check` and `makemigrations --check` all clean. One new
-  migration ships with this increment (`social 0018`).
+  migration shipped with this increment (`social 0018`), now applied.
 - **Three rules bind anyone who touches §2G** (all in R130, none
   re-openable): session eviction is **Django's auth hash, not our code** —
   a test scans shipped code for `update_session_auth_hash` and fails on it,
