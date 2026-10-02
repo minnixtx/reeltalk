@@ -61,6 +61,8 @@ from reeltalk.notifications.models import Notification, notify
 from reeltalk.proxy_trust import client_ip
 
 from .forms import (
+    PasswordResetConfirmForm,
+    PasswordResetRequestForm,
     ProfileForm,
     ResendVerificationForm,
     SignupForm,
@@ -71,6 +73,12 @@ from .models import (
     Invite,
     SiteSettings,
     User,
+)
+from .password_reset import (
+    RESET_PATH,
+    classify_reset_code,
+    complete_reset,
+    request_reset,
 )
 from .verify import RESEND_PATH, request_resend, send_verification_email
 
@@ -89,7 +97,24 @@ from .verify import RESEND_PATH, request_resend, send_verification_email
 # account in the database, asserting none of them bounce to the login page.
 # Adding one of these verbs to any of these routes turns that test red, which
 # is the whole point of naming the exemption rather than relying on it.
-GATED_EXEMPT_URLS = ("login", "verify-link", "verify-resend", "signup", "setup")
+#
+# The 2G reset routes belong here for the same reason the resend route does,
+# and one reason more besides. R119 means the person who needs a password
+# reset is by definition someone who cannot sign in, so a reset page behind
+# ``login_required`` could not rescue the case it exists for — the same
+# argument R122 makes for resend. And because an *unverified* account is
+# refused a reset (owner decision, 2026-10-02), the reset page is the only
+# place such a member is ever told that; if it bounced to sign-in, the
+# refusal would be delivered as a redirect loop rather than a sentence.
+GATED_EXEMPT_URLS = (
+    "login",
+    "verify-link",
+    "verify-resend",
+    "password-reset",
+    "password-reset-confirm",
+    "signup",
+    "setup",
+)
 
 
 def has_admin() -> bool:
@@ -456,6 +481,113 @@ def verify_resend(request):
     else:
         form = ResendVerificationForm()
     return render(request, "social/verify_form.html", {"form": form})
+
+
+# The one sentence every reset request gets, whoever it was about. It does
+# not promise a link, because for some of the addresses submitted here no
+# link is coming and this page must not say otherwise. It points at the
+# note above the form — which says the verification precondition to every
+# visitor in the same words, so it discloses nothing about any particular
+# address — rather than repeating it, and it hands the leftovers to the
+# human who can actually do something.
+#
+# The alternative that looks tidier and is worse: vary the answer by what
+# was found. "That account is not verified" is a three-way enumeration
+# oracle over every address on the instance, handed out for free.
+UNIFORM_RESET_MESSAGE = (
+    "If that address can reset its password, a reset link is on its way. "
+    "Check the inbox and the spam folder. If nothing arrives, the note "
+    "above this form explains the other reasons a reset is not possible, "
+    "and the site administrator can help."
+)
+
+
+def password_reset_request(request):
+    """The logged-out "I forgot my password" page (2G).
+
+    Mirrors :func:`verify_resend` in shape because it is the same kind of
+    page: logged out, takes an address, must not answer a question about it.
+
+    **The page says the verification precondition out loud, to everyone,
+    before anyone types.** That is what keeps the uniform answer honest.
+    An unverified account gets no reset link — a new password would not
+    open it, since R119 refuses sign-in until the address is proven — and
+    the only way to tell that without building an enumeration oracle is to
+    say it in copy that is identical whoever is reading it. The cost is
+    that a verified member reads a sentence they do not need. That is a
+    much smaller price than the alternative.
+    """
+    if request.method == "POST":
+        form = PasswordResetRequestForm(request.POST)
+        if form.is_valid():
+            request_reset(form.cleaned_data["email"], client_ip(request))
+            # Redirect rather than render, so a refresh cannot fire a second
+            # send. The uniform sentence rides in the flash message.
+            messages.success(request, UNIFORM_RESET_MESSAGE)
+            return redirect(RESET_PATH)
+    else:
+        form = PasswordResetRequestForm()
+    return render(request, "social/password_reset_form.html", {"form": form})
+
+
+def password_reset_confirm(request, code):
+    """Open or spend a reset link: ``/account/password-reset/<code>/`` (2G).
+
+    **GET opens the form; only the POST spends the link.** The link in the
+    mail is a credential that has already been copied through a mail
+    server, a mail client, and possibly a link scanner. Letting the GET
+    *be* the change would mean that credential alone was enough to set a
+    password. Here it only unlocks a form, and the thing that actually
+    writes is a submission carrying a password nobody else has seen.
+
+    **The copy on this page is specific, and the request page's is not** —
+    the same asymmetry R122 draws. Reaching this page at all takes an
+    unguessable ~256-bit code, so whoever reads "your link expired on such
+    a date" already holds a real credential and is entitled to know what
+    is wrong with it.
+
+    **A successful reset does not sign anybody in.** The flow stays
+    logged-out end to end so that a session on this instance is only ever
+    created by the login form, and the rule that a password change kills
+    every session needs no carve-out for "except the one that just did the
+    resetting". The member types their new password once more. That is the
+    whole cost, and it buys the simpler invariant.
+    """
+    outcome, problem = classify_reset_code(code)
+    if outcome != "live":
+        return render(
+            request,
+            "social/password_reset_result.html",
+            {"ok": False, "outcome": outcome, "reason": problem},
+        )
+
+    if request.method == "POST":
+        form = PasswordResetConfirmForm(request.POST)
+        if form.is_valid():
+            result = complete_reset(code, form.cleaned_data["password1"])
+            if result["changed"]:
+                return render(
+                    request,
+                    "social/password_reset_result.html",
+                    {"ok": True, "outcome": "done", "localname": result["localname"]},
+                )
+            # The link died between the GET that showed this form and the
+            # POST that spent it — someone else clicked first, or it aged
+            # out mid-form. Re-classify so the sentence matches the truth.
+            outcome, problem = classify_reset_code(code)
+            return render(
+                request,
+                "social/password_reset_result.html",
+                {"ok": False, "outcome": outcome, "reason": problem},
+            )
+    else:
+        form = PasswordResetConfirmForm()
+
+    return render(
+        request,
+        "social/password_reset_confirm.html",
+        {"form": form, "code": code},
+    )
 
 
 def _invite_context(request, profile_user) -> dict:

@@ -5,9 +5,18 @@ The user admin deliberately uses Django's auth forms rather than a bare
 model's ``password`` column as an ordinary text input and writes whatever is
 typed straight into it — unhashed, so the account cannot log in
 (``check_password`` expects a hash) and a plaintext secret is left sitting in
-the database. ``UserCreationForm`` hashes through ``set_password``, and
-``UserChangeForm``'s password field is read-only and re-submits the stored
-hash, so no admin edit can put plaintext in that column.
+the database. ``UserCreationForm`` hashes through ``set_password``, and the
+change form here goes through the same writer rather than the column.
+
+That writer is the point. ``UserChangeForm`` used to give this page a
+read-only hash field that no admin could overwrite, which kept plaintext out
+but also meant **an admin could not set a member's password at all** — the
+only path was a shell on the server. §2G made the field real, and the way
+back into "no admin edit can put plaintext in that column" is
+:func:`reeltalk.social.passwords.set_password`: the admin submits a
+plaintext credential through a validated form, and the single writer hashes
+it. Nothing in this class touches ``obj.password`` directly, which is what
+makes the guarantee about the code rather than about the widget.
 
 The federation internals are read-only or absent for the same kind of reason:
 they are written by key generation and by the mirror path, and an admin typo
@@ -28,8 +37,16 @@ from django.utils.timezone import localtime
 from reeltalk.moderation.representative import is_instance_actor
 from reeltalk.proxy_trust import client_ip
 
-from .forms import LOCALNAME_RE
-from .models import EmailVerificationToken, Invite, LinkDomain, SiteSettings, User
+from .forms import LOCALNAME_RE, NewPasswordPairMixin
+from .models import (
+    EmailVerificationToken,
+    Invite,
+    LinkDomain,
+    PasswordResetToken,
+    SiteSettings,
+    User,
+)
+from .passwords import set_password
 from .verify import change_email, send_verification_email
 
 # How many of an account's verification sends the inline shows. Bounded
@@ -84,13 +101,40 @@ class InviteUserCreationForm(UserCreationForm):
         return localname
 
 
-class AdminUserChangeForm(UserChangeForm):
+class AdminUserChangeForm(NewPasswordPairMixin, UserChangeForm):
     """Editing an existing account.
 
-    ``UserChangeForm`` declares ``password`` as a read-only hash field whose
-    ``clean_password`` returns the stored value regardless of what was
-    submitted, so this column can never be overwritten with plaintext.
+    ``password`` is set to ``None`` to drop the field ``UserChangeForm``
+    declares — a ``ReadOnlyPasswordHashField`` with ``disabled=True`` whose
+    ``clean_password`` returned the stored hash no matter what was
+    submitted. That field is why an admin could not set a member's password
+    from the browser at all, and why "the admin keeps a raw password field"
+    had to be re-asked before §2G was built on it.
+
+    In its place: two real inputs, blank meaning "change nothing". They are
+    **not** bound to the model, so ``form.save()`` cannot write the
+    ``password`` column and no plaintext can reach it by accident. The write
+    happens in :meth:`UserAdmin.save_model`, through
+    :func:`~reeltalk.social.passwords.set_password`, which hashes and
+    carries every consequence of the change with it.
     """
+
+    password = None
+    password1 = forms.CharField(
+        label="New password",
+        required=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+        help_text=(
+            "Leave both password boxes blank to keep the current password. "
+            "Filling them in replaces it and signs that member out "
+            "everywhere, including here if this is your own account."
+        ),
+    )
+    password2 = forms.CharField(
+        label="Confirm new password",
+        required=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
 
     class Meta:
         model = User
@@ -135,9 +179,26 @@ class UserAdmin(admin.ModelAdmin):
         "verification_status",
         "send_verification",
         "verification_tokens",
+        "password_hash",
+        "reset_tokens",
     ]
     fieldsets = [
-        (None, {"fields": ("localname", "password")}),
+        (
+            None,
+            {
+                "fields": (
+                    "localname",
+                    # The hash stays visible because it is the read the
+                    # previous page had — "is a password set, and which
+                    # one" — and removing it would take something away that
+                    # nobody asked to lose. It is not the write path, and
+                    # it cannot be: it is a display method, not a field.
+                    "password_hash",
+                    "password1",
+                    "password2",
+                )
+            },
+        ),
         ("Profile", {"fields": ("display_name", "email", "avatar")}),
         (
             "Email verification",
@@ -147,6 +208,17 @@ class UserAdmin(admin.ModelAdmin):
                     "send_verification",
                     "verification_tokens",
                 )
+            },
+        ),
+        (
+            "Password reset",
+            {
+                # Read-only, and deliberately placed right below the
+                # verification block rather than down by the password
+                # inputs: the question an admin brings here is usually
+                # "did the recovery mail go out and what happened to it",
+                # and that answer sits beside the other mail answer.
+                "fields": ("reset_tokens",)
             },
         ),
         (
@@ -252,6 +324,35 @@ class UserAdmin(admin.ModelAdmin):
         )
         super().save_model(request, obj, form, change)
         change_email(obj, submitted_email, changed_by=request.user)
+
+        # The password gets the same treatment as the address: the plain
+        # save never had it in its hands, and the submitted one arrives
+        # only through the single writer. ``AdminUserChangeForm`` drops the
+        # model-bound ``password`` field entirely, so ``form.save()`` has
+        # nothing to write to that column — which is what makes "no
+        # plaintext in the password column" a property of the code rather
+        # than of a disabled widget.
+        #
+        # Blank means no change, and that is checked here rather than by
+        # the writer, because "did the admin mean to rotate this
+        # credential?" is a question about this form, not about what a
+        # password is.
+        new_password = form.cleaned_data.get("password1") or ""
+        if new_password:
+            result = set_password(obj, new_password, changed_by=request.user)
+            self.message_user(
+                request,
+                "Password changed. Every session that account had is now "
+                "invalid, including your own if this is your own account — "
+                "sign in again to keep working there. "
+                + (
+                    "The member has been mailed a notice."
+                    if result["notified"]
+                    else "No notice mailed: this account has no address on file."
+                ),
+                messages.SUCCESS,
+            )
+
         if "_send_verification" in request.POST:
             self.send_verification_now(request, obj)
 
@@ -491,6 +592,81 @@ class UserAdmin(admin.ModelAdmin):
             return format_html(
                 '<span class="help-text">{}</span>',
                 "No verification mail has ever been sent to this account.",
+            )
+        rows = list(sends[:TOKEN_INLINE_LIMIT])
+        body = format_html_join(
+            "\n",
+            (
+                "<tr><td><code>{}…</code></td><td>{}</td><td>{}</td>"
+                "<td>{}</td><td>{}</td></tr>"
+            ),
+            (_token_cells(token) for token in rows),
+        )
+        more = (
+            ""
+            if total <= TOKEN_INLINE_LIMIT
+            else format_html(
+                '<br><span class="help-text">…and {} earlier send(s) not shown.</span>',
+                total - TOKEN_INLINE_LIMIT,
+            )
+        )
+        return format_html(
+            '<table class="verification-sends">\n'
+            "<thead><tr><th>Token</th><th>Minted</th><th>Send</th>"
+            "<th>Link</th><th>Requested from</th></tr></thead>\n"
+            "<tbody>\n{}\n</tbody>\n"
+            "</table>{}",
+            body,
+            more,
+        )
+
+    @admin.display(description="Current password hash")
+    def password_hash(self, obj):
+        """What is actually stored, shown the way the old field showed it.
+
+        Read-only, and present for one reason: the field §2G replaced was a
+        read-only hash display, and taking that read away was never asked
+        for. It is not the write path and cannot become one — it is a
+        display method, so there is no widget here whose value could be
+        tampered with and no way for this row to put anything into the
+        column.
+
+        Shown whole rather than truncated. It is already one-way, and an
+        admin who can reach this page can already set a new password
+        through the writer above, so nothing is disclosed here that the
+        page does not already grant the power to do.
+        """
+        if not obj.pk or not obj.password:
+            return format_html(
+                '<span class="help-text">{}</span>', "No password is set."
+            )
+        return format_html("<code>{}</code>", obj.password)
+
+    @admin.display(description="Password reset sends")
+    def reset_tokens(self, obj):
+        """Every reset link ever sent for this account, newest first.
+
+        The same read :attr:`verification_tokens` gives, on the other
+        table, because the same support question lands here: *did we send
+        one, did it fail, who asked and from where*. The two tables are
+        separate credentials and stay separate on the screen for the same
+        reason — an admin trying to work out what happened to an account
+        needs to be able to tell a verification link from a reset link at
+        a glance, not read a ``purpose`` column.
+
+        The code is truncated to the same eight characters, for the same
+        control that truncates the verification one: a full live token on a
+        screen is a credential the viewer could open and spend themselves.
+        Eight characters tell one send from another and cannot buy anything.
+        """
+        if obj.pk is None:
+            return ""
+        sends = PasswordResetToken.objects.filter(user=obj)
+        total = sends.count()
+        if not total:
+            return format_html(
+                '<span class="help-text">{}</span>',
+                "No password reset mail has ever been sent to this account.",
             )
         rows = list(sends[:TOKEN_INLINE_LIMIT])
         body = format_html_join(

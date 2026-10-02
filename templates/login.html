@@ -15,13 +15,17 @@
 Rendered off the form's own flag rather than by matching error text, so the
 message can be reworded without silently taking the link away. This block is
 the reason the custom login form exists: under R119 Django's stock "enter a
-correct username and password" sends a member looking for a password reset
-that does not exist yet (R121) instead of the resend route that does.
+correct username and password" would send an unverified member looking for
+a password reset when their password may be perfectly fine and the step
+actually missing is verification. The form knows which of the two it is and
+says so.
 {% endcomment %}
 <p>
   <a class="btn" href="{% url 'verify-resend' %}">Resend my verification link</a>
 </p>
 {% endif %}
+
+<p><a href="{% url 'password-reset' %}">Forgot your password?</a></p>
 
 {% if signup_open %}
 <p>New here? <a href="{% url 'signup' %}">Sign up</a>.</p>

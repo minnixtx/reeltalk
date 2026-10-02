@@ -239,3 +239,84 @@ class ProfileForm(forms.Form):
         help_text="Markdown. Links are kept only for the instance's allowed domains.",
     )
     avatar = forms.ImageField(required=False)
+
+
+class NewPasswordPairMixin:
+    """The validation behind any "type the new password twice" control.
+
+    Shared by the admin's user form and the self-service reset confirm
+    because the two must not disagree about what a usable password is, and
+    because the pair check — the thing that stops a typo locking somebody
+    out of their own account — is exactly the kind of rule that gets fixed
+    in one place and forgotten in the other.
+
+    Both fields treat an **empty value as "no change"**, which is what the
+    admin needs (edit a profile without re-typing a password) and is never
+    wrong for the reset flow either, because that flow's view requires the
+    fields and would have failed validation before this ran. The writer
+    downstream is the thing that decides whether an empty value is legal.
+    """
+
+    def clean_password1(self):
+        password = self.cleaned_data.get("password1") or ""
+        if not password:
+            return ""
+        try:
+            validate_password(password)
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.messages)
+        return password
+
+    @sensitive_variables("password1", "password2")
+    def clean(self):
+        cleaned = super().clean()
+        first = cleaned.get("password1") or ""
+        second = cleaned.get("password2") or ""
+        if first != second:
+            # Named on the confirmation field rather than as a non-field
+            # error, so it lands beside the box that is actually wrong
+            # instead of floating above the form.
+            self.add_error("password2", "The two passwords did not match.")
+        return cleaned
+
+
+class PasswordResetRequestForm(forms.Form):
+    """The logged-out "I forgot my password" form (2G).
+
+    Thin on purpose, for the same reason :class:`ResendVerificationForm`
+    is: it checks that something address-shaped was typed and nothing else.
+    **It must not report whether the address is registered, verified, or
+    refused** — not in an error, not in a delay, not in different copy.
+    Everything that knows any of that lives behind
+    :func:`reeltalk.social.password_reset.request_reset`, and the view
+    answers every outcome with the same sentence.
+    """
+
+    email = forms.EmailField(
+        label="Email address",
+        widget=forms.EmailInput(
+            attrs={"autofocus": True, "autocomplete": "email", "dir": "ltr"}
+        ),
+    )
+
+
+class PasswordResetConfirmForm(NewPasswordPairMixin, forms.Form):
+    """The new-password form opened from a reset link (2G).
+
+    A POST rather than a click-through: the person types a password, so
+    the credential that authorises the change arrives with the change
+    rather than sitting in a URL that a browser history, a proxy log or a
+    mail scanner has already seen. The link in the mail only *opens* this
+    page; spending it takes the form.
+    """
+
+    password1 = forms.CharField(
+        label="New password",
+        required=True,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+    password2 = forms.CharField(
+        label="Confirm new password",
+        required=True,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )

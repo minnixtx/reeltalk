@@ -12,6 +12,7 @@ from reeltalk.activitypub.identity import PROFILE_LOCALNAME_RE
 from reeltalk.core import admin_views as core_admin_views
 from reeltalk.social import views as social_views
 from reeltalk.social.forms import AdminVerificationLoginForm, VerificationAwareLoginForm
+from reeltalk.social.password_reset import RESET_PATH
 from reeltalk.social.verify import VERIFY_PATH
 
 # Minimal admin site branding (PLAN.md §3.7 v0.1 admin).
@@ -40,6 +41,11 @@ admin.site.login_form = AdminVerificationLoginForm
 # the link in the mail and the page behind it drifting apart: if they ever
 # disagree the link 404s loudly instead of quietly landing somewhere wrong.
 _VERIFY_PREFIX = re.escape(VERIFY_PATH.lstrip("/"))
+
+# Same treatment for the reset link (2G): the route is bound to
+# ``password_reset.RESET_PATH`` rather than to a re-typed string, so the
+# link in the mail and the page behind it cannot drift apart.
+_RESET_PREFIX = re.escape(RESET_PATH.lstrip("/"))
 
 urlpatterns = [
     path("", social_views.index, name="index"),
@@ -80,6 +86,24 @@ urlpatterns = [
         rf"^{_VERIFY_PREFIX}(?P<code>[A-Za-z0-9_-]{{8,64}})/$",
         social_views.verify_link,
         name="verify-link",
+    ),
+    # Password reset (2G). Same shape and the same reasons as the two above:
+    # the request page is a literal bound to ``RESET_PATH`` so the mail and
+    # the route cannot drift, and the confirm route takes only the charset
+    # ``SingleUseToken._fresh_code`` emits, so junk in the URL 404s at the
+    # router instead of reaching a database lookup.
+    #
+    # The literal sits first for the same reason ``resend`` does above — a
+    # stray word must never be swallowed as somebody's token.
+    path(
+        RESET_PATH.lstrip("/"),
+        social_views.password_reset_request,
+        name="password-reset",
+    ),
+    re_path(
+        rf"^{_RESET_PREFIX}(?P<code>[A-Za-z0-9_-]{{8,64}})/$",
+        social_views.password_reset_confirm,
+        name="password-reset-confirm",
     ),
     path("signup/", social_views.signup, name="signup"),
     path("setup/", social_views.setup, name="setup"),

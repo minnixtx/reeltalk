@@ -39,6 +39,7 @@ from reeltalk.social.backends import (
     EmailVerificationBackend,
 )
 from reeltalk.social.models import EmailVerificationToken, User
+from reeltalk.social.password_reset import RESET_PATH
 from reeltalk.social.verify import (
     RESEND_ADDRESS_COOLDOWN_MINUTES,
     RESEND_IP_LIMIT,
@@ -637,6 +638,13 @@ def test_the_named_exempt_routes_are_reachable_with_an_unverified_account(client
         "setup": reverse("setup"),
         "verify-resend": reverse("verify-resend"),
         "verify-link": f"{VERIFY_PATH}{token.code}/",
+        # 2G's two routes belong on this list for the same reason the
+        # resend route does: the person who needs them cannot sign in.
+        # A throwaway live code is used because the route takes one; the
+        # property under test is "not bounced to sign-in", not "the code
+        # was valid".
+        "password-reset": reverse("password-reset"),
+        "password-reset-confirm": f"{RESET_PATH}{'c' * 43}/",
     }
     # The list and the test must cover the same set, or the list can shrink
     # without anyone noticing.

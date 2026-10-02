@@ -22,14 +22,18 @@ from django_q.tasks import async_task
 
 from reeltalk.moderation.notify import console_backend_active
 
-from .models import EmailVerificationToken, User
+from .models import EmailVerificationToken, PasswordResetToken, User
 
 logger = logging.getLogger("reeltalk.social.verify")
 
 SEND_TOKEN_FUNC = "reeltalk.social.tasks.send_verification_token"
 SEND_NOTICE_FUNC = "reeltalk.social.tasks.send_address_change_notice"
+SEND_RESET_FUNC = "reeltalk.social.tasks.send_password_reset_token"
+SEND_PW_NOTICE_FUNC = "reeltalk.social.tasks.send_password_changed_notice"
 TOKEN_TASK_NAME = "email-verification"
 NOTICE_TASK_NAME = "email-changed-notice"
+RESET_TASK_NAME = "password-reset"
+PW_NOTICE_TASK_NAME = "password-changed-notice"
 
 
 def _one_line(exc: Exception) -> str:
@@ -55,6 +59,16 @@ def enqueue_verification_email(token_pk: int) -> str:
 def enqueue_address_change_notice(user_pk: int, old_email: str) -> str:
     """Put the R125 tamper notice on the cluster."""
     return async_task(SEND_NOTICE_FUNC, user_pk, old_email, task_name=NOTICE_TASK_NAME)
+
+
+def enqueue_password_reset_email(token_pk: int) -> str:
+    """Put one password reset send on the cluster; returns the task id."""
+    return async_task(SEND_RESET_FUNC, token_pk, task_name=RESET_TASK_NAME)
+
+
+def enqueue_password_changed_notice(user_pk: int) -> str:
+    """Put the 'your password was changed by someone else' notice on the cluster."""
+    return async_task(SEND_PW_NOTICE_FUNC, user_pk, task_name=PW_NOTICE_TASK_NAME)
 
 
 def send_verification_token(token_pk: int) -> dict:
@@ -172,3 +186,110 @@ def send_address_change_notice(user_pk: int, old_email: str) -> dict:
 
     logger.info("Address-change notice sent to %s for @%s.", old_email, user.localname)
     return {"sent": True, "email": old_email}
+
+
+def send_password_reset_token(token_pk: int) -> dict:
+    """Mail one password reset link and write the result onto its row.
+
+    Same contract as :func:`send_verification_token`, because the failure
+    it has to survive is the same one: a reset mail that vanishes is worse
+    than one that never existed, since the member is standing at a login
+    page that will not admit them and has no way to tell that a send was
+    even attempted. ``sent_at`` / ``send_error`` on the row are what the
+    admin reads to answer that, and both are written here rather than in
+    the request, which only knows it queued something.
+
+    Re-raised after recording, so a failure is a red ``Task`` row and a
+    logged cause rather than a green result that means nothing.
+    """
+    from .password_reset import build_reset_email
+
+    try:
+        token = PasswordResetToken.objects.select_related("user").get(pk=token_pk)
+    except PasswordResetToken.DoesNotExist:
+        logger.info(
+            "password reset email task dropped: token %s no longer exists", token_pk
+        )
+        return {"sent": False, "reason": "token-missing"}
+
+    if console_backend_active():
+        logger.warning(
+            "PASSWORD RESET EMAIL IS NOT BEING DELIVERED (token %s -> %s): "
+            "the mail backend prints to stdout. This message went nowhere, "
+            "and @%s cannot recover their account.",
+            token_pk,
+            token.email,
+            token.user.localname,
+        )
+
+    message = build_reset_email(token.user, token)
+    try:
+        message.send()
+    except Exception as exc:
+        line = _one_line(exc)
+        token.send_error = line
+        token.save(update_fields=["send_error"])
+        logger.error(
+            "Password reset email to %s for @%s FAILED: %s",
+            token.email,
+            token.user.localname,
+            line,
+        )
+        raise
+
+    token.sent_at = timezone.now()
+    token.save(update_fields=["sent_at"])
+    logger.info(
+        "Password reset email sent to %s for @%s.", token.email, token.user.localname
+    )
+    return {"sent": True, "email": token.email}
+
+
+def send_password_changed_notice(user_pk: int) -> dict:
+    """Mail the notice that someone else replaced this member's password.
+
+    **Log-only, exactly like the address-change notice.** The mail carries
+    no link and is not a credential, so there is no row of ours for its
+    outcome to live on. The accepted cost is the same one recorded for
+    R125's notice: if this send fails, nothing on an admin screen shows
+    it, and the only way to find out is to read the log — which is why the
+    line is written at WARNING rather than INFO. For a mail whose whole job
+    is telling a member that somebody else got into their account, a
+    silent failure is the worst available outcome, so it is made as loud
+    as a log line can be until there is an outbox table to put it on.
+    """
+    from .passwords import build_password_changed_email
+
+    try:
+        user = User.objects.get(pk=user_pk)
+    except User.DoesNotExist:
+        logger.warning(
+            "Password-changed notice not sent: account %s no longer exists.", user_pk
+        )
+        return {"sent": False, "reason": "user-missing"}
+
+    if console_backend_active():
+        logger.warning(
+            "PASSWORD-CHANGED NOTICE IS NOT BEING DELIVERED (@%s -> %s): "
+            "the mail backend prints to stdout. The member's only signal "
+            "that someone else changed their password went nowhere.",
+            user.localname,
+            user.email,
+        )
+
+    message = build_password_changed_email(user)
+    try:
+        message.send()
+    except Exception as exc:
+        logger.error(
+            "Password-changed notice to %s for @%s FAILED: %s",
+            user.email,
+            user.localname,
+            _one_line(exc),
+        )
+        raise
+
+    logger.info(
+        "Password-changed notice sent to %s for @%s.", user.email, user.localname
+    )
+    return {"sent": True, "email": user.email}
