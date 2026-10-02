@@ -10,6 +10,28 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
+- **Latest increment — credential-surface throttling — COMMITTED, gate-verified,
+  NOT deployed.** Sign-in, admin sign-in and signup are each throttled per
+  source address on a Postgres `CredentialAttempt` table
+  (`reeltalk/social/attempts.py`), mirroring the mail throttles so the
+  count is shared across every web process and survives a restart
+  (LocMemCache would reset on each deploy and disagree between workers).
+  Three separate budgets so none drains another; a correct login clears
+  its address's counter; a lock expires on the sliding window rather than
+  needing an admin to clear it — with one admin and no second admin, an
+  admin-cleared lock is a denial-of-service lever, so there is none here;
+  signup counts every attempt that reaches the name/email uniqueness
+  checks, bounding the account-existence oracle the necessary "name is
+  taken" disclosure creates; the reveal names the address and the wait,
+  never an account. Only a wrong password counts against the login/admin
+  budget (an unverified or suspended account got its password right, so
+  it is not a guess). Source is always `client_ip()`, never a raw header.
+- **Proven by mock only; not proven live.** `social.0019_credentialattempt`
+  is **pending** — not applied to the live DB because this increment is
+  not deployed. The signup half is not live-exercisable until
+  `signup_policy` is flipped to `OPEN`: this instance is invite-only, so
+  `/signup/` renders the closed page. Flag that in any live handoff rather
+  than reporting the throttle untested by accident.
 - **Live on `reeltalk.minnix.dev` and proven there:** everything through
   **§2G**, plus the R127/R128 client-address work. Deployed 2026-10-02;
   `social.0018_passwordresettoken` applied cleanly on the web container's
@@ -29,9 +51,11 @@ is history.**
   eviction (the only live warden session postdates the change; all the
   admin's sessions untouched). The record is the "Executed — §2G is DONE"
   section at the end of §2F, including the live-proof detail.
-- **Gate baseline: `2062 passed + 5 skipped`.** `ruff check`,
-  `ruff format --check` and `makemigrations --check` all clean. One new
-  migration shipped with this increment (`social 0018`), now applied.
+- **Gate baseline: `2086 passed + 5 skipped`.** `ruff check`,
+  `ruff format --check` and `makemigrations --check` all clean. The +24
+  over the prior 2062 is 21 new throttle tests plus 3 clean-room param
+  instances for the three new files (`attempts.py`, the `0019` migration,
+  and the throttle test file).
 - **Three rules bind anyone who touches §2G** (all in R130, none
   re-openable): session eviction is **Django's auth hash, not our code** —
   a test scans shipped code for `update_session_auth_hash` and fails on it,
