@@ -11,7 +11,7 @@ this file disagrees with this block, **this block is current and the other
 is history.**
 
 - **Latest increment — credential-surface throttling — COMMITTED, gate-verified,
-  NOT deployed.** Sign-in, admin sign-in and signup are each throttled per
+  DEPLOYED and live-proven.** Sign-in, admin sign-in and signup are each throttled per
   source address on a Postgres `CredentialAttempt` table
   (`reeltalk/social/attempts.py`), mirroring the mail throttles so the
   count is shared across every web process and survives a restart
@@ -26,12 +26,24 @@ is history.**
   never an account. Only a wrong password counts against the login/admin
   budget (an unverified or suspended account got its password right, so
   it is not a guess). Source is always `client_ip()`, never a raw header.
-- **Proven by mock only; not proven live.** `social.0019_credentialattempt`
-  is **pending** — not applied to the live DB because this increment is
-  not deployed. The signup half is not live-exercisable until
-  `signup_policy` is flipped to `OPEN`: this instance is invite-only, so
-  `/signup/` renders the closed page. Flag that in any live handoff rather
-  than reporting the throttle untested by accident.
+- **Signup throttle live-proven on `reeltalk.minnix.dev` 2026-10-02** after
+  the owner flipped `signup_policy` to `OPEN` and confirmed the instance is
+  throwaway test data. Over HTTPS through the real Cloudflare→NPM→container
+  chain with CSRF: 7 signup POSTs using the already-taken name `minnix` — so
+  no account is created and no verification mail is sent, yet each still
+  reaches the uniqueness check. Attempts 1–5 returned the normal "name is
+  already taken"; attempts 6–7 were blocked with **"Too many attempts from
+  this address. Try again in 60 minutes."** and rendered a fresh empty form,
+  so the "name is taken" oracle is closed once throttled. The DB shows
+  exactly 5 signup rows under one resolved `source_ip`, the block persists
+  on the 60-min sliding window, and that same address's **login and admin
+  budgets read unblocked** — the three budgets are separate live, not just in
+  the mock. `social.0019_credentialattempt` applied on the web container's
+  own `migrate`. **What is still mock-only:** the login/admin wrong-password
+  counting and correct-login-clears paths were not exercised with real bad
+  credentials against the live instance — the throttle mechanism they share
+  is the code the signup test just exercised, but a live wrong-password login
+  test remains open if the owner wants that half seen live too.
 - **Live on `reeltalk.minnix.dev` and proven there:** everything through
   **§2G**, plus the R127/R128 client-address work. Deployed 2026-10-02;
   `social.0018_passwordresettoken` applied cleanly on the web container's
