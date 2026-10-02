@@ -5571,11 +5571,28 @@ adds nine of them — = 2062. Skips unchanged at 5, which are the five
 whitelisted attribution docs and the guard itself; nothing new was
 whitelisted to make the count work. No pre-existing test changed state.
 
+**Deployed 2026-10-02.** All three images rebuilt (`docker compose build`,
+not `build web`), stack recreated, and the web container's own entrypoint
+applied `social.0018_passwordresettoken` cleanly. A fresh dump was taken
+first: **`reeltalk-20261002T181709Z.dump`** (737,310 bytes, 7 retained) is
+the rollback target for this schema change. Live checks: the reset route
+answers 200 on both the LAN and public https origins, the login page
+carries the new link, the page renders its static precondition copy, a POST
+for a nonexistent address returns the uniform answer and leaves **zero**
+reset tokens and **zero** queue entries, the worker has both new send tasks
+and the live budget reads 5 min/address and 25 per 5 min/IP,
+`check_client_ip` now exists and reports the operator-set trust list, and
+the published actor ID is still https with no `:3030`. The worker's empty
+log is normal, not a stalled queue: `qcluster` runs five processes in the
+image and `ps` is not installed, so a `grep qcluster` there measures
+nothing — read `/proc/*/cmdline` instead.
+
 **What is NOT done.** Live proof, and it is the owner's to drive as always:
 the reset flow end to end through real mail in a browser, the admin's new
-writable password field in a real browser, and the fact that neither is
-deployed. **`reeltalk.minnix.dev` has neither §2G nor the R127 `client_ip`
-fix running on it.** Both are committed and gate-verified only.
+writable password field in a real browser. **No live account's password was
+changed by the deploy or its checks** — the only POST made was for an
+address that does not exist, so nothing was reset and there is no credential
+to hand over.
 
 ## 3. Host facts (this box)
 
