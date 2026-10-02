@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-01
+**Last updated:** 2026-10-02
 
 ---
 
@@ -10,58 +10,41 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **Live on `reeltalk.minnix.dev`:** everything through **§2F**. Email
-  verification is deployed and fully live-proven; sign-in is gated on a
-  verified address (R119); the admin can read the verified state and
-  trigger the mail but can never attest it (R123).
+- **Live on `reeltalk.minnix.dev`:** everything through **§2F** except the
+  R127/R128 client-address work. Email verification is deployed and
+  fully live-proven; sign-in is gated on a verified address (R119); the
+  admin can read the verified state and trigger the mail but can never
+  attest it (R123).
+- **Committed and gate-verified, NOT deployed: §2G (password reset) and
+  R127/R128 (`client_ip`).** Nobody has been asked to deploy either. A
+  deploy is a rebuild + restart **plus `migrate`** — `social 0018` adds
+  the `PasswordResetToken` table, so `--no-migrate` is not an option here.
+  Until then the instance has no reset routes at all and still resolves
+  client addresses by the old leftmost rule. Check the live state with
+  `git log -n 4 --oneline` against what the web container is running.
 - **§2F is COMPLETE.** Nothing inside it is outstanding — do not re-run its
   proofs. The spec is §2F; the outcome is its "Executed" records and the
   four "Live proof" sections at its end.
-- **Done since the last block, NOT yet deployed:** the `client_ip()` fix
-  (R127/R128) is committed and gate-verified but is **not running on
-  `reeltalk.minnix.dev`** — deploying it is a rebuild + restart, and nobody
-  has been asked to do that. The instance still resolves client addresses by
-  the old leftmost rule until it is redeployed. Check with
-  `git log -n 3 --oneline` against what the web container is running.
-- **Gate baseline: `2007 passed + 5 skipped`.** `ruff check`,
-  `ruff format --check` and `makemigrations --check` all clean; **no new
-  migration** in this increment.
+- **§2G is COMPLETE in code and gate-verified; its live proof is
+  outstanding, and it is the owner's to drive.** What has not been done in
+  a real browser: the reset flow end to end through real mail, and the
+  admin's newly writable password field. The record is the "Executed — §2G
+  is DONE" section at the end of §2F.
+- **Gate baseline: `2062 passed + 5 skipped`.** `ruff check`,
+  `ruff format --check` and `makemigrations --check` all clean. One new
+  migration ships with this increment (`social 0018`).
+- **Three rules bind anyone who touches §2G** (all in R130, none
+  re-openable): session eviction is **Django's auth hash, not our code** —
+  a test scans shipped code for `update_session_auth_hash` and fails on it,
+  because that function exists to keep a session alive across a password
+  change, which is the exception "no exception" refuses; a spent reset
+  token **never** writes verified state (R123's single writer); and the
+  admin's password input goes through `set_password()`, never a bound
+  `password` form field.
 - **git:** read the current state with `git status` and `git log -n 1
   --oneline` rather than trusting anything written here. Anything a single
   command answers for free is a pointer in this block, not a value; only a
   literal hash goes stale faster than this block gets rewritten.
-- **Resolved 2026-10-01:** the router does **not** SNAT inbound **WAN**
-  traffic. NPM's access log for proxy host 76 shows real public client
-  addresses arriving intact; the `192.168.1.1` bucket is LAN hairpin only.
-- **The `client_ip()` forgery is closed (R127).** The leftmost-entry rule is
-  gone; the app now walks `X-Forwarded-For` right-to-left over trusted
-  hops, `TRUSTED_PROXIES` defaults to the private ranges so a compose
-  deploy needs no config, and the app announces a collapsed setup from
-  sampled traffic rather than leaving it undiscoverable. Record: "Executed:
-  the right-to-left walk" at the end of §2F.
-- **Open next: §2G, self-service password reset.** It does **not exist
-  anywhere** in the codebase, though `PLAN.md` §3.7 marks it
-  `[v0.1 core auth]`. Recovery today means `manage.py changepassword` or a
-  shell. It is cheap now because 2F-3 already built the token, the send path
-  and the throttle it needs, and because the client IP it will rate-limit on
-  is now correct (R127). **Three of the four owner decisions are settled —
-  recorded as R129, do not re-ask them:** a completed reset kills the
-  account's existing sessions; reset gets its **own** budget shaped like
-  resend's (`RESET_ADDRESS_COOLDOWN` / `RESET_IP_LIMIT`, never `RESEND_*`,
-  so the unauthenticated resend route cannot be used to starve recovery);
-  and **every** password change kills sessions — admin-set or self-service,
-  no exception, so the eviction goes in the password-write path rather than
-  the reset view. **One question is REOPENED and must be asked before any
-  §2G code is written** (see R129's correction): the admin's `password`
-  field is `ReadOnlyPasswordHashField`, `disabled=True`, so an admin cannot
-  set another user's password through the admin today. "Keep the raw
-  password field" was answered against a writable input that does not
-  exist — does the owner want the read-only display kept as-is, or the field
-  made actually writable? **Also unresolved and worth surfacing early:**
-  Django's DB session backend cannot query sessions by user, so "kill the
-  account's sessions" needs a chosen mechanism (a per-user
-  `password_updated_at` checked at auth time, versus decoding every session
-  row) — decide it before building, not after.
 - **Parked:** the M6 grindhouse artwork polish pass, at R73.
 
 ### How to read the project's docs
@@ -72,7 +55,7 @@ is history.**
 | Product contract — domain model, watch state, TMDB, federation surface, deployment shape | `PLAN.md` §3 |
 | **D-series** — the original product decisions (D1–D17) | `PLAN.md` §2 |
 | License audit | `PLAN.md` §4 |
-| **R-series** — rewrite-era decisions (R1–R129) | `PROGRESS.md` §4 |
+| **R-series** — rewrite-era decisions (R1–R130) | `PROGRESS.md` §4 |
 | What was actually built, with commit hashes | `PROGRESS.md` §2 |
 | Host and deploy facts for this box | `PROGRESS.md` §3 |
 | What is live right now | the block above |
@@ -5426,6 +5409,173 @@ already formatted*; `makemigrations --check` — *No changes detected*, and
 `test_clean_room` instance for the new `check_client_ip.py` file = 2007.
 Skips unchanged at 5. No pre-existing test changed state.
 
+### Executed — §2G is DONE, gate-verified; recovery by link, and the admin can finally set a credential (2026-10-02)
+
+**Asked before building, the way R129 required.** R129's correction had
+reopened one question and the build surfaced two more. All three went to
+the owner in plain prose before a line of code was written, and all three
+were answered:
+
+1. **The admin's password field — make it writable.** It was
+   `ReadOnlyPasswordHashField` with `disabled=True`: a display, not an
+   input, whose `clean_password` handed back the stored hash no matter what
+   was typed. An admin could not give anybody a new password from the
+   browser, and the only path was a shell on the server. The owner took the
+   writable option, because the one recovery case self-service reset
+   cannot reach — a member who has lost the password *and* cannot use the
+   address on file — otherwise had no path but the shell.
+2. **The eviction mechanism.** Chosen over a session-table scan: a
+   per-user `password_updated_at` stamped on every write and checked at
+   auth time.
+3. **Whether an unverified account may reset at all.** The answer was
+   firmer than either option offered: *"A user must have a verified
+   address before they are able to do anything at all on the site, this
+   includes resetting their password. They should not even be able to
+   login without verifying their email address first."*
+
+**Then answer (2) turned out to be unnecessary, and stopping for that was
+worth the round trip.** Checked in the container on Django 6.1.1:
+`get_user()` — which runs on every request, the same seam R119's gate
+bites through — compares the `_auth_user_hash` stored in the session
+against an HMAC of the user's **current** password, and flushes the
+session when they stop matching. A scratch test against this app's real
+stack (custom backend, custom middleware) proved it: a password change
+killed that member's live session on its next click, a second member
+logged in at the same time was untouched, and `django_session` really
+does hold only `session_key / session_data / expire_date` — the premise
+that there is nothing to query by was correct, and irrelevant, because
+nothing needs to be queried. **Every password change already kills that
+account's sessions, with no column and no scan**, and with exactly the
+properties the column was picked for: O(1) per request, survives
+restarts, shared across every web process, no race window. The owner was
+told before the build and chose **rely on the auth hash** — no migration
+for eviction, and the behaviour pinned by tests rather than trusted.
+
+What that leaves is a prohibition rather than an implementation, and it is
+tested as one. **Nothing in the shipped code may call
+`update_session_auth_hash`** — a function whose entire purpose is keeping
+the acting session alive through a password change, which is precisely
+the exception R129 rules out. A scan over `reeltalk/**/*.py` (excluding
+migrations and tests) asserts the call is absent, matched as a call or an
+import rather than as a bare mention, because `passwords.py`'s own
+docstring names the function in order to forbid it and a needle that
+matched prose would be a test that could only be satisfied by deleting
+the explanation.
+
+**The token: same machinery, a different credential.** R129 says reuse
+§2F's token layer rather than invent a second token, and the safe reading
+of that was tested against the alternative rather than assumed. One table
+with a `purpose` column would make every **verification** link — minted at
+signup to an address that is *not yet proven*, opened by mail clients and
+link scanners nobody controls — also a credential that sets a password,
+with a `purpose` check at every consume as the only thing between a
+forwarded email and a takeover. So `SingleUseToken` is a new abstract base
+holding the mechanics once (the code, the clock, `live()`, `mint()` with
+its supersede, `lock_live()` across the row lock, the derived `link_state`
+and `send_state`, the refusal copy), and `PasswordResetToken` is a second
+concrete table beside `EmailVerificationToken` with its own TTL, its own
+route, and its own answer to what spending it does. The refactor is
+provably inert on the deployed table: `makemigrations` emitted exactly one
+operation, `+ Create model PasswordResetToken`, and no change to the
+existing one.
+
+**What was built.**
+
+- `reeltalk/social/passwords.py` — **the only writer of a password on
+  this instance.** Same discipline as `change_email`: the consequence of
+  the write lives inside the write. Validates against the instance policy,
+  hashes, logs, and mails the member a notice whenever the change was not
+  self-made — because silently replacing somebody's password is the
+  obvious first move for an attacker holding admin, and it is the same
+  threat R125 covers one field over. `manage.py changepassword` still
+  writes directly and deliberately skips the notice: a command the owner
+  ran themselves is not the event the notice describes, and the eviction
+  reaches it anyway because that hangs off the stored hash, not off here.
+- `reeltalk/social/password_reset.py` — the flow, on **its own budget**:
+  `RESET_ADDRESS_COOLDOWN_MINUTES` (5) and `RESET_IP_LIMIT` (25),
+  mirroring R122's shape and sharing no counter with it.
+- `PasswordResetToken` + migration `social 0018`, TTL 24h — half
+  verification's, because a leaked reset link hands over an account
+  outright rather than merely proving an address.
+- Two routes on `RESET_PATH`, both added to `GATED_EXEMPT_URLS`: the
+  logged-out request page and the confirm page. **GET opens the form, only
+  POST spends the link** — the credential in the mail has already been
+  copied through a mail server, a mail client and possibly a scanner, and
+  on its own it unlocks a form rather than setting a password.
+- The admin's change form: `password = None` drops the inherited
+  read-only field, two unbound `password1`/`password2` inputs replace it,
+  and `save_model` routes a non-empty submission through
+  `set_password()`. The plain save never has the column in its hands, so
+  "no plaintext in the password column" is a property of the code rather
+  than of a disabled widget. The old read-only hash display is kept as
+  `password_hash` because taking it away was never asked for, and a
+  `reset_tokens` ledger sits beside the verification one.
+- Four templates, a "Forgot your password?" link on the login page, and
+  the login page's stale comment corrected — it had been telling readers a
+  password reset did not exist.
+
+**The copy that keeps the uniform answer honest.** The owner's rule means
+an unverified account gets no reset link, and the page must not say a
+link is coming when none is. Telling only the affected addresses would
+make the form a three-way oracle over which addresses are registered,
+registered-but-unverified, or unknown. So the page states the
+precondition to **every** visitor before anyone types — an account needs
+a verified address before it can do anything here, and here is the
+verification route — and the post-submit answer is one sentence that
+varies for nobody and promises nothing a refused address would not get.
+The cost is that a verified member reads a line they do not need, which
+is a much smaller price than the alternative.
+
+**No auto-login after a reset.** The flow stays logged-out end to end so
+that a session on this instance is only ever created by the login form,
+and the eviction rule needs no carve-out for "except the one that just
+did the resetting". The member types the new password once more. And
+because "no exception" means no exception, **an admin who changes their
+own password through the admin is signed out too** — pinned as a test so
+it reads as the rule rather than as a bug someone files next week.
+
+**Non-vacuity: seven mutations, all RED.** Unverified-can-reset,
+address-binding-dropped, link-never-marked-spent, reset-borrows-the-resend
+-budget, admin-input-ignored, self-change-also-notifies,
+password-never-written. The first pass caught one of the seven still green
+— `test_a_self_change_queues_no_notice` was asserting on an empty queue
+that its own `on_commit` hook had never been allowed to populate, so it
+could not have failed. Fixed by wrapping the write in
+`captureOnCommitCallbacks`, and it now goes red as it should.
+
+**Two tests worth naming, because they are the ones that would otherwise be
+lost.** `test_a_full_resend_budget_does_not_starve_password_recovery`
+runs R129's availability attack against the code — fills the verification
+resend budget until that route refuses, then asks for a reset from the
+same address and the same source and requires it to succeed — with the
+mirror test in the other direction. Both needed a helper the first attempt
+did not have: `member()` reaches the verified state the only honest way,
+by minting and spending a real token, and that mint leaves a row inside
+the per-address cooldown the moment the account exists, so every resend
+was being refused for a reason that had nothing to do with what was being
+tested. And `test_a_reset_never_verifies_an_address` mints a reset token
+directly onto an **unverified** account — a state no request path can
+produce, precisely because of the owner's rule — to ask the question that
+actually matters: does spending this credential touch the verified flag?
+It must not, and R123's single writer stays single.
+
+**Gate** (all images rebuilt, fresh `docker compose run --rm web`):
+`ruff check` — *All checks passed!*; `ruff format --check` — *148 files
+already formatted*; `makemigrations --check` — *No changes detected*
+beyond the one migration this increment ships; pytest **2062 passed + 5
+skipped in 1501.37s**. Baseline reconciled exactly: 2007 + 46 new test
+functions in `test_password_reset.py` + 9 `test_clean_room` instances —
+that guard is parametrized over *every* project file, and this increment
+adds nine of them — = 2062. Skips unchanged at 5, which are the five
+whitelisted attribution docs and the guard itself; nothing new was
+whitelisted to make the count work. No pre-existing test changed state.
+
+**What is NOT done.** Live proof, and it is the owner's to drive as always:
+the reset flow end to end through real mail in a browser, the admin's new
+writable password field in a real browser, and the fact that neither is
+deployed. **`reeltalk.minnix.dev` has neither §2G nor the R127 `client_ip`
+fix running on it.** Both are committed and gate-verified only.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -5730,3 +5880,5 @@ not an optimisation.
 - **R128 — The app explains a bad proxy setup from traffic, not from settings; the forwarded chain is not persisted (owner decision 2026-10-01).** **Why not a startup check, which is what the spec asked for:** the failure a private-range default cannot see is an unconfigured CDN, and that is invisible without traffic — the settings are byte-identical whether or not a CDN sits upstream. A startup check can only assert what the config already says. So the middleware samples the first 50 proxied requests and warns **once** when not one of them resolved to a distinct client, with two branches because the faults need different remedies: resolved == the immediate peer means the proxy is forwarding nothing; resolved ≠ peer means something upstream is replacing it, which is usually a CDN. Direct (untrusted-peer) traffic is never sampled, because one address there genuinely means one user and warning would train deployers to ignore the only warning that matters. The message names its own false positive rather than asserting a fault. **Why the app must explain itself at all:** a non-technical deployer has to find out something is wrong in plain language at 1am, not on a forum. `manage.py check_client_ip` prints the effective config (raw, parsed, shipped-default or overridden) and the `SECURE_PROXY_SSL_HEADER` that derives from it, walks a `--peer`/`--xff` chain hop by hop with `trusted`/`client`/`unparseable` on each entry so a chain copied from a proxy access log can be checked without a running instance, and summarises the `request_ip` values on recent verification tokens — the same rows `ip_budget_spent` counts — with a verdict separating *many addresses* from *one* from *no source recorded at all*. **The trade the owner took: no stored chain.** The spec asked for the full forwarded chain per recent request; nothing in the schema holds one, and adding `forwarded_for` to `EmailVerificationToken` meant a migration plus threading a second parameter through `send_verification_email` and its six call sites — into the write path §2F had just finished proving. The resolved-IP distribution already surfaces both failure modes the diagnostic exists for, and `--xff` covers the human debugging case. **How to apply:** keep the diagnostic's data source read-only — settings plus one existing table. If a real deploy later needs stored chains, the field is a cheap addition to a table that already records one address per send; do not pre-emptively widen the verification write path for a hypothetical.
 
 - **R129 — Self-service password reset (§2G): every password change kills sessions, the admin keeps its raw password field, and reset gets its own throttle shaped like resend's (owner decisions 2026-10-01, taken before §2G starts so none of them get re-litigated mid-build).** Four answers, all settled up front. **(1) A completed reset kills the account's existing sessions.** A reset that leaves sessions alive means the thing a member is most likely trying to escape — someone else in their account — survives the reset; recovery that does not evict is half a fix. **(2) The admin keeps a raw password field on the user form.** **CORRECTION, verified in the container 2026-10-02 — the premise of this answer was wrong, and what it means is still open.** The `password` entry in `UserAdmin.fieldsets` renders as Django's `ReadOnlyPasswordHashField` with `disabled=True`: `AdminUserChangeForm` extends `UserChangeForm`, which declares it that way and whose `clean_password` returns the stored value regardless of what is submitted. **An admin therefore cannot set another user's password through the admin today at all** — the only paths are `manage.py changepassword` or a shell. So "keep the raw password field" was answered against a description implying a writable input that does not exist. **What it means needs the owner before §2G builds on it:** keep the read-only hash display exactly as it is (and let §2G's self-service flow be the only member-facing reset), or make the field actually writable so the admin can set a credential. What IS settled and must not be re-litigated either way: **this is not in tension with R123.** R123 forbids the admin *attesting verification* — a claim about a fact the member must establish. Setting a credential is a different axis entirely. **(3) Reset gets its own budget — `RESET_ADDRESS_COOLDOWN` and `RESET_IP_LIMIT` — mirroring R122's resend shape (5-minute per-address cooldown, 25 per 5 minutes per source) but with separate counters, deliberately NOT shared.** The reason for separate counters is an availability attack: if the budget is shared, the unauthenticated resend route becomes a denial-of-service against password recovery — spam resend until the victim's reset is refused. Same numbers keeps it explainable; separate counters stop the two routes starving each other. **(4) Every password change kills sessions — admin-set or self-service, no exception.** Django sessions carry the auth hash, so a session left running after an admin rotation survives the very action taken to lock it out. One rule with no exception is also one rule nobody has to remember. **Accepted cost, stated plainly:** the admin's raw password field is now a kick-out action, so an admin rotating a credential should expect to log that member back in. **How to apply:** put the eviction in the **password-write path**, not in the reset view, so the admin's field and the self-service flow cannot drift apart — one writer, one consequence. Do not reuse `RESEND_*` for reset. Reset stays a separate feature from verification per R121 and reuses §2F's token layer (`mint`/supersede/`consume`) rather than inventing a second token. **This increment was only made safe to throttle by R127:** a per-source reset budget keyed on a forgeable client IP is worse than no budget, which is exactly why reset was sequenced after the `client_ip()` fix.
+
+- **R130 — §2G built: the admin's password field is writable, session eviction is Django's auth hash and not our code, an unverified account cannot reset at all, and a reset credential is its own table on shared abstract mechanics (owner decisions 2026-10-02, taken before the code was written).** Six answers, and the second one overturned how the fourth was going to be built. **(1) The admin's password field is now writable, which closes R129's reopened question.** `AdminUserChangeForm` sets `password = None` to drop the inherited `ReadOnlyPasswordHashField` and replaces it with unbound `password1`/`password2` inputs routed through `set_password()` in `save_model`; the old hash display survives as a separate read-only `password_hash`. **Why the owner took it:** the recovery case self-service reset cannot reach is a member who has lost the password *and* cannot use the address on file, and after decision (3) below that member has no self-service path whatsoever — so if the admin could not set a credential either, the only recovery was a shell on the server. **These two decisions are load-bearing on each other; do not undo one and keep the other.** **How to apply:** never re-bind `password` to a form field. The plain model save must never have the password column in its hands, which is what makes "no plaintext in the password column" a property of the code rather than of a disabled widget. **(2) Session eviction is already provided by Django and needs no code from us — and the standing rule is now a prohibition, not an implementation.** R129's premise ("Django's DB session backend cannot query sessions by user") is true and irrelevant: `get_user()` runs on every request and compares the session's `_auth_user_hash` against an HMAC of the user's *current* password, flushing the session on mismatch. Proven in this app's own stack before the build. The owner chose **rely on the auth hash** over a `password_updated_at` column, so there is no eviction migration and no per-request scan. **How to apply:** the invariant is protected by forbidding `update_session_auth_hash` in shipped code — a test scans `reeltalk/**/*.py` (excluding migrations and tests) for it as a call or an import. That function exists precisely to keep a session alive across a password change, which is the exception R129(4) refuses. If anyone adds it "to be kind" after a reset, the rule is silently gone. If anyone later adds a `password_updated_at` column, know it is redundant for eviction; the auth hash already does the job, O(1), across processes, surviving restarts. **(3) An account must have a verified address before it can do anything at all, including resetting its password — the owner's rule, verbatim: "A user must have a verified address before they are able to do anything at all on the site, this includes resetting their password. They should not even be able to login without verifying their email address first."** So `request_reset` refuses unverified accounts, and this is a deliberate security narrowing: the reset link is only ever mailed to an address we have already proven the member controls, which removes the worst case of a reset link landing in a stranger's inbox. **What it costs, named:** a member stuck at unverified and locked out of the password has exactly one door, the admin — which is why (1) had to land in the same increment. **(4) The reset credential is its own concrete table on a shared abstract base — not one table with a `purpose` column.** `SingleUseToken` (abstract) holds the mechanics once: code, clock, `live()`, `mint()` with supersede, `lock_live()`, the derived `link_state`/`send_state`, the refusal copy. `PasswordResetToken` and `EmailVerificationToken` are siblings with their own TTL, route, and meaning. **Why not a shared table:** a `purpose` column would make every verification link — minted to an address *not yet proven*, opened by mail clients and link scanners nobody controls — also a credential that sets a password, with only a `purpose` check at each consume between a forwarded email and a takeover. Two tables make the confusion structurally impossible rather than checked. The refactor is provably inert on the deployed verification table: `makemigrations` emitted only `+ Create model PasswordResetToken`. **How to apply:** a third single-use credential extends `SingleUseToken`; never widen a verification token into a password-setting credential. **(5) No auto-login after a reset.** The flow stays logged-out end to end, so a session on this instance is only ever created by the login form and the eviction rule needs no carve-out for "except the one that just did the resetting". **(6) An admin who changes their own password through the admin is signed out too** — accepted, and pinned as a test so it reads as the rule rather than as a bug. **"Every password change kills sessions" means no exception, including the actor's own.** **Copy rule that follows from (3):** the reset page states the verified-address precondition **statically, to every visitor**, and the post-submit answer is one uniform sentence that promises nothing. Making the copy conditional on the account's state would turn the form into a three-way oracle over registered / registered-but-unverified / unknown, which is a worse leak than a verified member reading one line they do not need.
