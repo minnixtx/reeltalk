@@ -3,6 +3,16 @@
 
 {% block title %}{{ site.name }}{% endblock %}
 {% block main_class %} wide-main{% endblock %}
+{% comment %}
+R131: the footer lives at the foot of the rail instead, so the wide band is
+suppressed here. A footer in the document flow would sit below the end of a
+feed the rail no longer bounds — you would have to scroll past the whole feed
+to reach it while the rail's own bottom stayed pinned off-screen. Home owns
+the placement; the body it draws is the same partial every other page uses.
+A comment BLOCK and not the hash form, because a hash comment has to close on
+the line it opens — the trap the row comment below records.
+{% endcomment %}
+{% block site_footer %}{% endblock %}
 
 {% block content %}
 {# M6 artwork C (R64): 2-pane home — feed left, ticket-stub rail right. #}
@@ -148,6 +158,16 @@
         <p class="muted">Genres appear once films start getting reviews.</p>
       {% endif %}
     </section>
+
+    {% comment %}
+    R131: the footer's second home — same partial as every other page, the
+    `site-footer--rail` modifier restacking it for the 22rem column. It rides
+    inside the rail's own scroll, so it is reachable by scrolling the rail to
+    its bottom without leaving the feed.
+    {% endcomment %}
+    <footer class="site-footer site-footer--rail">
+      {% include "_footer.html" %}
+    </footer>
   </aside>
 </div>
 {% endblock %}

@@ -1,0 +1,50 @@
+  {% comment %}
+  Owner pass 2026-09-19: wordmark + tagline left, wayfinding center, neon
+  sign-off right.
+
+  Extracted out of base.html for R131 so the two placements share one body
+  and cannot drift. The footer wrapper stays at each call site, because the
+  wrapper is what carries the class: plain `site-footer` for the wide band
+  under the document, `site-footer site-footer--rail` for the copy stacked at
+  the foot of the home rail. base.html renders this inside its own wrapper
+  unless a page suppresses that block — home.html does, because a footer in
+  the document flow would sit below the fold of a feed that never ends.
+  Everything here is placement-neutral: the wide three-zone band and the
+  stacked rail variant are both driven from the stylesheet, off the wrapper
+  class. Nothing in this file knows which one it is in.
+
+  A comment BLOCK and not the hash form, because a hash comment has to close
+  on the line it opens: a multi-line one is not a comment at all and renders
+  as page text. Same trap §2H records for the row comment in home.html — here
+  it leaked a literal tag into the footer and broke the page.
+  {% endcomment %}
+  <div class="container">
+    <div class="footer-brand">
+      <span class="footer-wordmark">ReelTalk</span>
+      <span class="footer-tagline">A Federated Home For Film Fans</span>
+    </div>
+    <nav class="footer-links" aria-label="About ReelTalk">
+      <a href="{% url 'welcome' %}">Getting Started</a>
+      <span class="footer-sep" aria-hidden="true">|</span>
+      <a href="{% url 'about' %}">About This Site</a>
+      <span class="footer-sep" aria-hidden="true">|</span>
+      <a href="https://github.com/minnixtx/reeltalk" target="_blank" rel="noopener">Code</a>
+    </nav>
+    <div class="footer-signoff">
+      <span class="footer-neon">Keep Watching.</span>
+      {# Decorative film reel, drawn here so the identity stays original art. #}
+      <svg class="footer-reel" viewBox="0 0 44 44" aria-hidden="true" focusable="false">
+        <circle cx="21" cy="20" r="15.5" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <circle cx="21" cy="20" r="3.4" fill="none" stroke="currentColor" stroke-width="2"/>
+        <g fill="currentColor">
+          <circle cx="21" cy="10.6" r="3.1"/>
+          <circle cx="29.14" cy="15.3" r="3.1"/>
+          <circle cx="29.14" cy="24.7" r="3.1"/>
+          <circle cx="21" cy="29.4" r="3.1"/>
+          <circle cx="12.86" cy="24.7" r="3.1"/>
+          <circle cx="12.86" cy="15.3" r="3.1"/>
+        </g>
+        <path d="M25 39.5c5 1.6 10 1 14-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </div>
+  </div>

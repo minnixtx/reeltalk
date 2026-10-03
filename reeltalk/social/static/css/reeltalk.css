@@ -1363,6 +1363,101 @@ button:disabled {
 .rail {
   display: grid;
   gap: 1.5rem;
+  /* R131: the rail scrolls on its own. The height cap is what makes sticky a
+     fix rather than a bug — sticky with no `max-height` pins the rail's top and
+     leaves its bottom 270-450px below the fold forever, which is exactly where
+     the footer now lives. `overscroll-behavior: contain` stops the rail hitting
+     its end and chaining the scroll into the document, which would yank the
+     feed sideways mid-read. Needs `.home-grid`'s `align-items: start`: a
+     stretched grid item has nowhere to travel and sticky does nothing. */
+  position: sticky;
+  top: 0;
+  max-height: 100vh;
+  overflow-y: auto;
+  /* Required once the rail scrolls: with one axis non-visible, `visible` on the
+     other is not allowed and computes to `auto`, and the rotated rail banners
+     overhang their column by ~1px on each side — enough to raise a horizontal
+     scrollbar inside the rail. Hidden clips that overhang, which the rotation
+     makes invisible anyway. */
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  /* Mastodon's thin themed scrollbar (copied outright, per R131). The thumb is
+     --line (90,67,44) at .55 and the track --black (9,8,7) at .35, so on this
+     palette it reads as the panel's own edge rather than as a second scrollbar
+     competing with the feed's. */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(90, 67, 44, 0.55) rgba(9, 8, 7, 0.35);
+}
+
+/* WebKit/Blink ignores scrollbar-color and needs its own set. 8px, same two
+   colours, brightening while the pointer is over the rail so the control is
+   there when you are using it and quiet when you are not. */
+.rail::-webkit-scrollbar {
+  width: 8px;
+}
+
+.rail::-webkit-scrollbar-track {
+  background: rgba(9, 8, 7, 0.35);
+}
+
+.rail::-webkit-scrollbar-thumb {
+  background: rgba(90, 67, 44, 0.55);
+  border-radius: 4px;
+}
+
+.rail:hover::-webkit-scrollbar-thumb {
+  background: rgba(90, 67, 44, 0.85);
+}
+
+/* The footer's second home (R131): the same partial the wide band uses,
+   restacked for the 22rem column. One zone per row, each centred, instead of
+   three zones spread across 72rem. The wrapper class is the only difference at
+   the call site — which is the point: one body, two placements. Values are the
+   ones the owner approved in the browser prototype, including the lighter top
+   border: inside the rail the footer follows the genres panel, so a 3px seam
+   reads as a second band boundary. */
+.site-footer--rail {
+  margin-top: 1.25rem;
+  border-top-width: 2px;
+}
+
+.site-footer--rail .container {
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
+  padding-top: 1.1rem;
+  padding-bottom: 1.2rem;
+}
+
+.site-footer--rail .footer-signoff {
+  justify-content: center;
+}
+
+/* The brand block centres on the tagline, not on itself. The single auto column
+   is sized by the tagline (the wider line) and centred; the wordmark is placed
+   at that column's left edge, so REELTALK's left edge meets the beginning of
+   the phrase instead of the pair floating as one shrink-wrapped box with dead
+   space after the tagline. Live dependency, not a coincidence: it holds while
+   the tagline is wider than the wordmark. Shorten the tagline below the
+   wordmark's width and the column sizes to the wordmark instead, the tagline
+   centres inside it, and the two left edges stop meeting. */
+.rail .footer-brand {
+  display: grid;
+  justify-content: center;
+}
+
+.rail .footer-wordmark {
+  grid-row: 1;
+  grid-column: 1;
+  justify-self: start;
+}
+
+.rail .footer-tagline {
+  grid-row: 2;
+  grid-column: 1;
+  justify-self: center;
 }
 
 /* Pane heading with the red hairline running out toward the rail. */
@@ -1530,6 +1625,15 @@ a.genre-pill:hover {
 
   .rail {
     grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    /* Below the stack point the rail falls in under the feed and goes back to
+       ordinary document flow — the narrow-layout mapping §2I records for
+       Mastodon (`layout-single-column { height: auto }`). A viewport-capped
+       sticky scroller under a long feed would hide the footer behind its own
+       scrollbar and make the reader hunt for it. */
+    position: static;
+    max-height: none;
+    overflow: visible;
+    overscroll-behavior: auto;
   }
 }
 
