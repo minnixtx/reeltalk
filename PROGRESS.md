@@ -10,24 +10,102 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **Next planned work: §2I — endless scroll on the home feed, and the
-  footer in the right rail. ALL EIGHT DECISIONS SETTLED by the owner
-  2026-10-03 (R131 + R132); nothing in it is built yet.** Recorded there:
-  the owner's ask verbatim, the finding that Mastodon's columns are
-  independent scroll containers rather than `position: sticky` (so it has
-  the same second scroll container we would, and only shows one scrollbar
-  because the other column is short), the live measurements the shape rests
-  on, **R131** (rail scrolls on its own with a thin themed scrollbar,
-  trending stays at 8 films, footer brand block centred on the tagline),
-  and **R132** (page the already-computed list rather than in SQL, 20 rows
-  per page, 300-row DOM cap with the "Older" link always remaining, no-JS
-  gets a real paged link, scrolling pushes no URLs, home-only scope,
-  increments 2 and 3 deployed back-to-back). **Nothing is open — build to
-  the record and do not re-ask.** Increment 1 is the next thing to build:
-  the footer moves into the rail, CSS and templates only, no JS and no
-  migration.
-- **Latest increment — the whole feed row opens its post — COMMITTED,
-  gate-verified, DEPLOYED and live-proven on `reeltalk.minnix.dev`.** The
+- **Next planned work: §2I increments 2 and 3 — the cursor-paged home feed
+  and the endless scroll on top of it. Increment 1 (the footer in the rail) is
+  BUILT and PROVEN; nothing else in §2I is built, and increment 1 is NOT
+  DEPLOYED, so the live site still draws the wide footer band under the page
+  and a rail that scrolls with the document.** All eight decisions in §2I were
+  settled by the owner 2026-10-03 (R131 + R132) — build to the record and do
+  not re-ask. Recorded there: the owner's ask verbatim, the finding that
+  Mastodon's columns are independent scroll containers rather than
+  `position: sticky` (so it has the same second scroll container we would,
+  and only shows one scrollbar because the other column is short), the live
+  measurements the shape rests on, **R131** (rail scrolls on its own with a
+  thin themed scrollbar, trending stays at 8 films, footer brand block centred
+  on the tagline), and **R132** (page the already-computed list rather than in
+  SQL, 20 rows per page, 300-row DOM cap with the "Older" link always
+  remaining, no-JS gets a real paged link, scrolling pushes no URLs,
+  home-only scope, increments 2 and 3 deployed back-to-back). **Ship 2 and 3
+  back-to-back:** alone, increment 2 turns the home feed into "20 rows and a
+  link", which reads as a step backwards even though it is the same
+  pagination genre pages and notifications already use. The approved prototype
+  and its proof scripts are still on disk at `.qwen/tmp/rail-prototype.html`
+  and `.qwen/tmp/pw_*.mjs` — read them before re-deriving any geometry.
+- **Latest increment — the footer moves into the right rail (§2I increment 1,
+  R131) — COMMITTED and gate-verified, NOT DEPLOYED.** CSS and templates
+  only, exactly as scoped: no JS, no Python, no migration. The footer body is
+  now one partial (`templates/_footer.html`) with two wrappers — `base.html`
+  draws it inside `<footer class="site-footer">` unless a page suppresses the
+  `site_footer` block, and `home.html` suppresses that block and draws the
+  same partial at the foot of `.rail` with the `site-footer--rail` modifier.
+  `.rail` carries the R131 set (`position: sticky; top: 0; max-height: 100vh;
+  overflow-y: auto; overscroll-behavior: contain`) plus Mastodon's thin themed
+  scrollbar, and the brand block is centred on the tagline with the wordmark at
+  that column's left edge. **The values are the ones the owner approved in the
+  browser prototype**, recovered from `.qwen/tmp/rail-prototype.html` rather
+  than reconstructed — which surfaced two details the §2I prose did not carry:
+  the rail footer's `margin-top: 1.25rem` with `border-top-width: 2px` (a 3px
+  seam read as a second band boundary sitting on the genres panel), and that
+  the stacking is `display: flex; flex-direction: column`, not a grid.
+  **One judgment call beyond the record, open to veto:** below the
+  `@media (max-width: 64rem)` stack point the rail is reset to
+  `position: static; max-height: none; overflow: visible; overscroll-behavior:
+  auto`, because a viewport-capped sticky scroller sitting under a long feed
+  would hide the footer behind its own scrollbar. That follows the
+  narrow-layout mapping §2I already records for Mastodon
+  (`layout-single-column { height: auto }`) rather than making a new decision,
+  but §2I named the mapping without stating it as a rule to implement. The
+  same reset has to undo `overflow`, not just `position`. **A second addition
+  beyond the literal rule list, for a measured cause:** `.rail` also carries
+  `overflow-x: hidden`. Once one axis is non-visible the other cannot stay
+  `visible` and computes to `auto`, and the rotated rail banners overhang
+  their column by ~1px on each side (`scrollWidth` 353 against `clientWidth`
+  352 at 1440 and 1280) — which under classic scrollbars would raise a
+  horizontal scrollbar inside the rail. Headless Chromium here uses overlay
+  scrollbars and showed no bar either way (`clientHeight` 900 with
+  `overflow-x: auto` forced and with it hidden), so this is a defensive rule
+  against other configurations rather than a fix for something observed; it
+  costs nothing visually, because the scroll container was already clipping
+  that overhang.
+  **Browser proof — 17 checks in headless Chromium against the page the real
+  view rendered, served with the shipped stylesheet:** scrolling the document
+  600px leaves `.rail` at `top: 0` while the first `li.review` moves by
+  exactly −600; exactly one `.site-footer` on home and
+  `.rail.contains(footer) === true`; scrolling the rail to its own bottom
+  leaves the footer fully visible with `footer.bottom <= rail.bottom`; on
+  `/about/` exactly one footer, not inside a rail, carrying no modifier. The
+  settled brand geometry reproduces the prototype's numbers exactly — rail
+  centre 1104 = tagline centre 1104, wordmark left edge 974 = tagline left
+  edge 974, a 119px wordmark inside a 261px tagline column and not clipped.
+  **Measured, not assumed:** the footer is 178px against the recorded 170px,
+  and its internals sum to exactly that (2 border + 17.6 pad-top + 60 brand +
+  11.2 gap + 25 links + 11.2 gap + 32 sign-off + 19.2 pad-bottom), so the 8px
+  is font metric and not drift. The rail's *total* height is data-determined —
+  this fixture's eight trending titles wrap to two lines each, +174px on that
+  panel — so what is asserted there is the property that matters: the rail is
+  taller than the viewport, which is exactly why the footer needs its own
+  scroll.
+  **Non-vacuity proven by three mutations, each turning only the intended
+  checks red.** Drop `position: sticky` → the pinned-top check goes red in the
+  suite *and* in the browser, where the rail top drifts to −429.6 instead of
+  holding 0. Drop the base suppression → home renders two footers and the
+  three one-footer checks go red. Move the include out of the rail → the
+  containment checks go red. **The third mutation caught a vacuity in the
+  test itself:** the "last thing in the rail" slice ran past the end of the
+  rail's inner markup, came back empty, and so passed for a footer that was not
+  in the rail at all — now guarded by an explicit containment assert before
+  the slice. **Non-home pages are byte-identical:** the footer region of
+  `/about/` is 1462 bytes before and after, and the `base.html` diff is
+  confined to that region (3 insertions, 33 deletions, all inside the footer).
+  **Two traps worth carrying.** A multi-line `{# … #}` is not a comment in
+  Django — it renders as page text, and here it leaked a literal `<footer>`
+  into the footer and broke the page; §2H records this trap for `home.html` and
+  it arrived again from the partial's direction, so use `{% comment %}` blocks.
+  And the anti-drift comparison needs per-line whitespace normalisation,
+  because Django's `include` does not reindent: the blank line the partial's
+  comment leaves behind picks up whatever indentation each call site has.
+- **The whole feed row opens its post — COMMITTED, gate-verified, DEPLOYED
+  and live-proven on `reeltalk.minnix.dev`.** The
   parked ask (owner restated 2026-09-28) is landed. A real anchor stretched
   over the row (`.review-open`), gated on `status_id` and never on
   `interactive`, with `aria-label="Open {author}'s post"` because an empty
@@ -91,10 +169,12 @@ is history.**
   eviction (the only live warden session postdates the change; all the
   admin's sessions untouched). The record is the "Executed — §2G is DONE"
   section at the end of §2F, including the live-proof detail.
-- **Gate baseline: `2106 passed + 5 skipped`.** `ruff check`,
-  `ruff format --check` and `makemigrations --check` all clean. The +20
-  over the prior 2086 is 19 tests in `test_feed_click_target.py` plus 1
-  clean-room param instance for that new file.
+- **Gate baseline: `2129 passed + 5 skipped`.** `ruff check`,
+  `ruff format --check` and `makemigrations --check` all clean. The +23
+  over the prior 2106 is 21 tests in `test_footer_in_rail.py` plus 2
+  clean-room param instances — one for that test file and one for the new
+  `templates/_footer.html`. `makemigrations --check` reporting *No changes
+  detected* is the confirmation that increment 1 needed no migration.
 - **A real browser can be driven over SSH without the Chrome extension, and
   that is how this increment's click geometry was proven.** There is no GUI
   session for `minnix` and the Qwen extension cannot be installed
