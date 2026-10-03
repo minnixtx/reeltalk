@@ -12,9 +12,9 @@ is history.**
 
 - **Next planned work: §2I increments 2 and 3 — the cursor-paged home feed
   and the endless scroll on top of it. Increment 1 (the footer in the rail) is
-  BUILT and PROVEN; nothing else in §2I is built, and increment 1 is NOT
-  DEPLOYED, so the live site still draws the wide footer band under the page
-  and a rail that scrolls with the document.** All eight decisions in §2I were
+  BUILT, PROVEN and DEPLOYED — the live site now draws the footer at the foot
+  of the rail, not as a wide band under the page. Nothing else in §2I is
+  built.** All eight decisions in §2I were
   settled by the owner 2026-10-03 (R131 + R132) — build to the record and do
   not re-ask. Recorded there: the owner's ask verbatim, the finding that
   Mastodon's columns are independent scroll containers rather than
@@ -32,7 +32,8 @@ is history.**
   and its proof scripts are still on disk at `.qwen/tmp/rail-prototype.html`
   and `.qwen/tmp/pw_*.mjs` — read them before re-deriving any geometry.
 - **Latest increment — the footer moves into the right rail (§2I increment 1,
-  R131) — COMMITTED and gate-verified, NOT DEPLOYED.** CSS and templates
+  R131) — COMMITTED, gate-verified, DEPLOYED and live-checked on
+  `reeltalk.minnix.dev`.** CSS and templates
   only, exactly as scoped: no JS, no Python, no migration. The footer body is
   now one partial (`templates/_footer.html`) with two wrappers — `base.html`
   draws it inside `<footer class="site-footer">` unless a page suppresses the
@@ -104,6 +105,23 @@ is history.**
   And the anti-drift comparison needs per-line whitespace normalisation,
   because Django's `include` does not reindent: the blank line the partial's
   comment leaves behind picks up whatever indentation each call site has.
+  **Deployed 2026-10-03** (`docker compose build` all services, then
+  `up -d`; `reeltalk-web-1` reported Healthy). **How the live instance was
+  checked without touching member data:** the served stylesheet
+  `/static/css/reeltalk.1086ac58a65c.css` diffs byte-identical against the
+  repo source once `collectstatic`'s `url()` rewriting is normalised, and the
+  `<footer class="site-footer site-footer--rail"> … </aside>` region the live
+  host serves is byte-identical (1501 chars) to the member render the 17-check
+  browser proof ran on. Same markup, same stylesheet, so the browser proof
+  transfers rather than needing a repeat. The live anonymous home does render
+  the rail and the footer inside it; it renders no feed rows, so the
+  scroll-pinning check itself has not been re-run against production — it
+  rests on that equivalence. **A live member-path proof was deliberately not
+  run here:** this stack holds 61 real user accounts, and minting a session
+  against any of them to satisfy a check that has already passed on identical
+  markup is not worth the intrusion. If a live member-path proof is ever
+  wanted, do it on a staging DB or a purpose-made account, not by borrowing
+  one of the 61.
 - **The whole feed row opens its post — COMMITTED, gate-verified, DEPLOYED
   and live-proven on `reeltalk.minnix.dev`.** The
   parked ask (owner restated 2026-09-28) is landed. A real anchor stretched
