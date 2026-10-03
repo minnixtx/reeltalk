@@ -10,7 +10,8 @@ feed the rail no longer bounds — you would have to scroll past the whole feed
 to reach it while the rail's own bottom stayed pinned off-screen. Home owns
 the placement; the body it draws is the same partial every other page uses.
 A comment BLOCK and not the hash form, because a hash comment has to close on
-the line it opens — the trap the row comment below records.
+the line it opens — the trap §2H records, and which §2I increment 1 hit again
+from the footer partial's direction.
 {% endcomment %}
 {% block site_footer %}{% endblock %}
 
@@ -22,96 +23,46 @@ the line it opens — the trap the row comment below records.
     <section class="feed">
       <h1 class="pane-title">Now Playing</h1>
       {% if feed %}
-        <ul class="review-list">
-          {% for entry in feed %}
-            {% comment %}
-            data-status marks which post this row speaks for (R83), so a test
-            can assert inside one row instead of against the page — which
-            also carries every other member's row and can pass an absence
-            check vacuously. This is a comment BLOCK rather than the hash
-            form because a hash comment has to close on the line it opens:
-            a multi-line one is not a comment at all and renders as page
-            text. Caught by test_a_row_with_no_replies_shows_no_count.
-            {% endcomment %}
-            <li class="review" data-status="{{ entry.status_id|default:'none' }}">
-              {% if entry.status_id is not None %}
-                {# The whole row opens the post (owner ask, restated 2026-09-28). #}
-                {# A real anchor stretched over the row by .review-open rather #}
-                {# than a JS click handler on the <li>: a list item is not #}
-                {# focusable, so a scripted row would be unreachable by Tab #}
-                {# and have no middle-click-open-in-new-tab. The anchor holds #}
-                {# no content of its own, so nothing in the row can end up #}
-                {# nested inside it — the Like button, the film link and any #}
-                {# link in the review prose stay siblings and paint above it. #}
-                {# Its accessible name has to be supplied: with no text inside, #}
-                {# a screen reader would otherwise announce a nameless link. #}
-                <a class="review-open" href="{% url 'status' entry.status_id %}" aria-label="Open {{ entry.user.localname }}'s post"></a>
-              {% endif %}
-              <div class="review-head">
-                {% if entry.user.avatar %}
-                  <img class="avatar avatar-row" src="{{ entry.user.avatar.url }}" alt="">
-                {% else %}
-                  <span class="avatar avatar-row avatar-placeholder" aria-hidden="true"></span>
-                {% endif %}
-                {# A link, as it already is on the post page, the reply partial #}
-                {# and notifications — the bare span here was why no profile #}
-                {# was reachable from the feed at all. #}
-                <a class="review-author" href="{% url 'user-profile' entry.user.localname %}">{{ entry.user.localname }}</a>
-                {% if entry.rating %}<span title="{{ entry.rating|floatformat:'-1' }} / 5">{{ entry.rating|stars }}</span>{% endif %}
-                {# R84: the row links on status_id, never on interactive — a remote mirror gets the page, not a control. #}
-                <span class="muted">{% if entry.status_id is not None %}<a href="{% url 'status' entry.status_id %}" title="Open this post">{{ entry.date|date:"Y-m-d" }}</a>{% else %}{{ entry.date|date:"Y-m-d" }}{% endif %}</span>
-                {# The control takes the *narrower* flag (R84): "may I put a control here", never "may I open this". Since increment 5 that set includes mirrors — a Like now reaches their home instance. #}
-                {% if entry.interactive %}
-                  <button type="button" class="like-btn" data-url="{% url 'status-like' entry.status_id %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}">
-                    <span class="like-label">{% if entry.liked_by_viewer %}Liked{% else %}Like{% endif %}</span>
-                    <span class="like-count">{{ entry.like_count }}</span>
-                  </button>
-                {% endif %}
-                {% comment %}
-                The reply count, on every row that has a post behind it —
-                mirrors included. The number is a fact about the post; the
-                offer is the composer, which lives on the post page this
-                row's timestamp already opens (R85). There is deliberately
-                no reply control on a feed row. The two-form pluralize is
-                not decoration: bare `pluralize` appends an "s" and would
-                render "2 replys".
-                {% endcomment %}
-                {% if entry.status_id is not None and entry.reply_count %}
-                  <span class="reply-count muted">{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:"y,ies" }}</span>
-                {% endif %}
-              </div>
-              {% if entry.film %}
-                <div class="feed-item">
-                  {# R34: poster thumb, same shape as the user-films page #}
-                  {% if entry.film.poster %}
-                    <img class="thumb" src="{{ entry.film.poster.url }}" alt="">
-                  {% else %}
-                    <span class="thumb thumb-placeholder"></span>
-                  {% endif %}
-                  <p class="feed-film">{% if entry.kind == "watchlist" %}added {% elif entry.kind == "watched" %}watched {% endif %}<a href="{% url 'film' entry.film.id %}">{{ entry.film.title }}{% if entry.film.year %} ({{ entry.film.year }}){% endif %}</a>{% if entry.other_count %} and {{ entry.other_count }} other film{{ entry.other_count|pluralize }}{% endif %}{% if entry.kind == "watchlist" %} to their Watchlist{% endif %}</p>
-                </div>
-              {% endif %}
-              {% if entry.content %}<div class="review-body">{{ entry.content|safe }}</div>{% endif %}
-            </li>
-          {% endfor %}
+        <ul class="review-list" id="feed-list">
+          {% for entry in feed %}{% include "_feed_row.html" %}{% endfor %}
+          {% if not next_cursor %}{% include "_feed_end.html" %}{% endif %}
         </ul>
         {% if next_cursor %}
           {% comment %}
-          The no-JS way forward (§2I increment 2, R132 decision 6): a real
+          The no-JS way forward (§2I increment 2, R132 decision 5): a real
           anchor to a real URL, not a handler waiting on a script that may
           never run. Increment 3 hides this link and loads the same page on
           scroll instead — same href, same template, so the feed never grows a
-          second rendering path to keep in sync.
+          second rendering path to keep in sync. It is un-hidden again at the
+          300-row DOM ceiling, so the scroll can slow down but never silently
+          stop with nowhere to go (R132 decision 4).
           {% endcomment %}
-          <p class="feed-more">
-            <a class="feed-older" href="{% url 'index' %}?c={{ next_cursor }}">Older</a>
+          <p class="feed-more" id="feed-more">
+            <a class="feed-older" id="feed-older" href="{% url 'index' %}?c={{ next_cursor }}">Older</a>
           </p>
         {% endif %}
+        {% comment %}
+        The scroll sentinel (§2I increment 3): the element feed.js watches. When
+        it comes into view the next page is fetched and appended to the list.
+        ``data-next`` is the cursor to ask for, empty when there is nothing
+        left — which is also what makes this element harmless on a one-page
+        feed. It sits BELOW the list rather than inside it, because the appended
+        fragment goes into the ``<ul>`` and a non-``li`` child there would be
+        invalid markup.
+
+        The ``|default:''`` is load-bearing, not tidiness: Django renders a
+        variable that resolves to ``None`` as the literal string ``"None"``, so
+        without it a one-page feed would hand the scroll a truthy cursor reading
+        "None", it would fetch with it, get page 1 back from the unreadable-cursor
+        fallback, and append a duplicate of what is already on screen.
+        {% endcomment %}
+        <div class="feed-sentinel" id="feed-sentinel" data-next="{{ next_cursor|default:'' }}" aria-hidden="true"></div>
       {% else %}
         <p class="muted">Nothing here yet — add a film to your watchlist or mark one watched.</p>
       {% endif %}
     </section>
     <script src="{% static 'js/likes.js' %}" defer></script>
+    <script src="{% static 'js/feed.js' %}" defer></script>
   {% else %}
     {# Anonymous visitors keep the landing copy where the feed would be. #}
     <section class="landing">

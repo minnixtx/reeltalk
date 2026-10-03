@@ -894,6 +894,18 @@ class FeedEntry:
         return (self.date, self.kind_rank, self.source_id)
 
     @property
+    def cursor(self) -> str:
+        """This row's own paging marker (§2I increment 3).
+
+        Rendered onto the row as ``data-cursor`` so the endless scroll can read
+        "where to next" off the last row it just appended. The alternatives —
+        a response header, or a JSON envelope around the fragment — would both
+        have put the paging state somewhere a template reader never sees, while
+        still duplicating what the row already knows.
+        """
+        return encode_feed_cursor(self)
+
+    @property
     def interactive(self) -> bool:
         """Whether this row can carry a like or a reply (R83, R85).
 

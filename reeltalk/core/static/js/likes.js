@@ -25,40 +25,55 @@
     btn.setAttribute("aria-pressed", liked ? "true" : "false");
   }
 
-  function init() {
-    document.querySelectorAll(".like-btn").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        if (btn.disabled) {
-          return;
+  function toggle(btn) {
+    if (btn.disabled) {
+      return;
+    }
+    // Locked while in flight: two clicks racing would otherwise send two
+    // toggles and leave the button on whichever the server read last.
+    btn.disabled = true;
+    fetch(btn.getAttribute("data-url"), {
+      method: "POST",
+      headers: {
+        "X-CSRFToken": csrfToken(),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      credentials: "same-origin",
+    })
+      .then(function (resp) {
+        return resp.json().then(function (data) {
+          return { ok: resp.ok, data: data };
+        });
+      })
+      .then(function (r) {
+        btn.disabled = false;
+        // Repaint only on a real answer. A failed request leaves the
+        // button showing the state it was in rather than a guess.
+        if (r.ok && typeof r.data.liked === "boolean") {
+          paint(btn, r.data.liked, r.data.count);
         }
-        // Locked while in flight: two clicks racing would otherwise send two
-        // toggles and leave the button on whichever the server read last.
-        btn.disabled = true;
-        fetch(btn.getAttribute("data-url"), {
-          method: "POST",
-          headers: {
-            "X-CSRFToken": csrfToken(),
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          credentials: "same-origin",
-        })
-          .then(function (resp) {
-            return resp.json().then(function (data) {
-              return { ok: resp.ok, data: data };
-            });
-          })
-          .then(function (r) {
-            btn.disabled = false;
-            // Repaint only on a real answer. A failed request leaves the
-            // button showing the state it was in rather than a guess.
-            if (r.ok && typeof r.data.liked === "boolean") {
-              paint(btn, r.data.liked, r.data.count);
-            }
-          })
-          .catch(function () {
-            btn.disabled = false;
-          });
+      })
+      .catch(function () {
+        btn.disabled = false;
       });
+  }
+
+  function init() {
+    /* ONE delegated listener on the document, not one per .like-btn.
+       The endless scroll (§2I increment 3) appends rows long after this runs,
+       and init() fires exactly once at DOMContentLoaded — so a listener bound
+       per button here would leave every Like button on an appended row dead.
+       Delegation is the fix and it is cheaper besides: one listener however
+       many rows the feed grows to. */
+    document.addEventListener("click", function (event) {
+      var target = event.target;
+      if (!target || typeof target.closest !== "function") {
+        return;
+      }
+      var btn = target.closest(".like-btn");
+      if (btn) {
+        toggle(btn);
+      }
     });
   }
 

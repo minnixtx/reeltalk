@@ -1,0 +1,75 @@
+{% load film_tags %}
+{% comment %}
+One home-feed row (§2I increment 3, R132 decision 5).
+
+This partial exists to make drift impossible rather than merely unlikely: the
+home page and the /feed/page/ fragment route both include THIS file, so the
+``.review-open`` overlay, its ``status_id`` gate and its ``aria-label`` cannot
+become two different things the way they would if the fragment route had its own
+copy of the markup. The HTML-equality test in test_feed_endless_scroll.py is what
+catches anyone re-introducing a second copy.
+
+``data-cursor`` carries this row's own paging marker so the endless scroll can
+read "where to next" off the last row it appended, without the fragment needing
+a second channel to say so.
+{% endcomment %}
+<li class="review" data-status="{{ entry.status_id|default:'none' }}" data-cursor="{{ entry.cursor }}">
+  {% if entry.status_id is not None %}
+    {# The whole row opens the post (owner ask, restated 2026-09-28). #}
+    {# A real anchor stretched over the row by .review-open rather #}
+    {# than a JS click handler on the <li>: a list item is not #}
+    {# focusable, so a scripted row would be unreachable by Tab #}
+    {# and have no middle-click-open-in-new-tab. The anchor holds #}
+    {# no content of its own, so nothing in the row can end up #}
+    {# nested inside it — the Like button, the film link and any #}
+    {# link in the review prose stay siblings and paint above it. #}
+    {# Its accessible name has to be supplied: with no text inside, #}
+    {# a screen reader would otherwise announce a nameless link. #}
+    <a class="review-open" href="{% url 'status' entry.status_id %}" aria-label="Open {{ entry.user.localname }}'s post"></a>
+  {% endif %}
+  <div class="review-head">
+    {% if entry.user.avatar %}
+      <img class="avatar avatar-row" src="{{ entry.user.avatar.url }}" alt="">
+    {% else %}
+      <span class="avatar avatar-row avatar-placeholder" aria-hidden="true"></span>
+    {% endif %}
+    {# A link, as it already is on the post page, the reply partial #}
+    {# and notifications — the bare span here was why no profile #}
+    {# was reachable from the feed at all. #}
+    <a class="review-author" href="{% url 'user-profile' entry.user.localname %}">{{ entry.user.localname }}</a>
+    {% if entry.rating %}<span title="{{ entry.rating|floatformat:'-1' }} / 5">{{ entry.rating|stars }}</span>{% endif %}
+    {# R84: the row links on status_id, never on interactive — a remote mirror gets the page, not a control. #}
+    <span class="muted">{% if entry.status_id is not None %}<a href="{% url 'status' entry.status_id %}" title="Open this post">{{ entry.date|date:"Y-m-d" }}</a>{% else %}{{ entry.date|date:"Y-m-d" }}{% endif %}</span>
+    {# The control takes the *narrower* flag (R84): "may I put a control here", never "may I open this". Since increment 5 that set includes mirrors — a Like now reaches their home instance. #}
+    {% if entry.interactive %}
+      <button type="button" class="like-btn" data-url="{% url 'status-like' entry.status_id %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}">
+        <span class="like-label">{% if entry.liked_by_viewer %}Liked{% else %}Like{% endif %}</span>
+        <span class="like-count">{{ entry.like_count }}</span>
+      </button>
+    {% endif %}
+    {% comment %}
+    The reply count, on every row that has a post behind it —
+    mirrors included. The number is a fact about the post; the
+    offer is the composer, which lives on the post page this
+    row's timestamp already opens (R85). There is deliberately
+    no reply control on a feed row. The two-form pluralize is
+    not decoration: bare `pluralize` appends an "s" and would
+    render "2 replys".
+    {% endcomment %}
+    {% if entry.status_id is not None and entry.reply_count %}
+      <span class="reply-count muted">{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:"y,ies" }}</span>
+    {% endif %}
+  </div>
+  {% if entry.film %}
+    <div class="feed-item">
+      {# R34: poster thumb, same shape as the user-films page #}
+      {% if entry.film.poster %}
+        <img class="thumb" src="{{ entry.film.poster.url }}" alt="">
+      {% else %}
+        <span class="thumb thumb-placeholder"></span>
+      {% endif %}
+      <p class="feed-film">{% if entry.kind == "watchlist" %}added {% elif entry.kind == "watched" %}watched {% endif %}<a href="{% url 'film' entry.film.id %}">{{ entry.film.title }}{% if entry.film.year %} ({{ entry.film.year }}){% endif %}</a>{% if entry.other_count %} and {{ entry.other_count }} other film{{ entry.other_count|pluralize }}{% endif %}{% if entry.kind == "watchlist" %} to their Watchlist{% endif %}</p>
+    </div>
+  {% endif %}
+  {% if entry.content %}<div class="review-body">{{ entry.content|safe }}</div>{% endif %}
+</li>

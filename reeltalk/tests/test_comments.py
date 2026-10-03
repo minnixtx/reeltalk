@@ -138,8 +138,16 @@ def _home(client) -> str:
 
 
 def _row(body, status_id) -> str:
-    """One feed row's own markup, so an absence check cannot borrow another row."""
-    marker = f'<li class="review" data-status="{status_id}">'
+    """One feed row's own markup, so an absence check cannot borrow another row.
+
+    The marker stops before the tag's closing ``>`` on purpose. Increment 3
+    (§2I) added ``data-cursor`` to the row element, and pinning the closing
+    bracket here made this helper break on an attribute that has nothing to do
+    with what it is checking. The status value is still matched exactly: the
+    closing quote of ``data-status="N"`` is in the marker, so row 39 cannot
+    satisfy a lookup for row 392.
+    """
+    marker = f'<li class="review" data-status="{status_id}"'
     assert marker in body, "the target row did not render at all"
     start = body.index(marker)
     return body[start : body.index("</li>", start)]

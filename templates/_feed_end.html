@@ -1,0 +1,10 @@
+{% comment %}
+The end of the feed (§2I increment 3, R132 decision 4). Server-rendered so the
+reader learns the feed has ended from the page, not from a script failing to add
+more. A ``<li>`` because it lives inside the feed's ``<ul>`` on both the full
+page and the appended fragment — anything else there would be invalid markup.
+
+The endless scroll keys its own stop off this element: the fragment's last node
+wearing ``feed-end`` is what tells it there is nothing further to ask for.
+{% endcomment %}
+<li class="feed-end">That&rsquo;s everything.</li>

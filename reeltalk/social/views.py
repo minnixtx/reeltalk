@@ -161,6 +161,35 @@ def index(request):
     return render(request, "home.html", data)
 
 
+@login_required
+def feed_page(request):
+    """One page of the home feed as a bare HTML fragment (§2I increment 3).
+
+    The endless scroll fetches this and appends it into the page's existing
+    ``<ul class="review-list">``. It renders the same row partial the home page
+    renders, which is the point: the ``.review-open`` overlay, its ``status_id``
+    gate and its ``aria-label`` cannot drift from a copy, because there is no
+    copy (§2I decision 4, and the reason JSON + client templating was rejected).
+
+    ``login_required`` rather than an inline check: this is the member's own feed,
+    and an anonymous fragment request has no answer that is not a redirect.
+
+    No pushed URL and no session state (§2I decision 5) — the page a reader has
+    scrolled to is not a place worth naming, and sharing a specific post already
+    has ``/status/<id>/``.
+    """
+    entries, next_cursor = feed_entries(
+        request.user,
+        limit=FEED_PAGE_SIZE,
+        cursor=request.GET.get("c") or None,
+    )
+    return render(
+        request,
+        "_feed_page.html",
+        {"feed": entries, "next_cursor": next_cursor},
+    )
+
+
 def about(request):
     """Instance info page (§3.7 v0.1): name, domain, software, version."""
     return render(

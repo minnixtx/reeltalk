@@ -616,6 +616,24 @@ ul.errorlist {
   border-bottom-color: var(--red-bright);
 }
 
+/* The end of the feed (§2I increment 3, R132 decision 7). It lives inside the
+   list as a sibling of the rows, so it sheds the row chrome and reads as a
+   closing line rather than another post. */
+.feed-end {
+  padding: 1.25rem 0 0.25rem;
+  color: var(--cream-muted);
+  text-align: center;
+  border-bottom: none;
+}
+
+/* The scroll sentinel (§2I increment 3). It has to occupy a little height to
+   cross the viewport edge while scrolling, and nothing else: the observer is
+   watching when it appears, not what it looks like. */
+.feed-sentinel {
+  height: 1px;
+  margin-top: 0.5rem;
+}
+
 .review-head {
   display: flex;
   flex-wrap: wrap;

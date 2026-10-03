@@ -1,0 +1,18 @@
+{% comment %}
+One page of the home feed as a bare fragment (§2I increment 3, R132 decision 5),
+served by the ``feed-page`` route for the endless scroll to append.
+
+No wrapper element and no ``extends`` on purpose: the response is appended
+straight into the page's existing ``<ul class="review-list">``, so anything
+around these rows would land inside the list as invalid markup.
+
+The body below is deliberately the SAME two lines the home page renders inside
+its own ``<ul>``. That is the whole anti-drift guarantee of this increment —
+test_the_fragment_template_body_is_the_home_page_list_body asserts the two are
+identical modulo indentation, so a row change made on one side and not the other
+cannot survive the gate. JSON plus client-side templating was rejected outright
+for exactly this reason: it would put a second, JS-built copy of the row where
+only one should exist.
+{% endcomment %}
+{% for entry in feed %}{% include "_feed_row.html" %}{% endfor %}
+{% if not next_cursor %}{% include "_feed_end.html" %}{% endif %}

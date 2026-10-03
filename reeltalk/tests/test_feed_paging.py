@@ -48,7 +48,7 @@ from reeltalk.core.models import (
     feed_entries,
 )
 from reeltalk.core.views import GENRE_PAGE_SIZE
-from reeltalk.tests.feed import all_pages, unpaged
+from reeltalk.tests.feed import all_pages, bulk_shelve, spread_shelve, unpaged
 from reeltalk.tests.members import member, site_admin
 
 PAGE = FEED_PAGE_SIZE
@@ -94,49 +94,6 @@ def _shelf(user, identifier=Shelf.TO_READ):
     return Shelf.objects.get(user=user, identifier=identifier)
 
 
-def _spread_shelve(
-    user, n, newest_at, *, gap=timedelta(minutes=10), identifier=Shelf.TO_READ
-):
-    """``n`` shelf events ending at ``newest_at`` and running ``gap`` apart into
-    the past.
-
-    Two things the fixtures depend on: every row is older than ``newest_at``
-    (so a caller can place a group "behind" a timestamp by passing it as
-    ``newest_at``), and ``gap`` is wider than ``FEED_BULK_WINDOW`` so R37 never
-    aggregates these into one entry — each row is its own feed entry.
-    """
-    shelf = _shelf(user, identifier)
-    films = []
-    for i in range(1, n + 1):
-        film = Film.objects.create(
-            title=f"{user.localname} Spread {i:02d}", year=2000 + i
-        )
-        ShelfFilm.objects.create(
-            shelf=shelf,
-            film=film,
-            user=user,
-            shelved_date=newest_at - gap * (n - i),
-        )
-        films.append(film)
-    return films
-
-
-def _bulk_shelve(user, n, at, *, identifier=Shelf.TO_READ, step_seconds=1):
-    """``n`` shelf events seconds apart — the shape of a file import, which R37
-    collapses into a single aggregate."""
-    shelf = _shelf(user, identifier)
-    for i in range(1, n + 1):
-        film = Film.objects.create(
-            title=f"{user.localname} Bulk {i:02d}", year=2000 + i
-        )
-        ShelfFilm.objects.create(
-            shelf=shelf,
-            film=film,
-            user=user,
-            shelved_date=at + timedelta(seconds=i * step_seconds),
-        )
-
-
 def _feed_region(body: str) -> str:
     """Just the ``<ul class="review-list">`` inner HTML.
 
@@ -144,7 +101,8 @@ def _feed_region(body: str) -> str:
     whole-body match for film hrefs would mix the feed with trending and could
     pass on the rail's content rather than the feed's.
     """
-    start = body.index('<ul class="review-list">') + len('<ul class="review-list">')
+    opener = '<ul class="review-list"'
+    start = body.index(opener) + len(opener)
     end = body.index("</ul>", start)
     return body[start:end]
 
@@ -186,14 +144,14 @@ def test_page_size_matches_the_genre_page_size():
 
 
 def test_no_limit_returns_the_whole_feed_and_no_cursor(alice):
-    _spread_shelve(alice, PAGE + 5, timezone.now() - timedelta(hours=2))
+    spread_shelve(alice, PAGE + 5, timezone.now() - timedelta(hours=2))
     entries, next_cursor = feed_entries(alice)
     assert len(entries) == PAGE + 5
     assert next_cursor is None, "an unpaged read has no next page to point at"
 
 
 def test_cursor_round_trips_the_sort_key(alice):
-    _spread_shelve(alice, 2, timezone.now() - timedelta(hours=2))
+    spread_shelve(alice, 2, timezone.now() - timedelta(hours=2))
     last = unpaged(alice)[-1]
     assert decode_feed_cursor(encode_feed_cursor(last)) == last.sort_key
 
@@ -201,7 +159,7 @@ def test_cursor_round_trips_the_sort_key(alice):
 def test_kind_rank_keys_off_kind_and_never_off_list_position(alice):
     """A rank derived from position would move between requests, which is fatal
     for a cursor. This asserts both arms of the rank."""
-    _spread_shelve(alice, 1, timezone.now() - timedelta(hours=2))
+    spread_shelve(alice, 1, timezone.now() - timedelta(hours=2))
     assert unpaged(alice)[0].kind_rank == KIND_RANK_SHELF
 
     status = Status.objects.create(
@@ -229,7 +187,7 @@ def test_pages_concatenate_to_the_unpaged_list_exactly(alice):
     able to see a lost row at all.
     """
     n = PAGE * 2 + 7
-    films = _spread_shelve(alice, n, timezone.now() - timedelta(hours=3))
+    films = spread_shelve(alice, n, timezone.now() - timedelta(hours=3))
     got = all_pages(alice, limit=PAGE)
 
     assert len(got) == n, f"paging produced {len(got)} rows for {n} fixture rows"
@@ -240,7 +198,7 @@ def test_pages_concatenate_to_the_unpaged_list_exactly(alice):
 
 
 def test_every_page_is_full_except_the_last(alice):
-    _spread_shelve(alice, PAGE + 3, timezone.now() - timedelta(hours=3))
+    spread_shelve(alice, PAGE + 3, timezone.now() - timedelta(hours=3))
     sizes = []
     cursor = None
     for _ in range(10):
@@ -254,7 +212,7 @@ def test_every_page_is_full_except_the_last(alice):
 
 
 def test_no_cursor_is_offered_when_nothing_is_left_behind(alice):
-    _spread_shelve(alice, PAGE, timezone.now() - timedelta(hours=3))
+    spread_shelve(alice, PAGE, timezone.now() - timedelta(hours=3))
     entries, next_cursor = feed_entries(alice, limit=PAGE)
     assert len(entries) == PAGE
     assert next_cursor is None, (
@@ -270,7 +228,7 @@ def test_a_post_arriving_mid_scroll_neither_duplicates_nor_drops_a_row(alice):
     An offset would have returned ``before[PAGE + 1 :]`` here and silently
     eaten the row that used to open page 2.
     """
-    _spread_shelve(alice, PAGE * 2, timezone.now() - timedelta(hours=3))
+    spread_shelve(alice, PAGE * 2, timezone.now() - timedelta(hours=3))
     before = [ident(e) for e in unpaged(alice)]
     _, cursor = feed_entries(alice, limit=PAGE)
     assert cursor is not None
@@ -307,11 +265,11 @@ def test_a_straddling_bulk_group_stays_one_entry_at_the_same_position(
     bulk_at = timezone.now() - timedelta(days=1)
     # ``newer_rows`` rows sit above the import, five below it, so the aggregate
     # lands exactly on the page boundary either side of it.
-    _spread_shelve(
+    spread_shelve(
         alice, newer_rows, bulk_at + timedelta(hours=newer_rows), gap=timedelta(hours=1)
     )
-    _bulk_shelve(alice, 25, bulk_at)
-    _spread_shelve(alice, 5, bulk_at - timedelta(hours=6), gap=timedelta(hours=1))
+    bulk_shelve(alice, 25, bulk_at)
+    spread_shelve(alice, 5, bulk_at - timedelta(hours=6), gap=timedelta(hours=1))
 
     expected = [ident(e) for e in unpaged(alice)]
     got = all_pages(alice, limit=PAGE)
@@ -337,9 +295,9 @@ def test_an_absorbed_rating_only_status_never_resurfaces_on_a_later_page(alice):
     film's shelf row fell onto.
     """
     bulk_at = timezone.now() - timedelta(days=1)
-    _spread_shelve(alice, PAGE, bulk_at + timedelta(hours=PAGE), gap=timedelta(hours=1))
-    _bulk_shelve(alice, 25, bulk_at, identifier=Shelf.READ)
-    _spread_shelve(alice, 5, bulk_at - timedelta(hours=6), gap=timedelta(hours=1))
+    spread_shelve(alice, PAGE, bulk_at + timedelta(hours=PAGE), gap=timedelta(hours=1))
+    bulk_shelve(alice, 25, bulk_at, identifier=Shelf.READ)
+    spread_shelve(alice, 5, bulk_at - timedelta(hours=6), gap=timedelta(hours=1))
     absorbed = set()
     for i in range(1, 26):
         status = Status.objects.create(
@@ -412,7 +370,7 @@ def test_a_tied_pair_sitting_on_the_page_boundary_pages_cleanly(alice):
     page 1's last row must be *strictly* older, so the shelf row is not repeated
     and the status row is not skipped."""
     at = timezone.now() - timedelta(hours=1)
-    _spread_shelve(
+    spread_shelve(
         alice,
         PAGE - 1,
         at + timedelta(minutes=10 * (PAGE - 1)),
@@ -451,7 +409,7 @@ def test_a_tied_pair_sitting_on_the_page_boundary_pages_cleanly(alice):
 
 
 def test_page_one_renders_twenty_rows_and_a_real_older_link(alice, admin):
-    _spread_shelve(alice, PAGE + 10, timezone.now() - timedelta(hours=3))
+    spread_shelve(alice, PAGE + 10, timezone.now() - timedelta(hours=3))
     body = _member_client().get("/").content.decode()
     assert "Log out" in body, "not a member render — nothing below proves anything"
     assert _row_count(_feed_region(body)) == PAGE
@@ -462,7 +420,7 @@ def test_following_the_older_link_renders_the_next_twenty_rows(alice, admin):
     """Page 2 of the rendered page is the same 20 rows page 2 of the function
     returns, in the same order — the view is not quietly re-sorting or
     re-slicing what ``feed_entries`` handed it."""
-    _spread_shelve(alice, PAGE * 2 + 5, timezone.now() - timedelta(hours=3))
+    spread_shelve(alice, PAGE * 2 + 5, timezone.now() - timedelta(hours=3))
     client = _member_client()
     page1_body = client.get("/").content.decode()
     _, cursor = feed_entries(alice, limit=PAGE)
@@ -479,7 +437,7 @@ def test_following_the_older_link_renders_the_next_twenty_rows(alice, admin):
 
 
 def test_the_last_page_renders_no_older_link(alice, admin):
-    _spread_shelve(alice, PAGE, timezone.now() - timedelta(hours=3))
+    spread_shelve(alice, PAGE, timezone.now() - timedelta(hours=3))
     body = _member_client().get("/").content.decode()
     assert _row_count(_feed_region(body)) == PAGE
     assert 'class="feed-older"' not in body, "a link to a page that does not exist"
@@ -487,16 +445,16 @@ def test_the_last_page_renders_no_older_link(alice, admin):
 
 def test_a_mangled_cursor_renders_the_first_page_not_an_error(alice, admin):
     """A bad ``?c=`` is a first page, not a 500 and not an empty feed."""
-    _spread_shelve(alice, PAGE + 5, timezone.now() - timedelta(hours=3))
+    spread_shelve(alice, PAGE + 5, timezone.now() - timedelta(hours=3))
     response = _member_client().get("/?c=not-a-cursor")
     assert response.status_code == 200
     assert _row_count(_feed_region(response.content.decode())) == PAGE
 
 
 def test_the_older_link_is_an_anchor_not_a_script_handler(alice, admin):
-    """Decision 6: no JS must still reach older rows, so the link has to be a
+    """R132 decision 5: no JS must still reach older rows, so the link has to be a
     real ``<a href>`` in the served HTML rather than a handler."""
-    _spread_shelve(alice, PAGE + 5, timezone.now() - timedelta(hours=3))
+    spread_shelve(alice, PAGE + 5, timezone.now() - timedelta(hours=3))
     body = _member_client().get("/").content.decode()
     start = body.index('class="feed-older"')
     tag = body[body.rindex("<a", 0, start) : body.index(">", start) + 1]

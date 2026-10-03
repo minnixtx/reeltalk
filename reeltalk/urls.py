@@ -49,6 +49,11 @@ _RESET_PREFIX = re.escape(RESET_PATH.lstrip("/"))
 
 urlpatterns = [
     path("", social_views.index, name="index"),
+    # The home feed's fragment route (§2I increment 3): the same rows the home
+    # page renders, without the page around them, for the endless scroll to
+    # append. Trailing-slash like every other route here; CommonMiddleware's
+    # APPEND_SLASH turns the shorter form into a redirect rather than a 404.
+    path("feed/page/", social_views.feed_page, name="feed-page"),
     # The film merge/absorb tool sits under /admin/ but is its own view — the
     # ModelAdmin framework has no multi-object action like this. It must be
     # matched before admin.site.urls swallows the whole /admin/ prefix.
