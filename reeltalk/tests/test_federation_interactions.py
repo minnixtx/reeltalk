@@ -44,7 +44,8 @@ from django.test import Client, RequestFactory
 
 from reeltalk.activitypub import crypto, signatures
 from reeltalk.activitypub.objects import like_activity, note_document, note_reference
-from reeltalk.core.models import Film, Like, Status, feed_entries
+from reeltalk.core.models import Film, Like, Status
+from reeltalk.tests.feed import unpaged
 from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
@@ -668,7 +669,7 @@ def test_a_mirror_feed_row_now_carries_the_like_control(alice, dune, admin):
     carol = _carol()
     mirror = _mirror_review(dune, carol)
     alice.follows.add(carol)
-    entry = next(e for e in feed_entries(alice) if e.user == carol)
+    entry = next(e for e in unpaged(alice) if e.user == carol)
     assert entry.interactive is True
     body = _home(_login("alice"))
     assert "Their review of Dune." in body  # the row really rendered…

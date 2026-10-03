@@ -28,10 +28,10 @@ from reeltalk.core.models import (
     Shelf,
     ShelfFilm,
     Status,
-    feed_entries,
     mark_watched,
     shelve_to_watchlist,
 )
+from reeltalk.tests.feed import unpaged
 from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
@@ -294,7 +294,7 @@ def test_remote_mirror_row_links_to_the_post_page_and_is_interactive_too(
         local=False,
         remote_url="https://remote.example/status/77",
     )
-    entry = next(e for e in feed_entries(alice) if e.user == carol)
+    entry = next(e for e in unpaged(alice) if e.user == carol)
     assert entry.interactive is True
     assert entry.status_id == mirror.pk
     body = _home(_login("alice"))
@@ -305,7 +305,7 @@ def test_remote_mirror_row_links_to_the_post_page_and_is_interactive_too(
 @pytest.mark.django_db
 def test_bare_shelf_rows_do_not_link_to_a_post_page(alice, dune, admin):
     shelve_to_watchlist(alice, dune)
-    assert all(e.status_id is None for e in feed_entries(alice))
+    assert all(e.status_id is None for e in unpaged(alice))
     body = _home(_login("alice"))
     assert "to their Watchlist" in body  # the row really rendered…
     assert "/status/" not in body  # …and really carries no link
@@ -322,7 +322,7 @@ def test_bulk_aggregate_row_does_not_link_to_a_post_page(alice, admin):
             film=Film.objects.create(title=f"Bulk {i}", year=2000 + i),
             user=alice,
         )
-    entries = feed_entries(alice)
+    entries = unpaged(alice)
     assert len(entries) == 1 and entries[0].status_id is None
     body = _home(_login("alice"))
     assert "2 other films" in body  # the aggregate really rendered…

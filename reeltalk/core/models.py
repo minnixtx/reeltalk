@@ -5,6 +5,7 @@ Person/Author models — directors and cast are plain name-list fields. The
 binary watch state (D1) lives on the Shelf/ShelfFilm side, not here.
 """
 
+import base64
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -761,6 +762,53 @@ def conversation(root: Status, *, max_depth: int = REPLY_THREAD_MAX_DEPTH):
 # one, so a slow import still aggregates as a whole.
 FEED_BULK_WINDOW = timedelta(minutes=5)
 
+# §2I increment 2 (R132 decision 3): rows per home-feed page. It matches
+# ``GENRE_PAGE_SIZE`` and is invisible under endless scroll, so it is purely a
+# first-paint knob — it sets what a member sees before anything loads, not how
+# much they can reach.
+FEED_PAGE_SIZE = 20
+
+# Tiebreak ranks inside the feed sort key (R132 decision 2). A shelf event
+# outranks a standalone status so a same-timestamp pair keeps the order the
+# pre-paging feed produced by insertion (shelf entries are built first). The
+# ranks are stable because they key off ``kind``, never off list position —
+# which is the whole requirement: a cursor has to be able to say "everything
+# strictly older than this row" without knowing where that row sat.
+KIND_RANK_SHELF = 1
+KIND_RANK_STATUS = 0
+
+
+def encode_feed_cursor(entry: "FeedEntry") -> str:
+    """An opaque page marker carrying an entry's sort key (§2I increment 2).
+
+    Cursor, not offset: ``?page=N`` over a live feed re-shows the last row of
+    page 1 every time anyone posts mid-session, because the offset counts
+    positions and positions move. This carries the key itself, so the next page
+    is "everything strictly older", whatever arrived in between.
+
+    Opaque rather than a readable triple because the date part carries a ``+``
+    in its UTC offset, which a query string would turn into a space.
+    """
+    payload = "|".join(
+        (entry.date.isoformat(), str(entry.kind_rank), str(entry.source_id))
+    )
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def decode_feed_cursor(raw: str) -> tuple[datetime, int, int]:
+    """Read an :func:`encode_feed_cursor` marker back into a sort key.
+
+    Raises ``ValueError`` on anything unreadable — junk in a URL is not a page.
+    """
+    try:
+        padded = raw + "=" * (-len(raw) % 4)
+        date_part, kind_rank, source_id = (
+            base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8").split("|")
+        )
+        return datetime.fromisoformat(date_part), int(kind_rank), int(source_id)
+    except (ValueError, IndexError) as exc:
+        raise ValueError(f"Unreadable feed cursor: {raw!r}") from exc
+
 
 @dataclass
 class FeedEntry:
@@ -811,6 +859,14 @@ class FeedEntry:
     user: "User"
     film: Film | None
     date: datetime
+    # The row's own database row, which is what the paging cursor keys on
+    # (§2I increment 2, R132 decision 2): the ``ShelfFilm.id`` for a shelf
+    # event — including an aggregate, whose row is the newest one in the group
+    # — and the ``Status.id`` for a standalone status. Deliberately *not*
+    # ``status_id``: a folded ``"watched"`` row carries its review's
+    # ``status_id`` while its own row is still the shelf row, and a cursor that
+    # conflated the two would page off the wrong row.
+    source_id: int
     rating: Decimal | None = None
     content: str = ""
     other_count: int = 0
@@ -819,6 +875,23 @@ class FeedEntry:
     like_count: int = 0
     liked_by_viewer: bool = False
     reply_count: int = 0
+
+    @property
+    def kind_rank(self) -> int:
+        """Where this row sits in the tiebreak (R132 decision 2)."""
+        return KIND_RANK_STATUS if self.kind == "status" else KIND_RANK_SHELF
+
+    @property
+    def sort_key(self) -> tuple[datetime, int, int]:
+        """The feed's total order: ``(date, kind_rank, source_id)``, newest first.
+
+        Every part is independent of the row's position in the list, which is
+        what makes a cursor over it possible. The existing sort was stable on
+        ``date`` alone, so ties kept insertion order; making the tie explicit
+        can move a same-timestamp pair, which the owner accepted up front
+        (R132) rather than being told afterwards.
+        """
+        return (self.date, self.kind_rank, self.source_id)
 
     @property
     def interactive(self) -> bool:
@@ -846,8 +919,35 @@ def _group_has_written_review(user_id: int, film_ids: list[int]) -> bool:
     ).exists()
 
 
-def feed_entries(user) -> list[FeedEntry]:
+def feed_entries(
+    user, *, limit: int | None = None, cursor: str | None = None
+) -> tuple[list[FeedEntry], str | None]:
     """The user's home-feed entries, newest first (R33; shape per R35/R37).
+
+    Returns ``(entries, next_cursor)``. ``limit=None`` (the default) means the
+    whole feed and no cursor, so every pre-paging caller keeps exactly the list
+    it always got — it just has to unpack the pair now.
+
+    **The paging is over the computed list, not over SQL** (§2I R132 decision
+    1, and the one that decides the shape of this function). ``feed_entries``
+    has always assembled a fully grouped, fully sorted Python list, so slicing
+    that list changes nothing about aggregation: a bulk group cannot split,
+    double, or lose its ``absorbed`` rating-only statuses, because the grouping
+    pass never sees a partial input. The accepted cost is that the full
+    ``O(all shelf rows + all statuses)`` computation still runs on every page
+    request — per-request latency is unchanged from the pre-paging home page,
+    total work grows with feed size. Aggregating *per page* was rejected on a
+    real correctness break: the ``absorbed`` set becomes page-local, so a
+    rating-only status of a film absorbed on page 1 surfaces again as a
+    duplicate row on page 2. Aggregating in SQL buys cheap pages and does not
+    retire the Python, so it stays an isolated later optimisation behind a seam
+    that changes no template, URL or behaviour.
+
+    ``cursor`` is an :func:`encode_feed_cursor` marker. An unreadable one is
+    treated as no cursor at all — a mangled ``?c=`` in an address bar is a
+    first page, not a 500, and the alternative (re-raising through the view)
+    would put a Python error in front of a reader who typed nothing wrong. The
+    round trip itself is pinned by tests, so a format break cannot hide here.
 
     Membership is the feed rule — own + followed users, minus blocked users
     (``user.feed_member_ids``, R54): a blocked user's shelf events and
@@ -918,7 +1018,11 @@ def feed_entries(user) -> list[FeedEntry]:
             for row in group:
                 entries.append(
                     FeedEntry(
-                        kind=kind, user=row.user, film=row.film, date=row.shelved_date
+                        kind=kind,
+                        user=row.user,
+                        film=row.film,
+                        date=row.shelved_date,
+                        source_id=row.id,
                     )
                 )
             continue
@@ -931,6 +1035,7 @@ def feed_entries(user) -> list[FeedEntry]:
                 user=newest.user,
                 film=newest.film,
                 date=newest.shelved_date,
+                source_id=newest.id,
                 other_count=len(group) - 1,
             )
         )
@@ -964,6 +1069,7 @@ def feed_entries(user) -> list[FeedEntry]:
                 user=status.user,
                 film=status.film,
                 date=status.published_date,
+                source_id=status.id,
                 rating=status.rating,
                 content=status.content,
                 status_id=status.id,
@@ -986,9 +1092,39 @@ def feed_entries(user) -> list[FeedEntry]:
             entry.liked_by_viewer = entry.status_id in liked
             entry.reply_count = replies.get(entry.status_id, 0)
 
-    # Stable sort: shelf events keep their ordering among equal timestamps.
-    entries.sort(key=lambda entry: entry.date, reverse=True)
-    return entries
+    # Total order, newest first (§2I increment 2). Before this the key was
+    # ``entry.date`` alone, which left every same-timestamp pair ordered only by
+    # insertion — fine when the whole list rendered on one page, not fine once a
+    # cursor has to name a position in it.
+    entries.sort(key=lambda entry: entry.sort_key, reverse=True)
+
+    if cursor is not None:
+        try:
+            cursor_key = decode_feed_cursor(cursor)
+        except ValueError:
+            # Unreadable marker: fall through with the full list, so the caller
+            # hands back page 1. See the docstring for why this is silent.
+            pass
+        else:
+            # Strictly older than the marker, so the row the cursor was cut from
+            # is never repeated here. If that row has since been deleted the
+            # first strictly-older entry is still the right continuation — no
+            # gap and no duplicate either way.
+            start = next(
+                (i for i, entry in enumerate(entries) if entry.sort_key < cursor_key),
+                len(entries),
+            )
+            entries = entries[start:]
+
+    if limit is None:
+        return entries, None
+    # A cursor is offered only when something is actually left behind: the
+    # template renders the "Older" link off this being non-None, and the endless
+    # scroll stops off the same value, so an over-eager cursor here would leave a
+    # link to an empty page.
+    page = entries[:limit]
+    next_cursor = encode_feed_cursor(page[-1]) if len(entries) > limit else None
+    return page, next_cursor
 
 
 def validate_star_rating(rating) -> Decimal:

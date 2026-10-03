@@ -43,13 +43,13 @@ from reeltalk.core.models import (
     Shelf,
     ShelfFilm,
     Status,
-    feed_entries,
     like_counts,
     liked_ids,
     mark_watched,
     shelve_to_watchlist,
     toggle_like,
 )
+from reeltalk.tests.feed import unpaged
 from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
@@ -280,7 +280,7 @@ def test_feed_like_queries_do_not_grow_with_the_feed(alice):
             film = Film.objects.create(title=f"Feed like {i}", year=2000 + i)
             mark_watched(alice, film, rating="4", content=f"<p>Review {i}</p>")
         with CaptureQueriesContext(connection) as ctx:
-            entries = feed_entries(alice)
+            entries = unpaged(alice)
         assert len(entries) == total
         return sum(1 for q in ctx.captured_queries if "core_like" in q["sql"].lower())
 
@@ -295,10 +295,10 @@ def test_feed_entries_carry_the_like_state(alice, bob, dune):
     status = _review(alice, dune)
     Like.objects.create(user=bob, status=status)
     bob.follows.add(alice)  # the feed rule: alice is in bob's members
-    entry = next(e for e in feed_entries(bob) if e.status_id == status.pk)
+    entry = next(e for e in unpaged(bob) if e.status_id == status.pk)
     assert entry.like_count == 1
     assert entry.liked_by_viewer is True
-    other = next(e for e in feed_entries(alice) if e.status_id == status.pk)
+    other = next(e for e in unpaged(alice) if e.status_id == status.pk)
     assert other.like_count == 1
     assert other.liked_by_viewer is False
 
@@ -442,7 +442,7 @@ def test_remote_mirror_row_keeps_its_link_and_now_carries_its_control(
     # have silently unlinked every mirror.
     carol, mirror = _mirror(dune)
     alice.follows.add(carol)
-    entry = next(e for e in feed_entries(alice) if e.user == carol)
+    entry = next(e for e in unpaged(alice) if e.user == carol)
     assert entry.interactive is True
     body = _home(_login("alice"))
     assert "Their review of Dune." in body

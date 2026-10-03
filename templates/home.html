@@ -95,6 +95,18 @@ the line it opens — the trap the row comment below records.
             </li>
           {% endfor %}
         </ul>
+        {% if next_cursor %}
+          {% comment %}
+          The no-JS way forward (§2I increment 2, R132 decision 6): a real
+          anchor to a real URL, not a handler waiting on a script that may
+          never run. Increment 3 hides this link and loads the same page on
+          scroll instead — same href, same template, so the feed never grows a
+          second rendering path to keep in sync.
+          {% endcomment %}
+          <p class="feed-more">
+            <a class="feed-older" href="{% url 'index' %}?c={{ next_cursor }}">Older</a>
+          </p>
+        {% endif %}
       {% else %}
         <p class="muted">Nothing here yet — add a film to your watchlist or mark one watched.</p>
       {% endif %}

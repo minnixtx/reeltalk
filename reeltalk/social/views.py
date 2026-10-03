@@ -53,7 +53,13 @@ from reeltalk.activitypub.mirrors import (
     refresh_mirror_profile,
     webfinger_actor_url,
 )
-from reeltalk.core.models import Shelf, feed_entries, popular_genres, trending_films
+from reeltalk.core.models import (
+    FEED_PAGE_SIZE,
+    Shelf,
+    feed_entries,
+    popular_genres,
+    trending_films,
+)
 from reeltalk.core.utils import render_markdown
 from reeltalk.moderation.decorators import can_act_on
 from reeltalk.moderation.models import report_state
@@ -138,7 +144,20 @@ def index(request):
     if request.user.is_authenticated:
         # The v0.1 timeline (§3.6/§3.7): shelf events + statuses (R33/R35);
         # anonymous visitors get the sign-up CTA in the feed's place.
-        data["feed"] = feed_entries(request.user)
+        #
+        # Page 1 of the cursor-paged feed (§2I increment 2, R132). The page
+        # size is a first-paint knob only — increment 3 loads the rest on
+        # scroll — but the "Older" link is rendered from the same
+        # ``next_cursor`` whether or not that JS is running, which is what
+        # decision 6 asks for: one template, one link, and JS changing only
+        # how it gets triggered, never whether the page works without it.
+        entries, next_cursor = feed_entries(
+            request.user,
+            limit=FEED_PAGE_SIZE,
+            cursor=request.GET.get("c") or None,
+        )
+        data["feed"] = entries
+        data["next_cursor"] = next_cursor
     return render(request, "home.html", data)
 
 

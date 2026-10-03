@@ -29,11 +29,11 @@ from reeltalk.core.models import (
     Shelf,
     ShelfFilm,
     Status,
-    feed_entries,
     mark_watched,
     shelve_to_watchlist,
     unshelve_from_watchlist,
 )
+from reeltalk.tests.feed import unpaged
 from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
@@ -364,7 +364,7 @@ def test_feed_entries_shows_watchlist_addition(db):
     alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     assert shelve_to_watchlist(alice, dune) == "added"
-    entries = feed_entries(alice)
+    entries = unpaged(alice)
     assert len(entries) == 1
     entry = entries[0]
     assert entry.kind == "watchlist"
@@ -386,7 +386,7 @@ def test_feed_entries_watched_carries_the_review(db):
         raw_content="Desert planet.",
     )
     # The D5 review rides on the watched entry — one row, not two.
-    entries = feed_entries(alice)
+    entries = unpaged(alice)
     assert len(entries) == 1
     entry = entries[0]
     assert entry.kind == "watched"
@@ -400,7 +400,7 @@ def test_feed_entries_watched_without_review_is_bare(db):
     dune = Film.objects.create(title="Dune", year=2021)
     mark_watched(alice, dune, rating="3")
     Status.objects.get(user=alice, film=dune).delete()  # soft delete
-    entries = feed_entries(alice)
+    entries = unpaged(alice)
     assert len(entries) == 1
     assert entries[0].kind == "watched"
     assert entries[0].rating is None
@@ -419,7 +419,7 @@ def test_feed_entries_membership_own_plus_followed(db):
     shelve_to_watchlist(alice, dune)
     mark_watched(bob, blade, rating="4")
     shelve_to_watchlist(carol, arrival)  # a stranger's event — excluded
-    got = {(e.user.localname, e.kind) for e in feed_entries(alice)}
+    got = {(e.user.localname, e.kind) for e in unpaged(alice)}
     assert got == {("alice", "watchlist"), ("bob", "watched")}
 
 
@@ -436,7 +436,7 @@ def test_feed_entries_orders_newest_first_across_kinds(db):
         shelved_date=timezone.now() - timedelta(days=1),
     )
     mark_watched(alice, blade, rating="4")  # now — newer than the watchlist row
-    entries = feed_entries(alice)
+    entries = unpaged(alice)
     assert [(e.kind, e.film.title) for e in entries] == [
         ("watched", "Blade Runner"),
         ("watchlist", "Dune"),
@@ -448,9 +448,9 @@ def test_feed_entries_watchlist_to_watched_transition(db):
     alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     shelve_to_watchlist(alice, dune)
-    assert {e.kind for e in feed_entries(alice)} == {"watchlist"}
+    assert {e.kind for e in unpaged(alice)} == {"watchlist"}
     mark_watched(alice, dune, rating="4")  # D1: off Watchlist, onto Watched
-    entries = feed_entries(alice)
+    entries = unpaged(alice)
     assert len(entries) == 1
     assert entries[0].kind == "watched"
 
@@ -461,7 +461,7 @@ def test_feed_entries_unshelve_removes_the_event(db):
     dune = Film.objects.create(title="Dune", year=2021)
     shelve_to_watchlist(alice, dune)
     assert unshelve_from_watchlist(alice, dune) is True
-    assert feed_entries(alice) == []
+    assert unpaged(alice) == []
 
 
 @pytest.mark.django_db
@@ -477,7 +477,7 @@ def test_feed_entries_review_without_shelf_row_stands_alone(db):
         rating="4",
         content="<p>Heard about it.</p>",
     )
-    entries = feed_entries(alice)
+    entries = unpaged(alice)
     assert len(entries) == 1
     assert entries[0].kind == "status"
     assert entries[0].content == "<p>Heard about it.</p>"
@@ -491,7 +491,7 @@ def test_feed_entries_comment_on_watched_film_stays_separate(db):
     Status.objects.create(
         user=alice, film=dune, status_type=Status.Type.COMMENT, content="<p>Update.</p>"
     )
-    kinds = sorted(e.kind for e in feed_entries(alice))
+    kinds = sorted(e.kind for e in unpaged(alice))
     assert kinds == ["status", "watched"]
 
 
@@ -519,7 +519,7 @@ def test_feed_entry_folded_review_carries_the_review_status_id(db):
     dune = Film.objects.create(title="Dune", year=2021)
     mark_watched(alice, dune, rating="4.5", content="<p>Desert planet.</p>")
     review = Status.objects.get(user=alice, film=dune)
-    entry = feed_entries(alice)[0]
+    entry = unpaged(alice)[0]
     assert entry.kind == "watched"
     assert entry.status_id == review.id
     assert entry.remote is False
@@ -532,7 +532,7 @@ def test_feed_entry_bare_watched_has_no_identity_and_is_not_interactive(db):
     dune = Film.objects.create(title="Dune", year=2021)
     mark_watched(alice, dune, rating="3")
     Status.objects.get(user=alice, film=dune).delete()  # soft delete
-    entry = feed_entries(alice)[0]
+    entry = unpaged(alice)[0]
     assert entry.kind == "watched"
     assert entry.status_id is None
     assert entry.interactive is False
@@ -543,7 +543,7 @@ def test_feed_entry_watchlist_add_is_not_interactive(db):
     alice = member(localname="alice", password="s3cretpass")
     dune = Film.objects.create(title="Dune", year=2021)
     shelve_to_watchlist(alice, dune)
-    entry = feed_entries(alice)[0]
+    entry = unpaged(alice)[0]
     assert entry.kind == "watchlist"
     assert entry.status_id is None
     assert entry.remote is False
@@ -564,7 +564,7 @@ def test_feed_entry_bulk_aggregate_has_no_identity(db):
             user=alice,
             shelved_date=now - timedelta(minutes=10 - offset),
         )
-    entries = feed_entries(alice)
+    entries = unpaged(alice)
     assert len(entries) == 1
     assert entries[0].other_count == 2
     assert entries[0].status_id is None
@@ -578,7 +578,7 @@ def test_feed_entry_standalone_status_carries_its_id(db):
     comment = Status.objects.create(
         user=alice, film=dune, status_type=Status.Type.COMMENT, content="<p>Hi.</p>"
     )
-    entry = feed_entries(alice)[0]
+    entry = unpaged(alice)[0]
     assert entry.kind == "status"
     assert entry.status_id == comment.id
     assert entry.remote is False
@@ -604,7 +604,7 @@ def test_feed_entry_remote_mirror_is_interactive(db):
         local=False,
         remote_url="https://remote.example/status/1",
     )
-    entry = next(e for e in feed_entries(alice) if e.user == carol)
+    entry = next(e for e in unpaged(alice) if e.user == carol)
     assert entry.kind == "status"
     assert entry.status_id == mirror.id
     assert entry.remote is True
@@ -635,7 +635,7 @@ def test_feed_entry_remote_review_folded_into_watched_is_interactive(db):
         local=False,
         remote_url="https://remote.example/status/2",
     )
-    entries = [e for e in feed_entries(alice) if e.user == carol]
+    entries = [e for e in unpaged(alice) if e.user == carol]
     assert len(entries) == 1
     entry = entries[0]
     assert entry.kind == "watched"
@@ -694,9 +694,9 @@ def test_feed_entries_excludes_blocked_users_shelf_events(db):
     alice.follows.add(bob)
     dune = Film.objects.create(title="Dune", year=2021)
     shelve_to_watchlist(bob, dune)
-    assert {e.user.localname for e in feed_entries(alice)} == {"bob"}
+    assert {e.user.localname for e in unpaged(alice)} == {"bob"}
     alice.blocks.add(bob)
-    assert feed_entries(alice) == []
+    assert unpaged(alice) == []
 
 
 @pytest.mark.django_db
@@ -709,7 +709,7 @@ def test_feed_entries_following_a_blocked_user_stays_hidden(db):
     alice.blocks.add(bob)
     dune = Film.objects.create(title="Dune", year=2021)
     mark_watched(bob, dune, rating="4")
-    assert feed_entries(alice) == []
+    assert unpaged(alice) == []
 
 
 @pytest.mark.django_db
@@ -720,9 +720,9 @@ def test_feed_entries_unblocking_restores_the_user(db):
     alice.blocks.add(bob)
     dune = Film.objects.create(title="Dune", year=2021)
     shelve_to_watchlist(bob, dune)
-    assert feed_entries(alice) == []
+    assert unpaged(alice) == []
     alice.blocks.remove(bob)
-    assert {e.user.localname for e in feed_entries(alice)} == {"bob"}
+    assert {e.user.localname for e in unpaged(alice)} == {"bob"}
 
 
 # --- Home page with shelf events ----------------------------------------------
@@ -800,7 +800,7 @@ def test_feed_entries_bulk_watchlist_is_one_entry(db):
     alice = member(localname="alice", password="s3cretpass")
     at = timezone.now() - timedelta(hours=1)
     _bulk_shelve(alice, 5, at)
-    entries = feed_entries(alice)
+    entries = unpaged(alice)
     assert len(entries) == 1
     entry = entries[0]
     assert entry.kind == "watchlist"
@@ -817,7 +817,7 @@ def test_feed_entries_bulk_gap_beyond_window_stays_separate(db):
     _bulk_shelve(alice, 1, at)
     # A deliberate add six minutes later is a separate event.
     _bulk_shelve(alice, 1, at + timedelta(minutes=6), step_seconds=0)
-    entries = feed_entries(alice)
+    entries = unpaged(alice)
     assert len(entries) == 2
     assert all(e.other_count == 0 for e in entries)
 
@@ -830,7 +830,7 @@ def test_feed_entries_bulk_chain_within_window_aggregates(db):
     # 8 — chaining still makes it one bulk operation.
     for i, offset in enumerate((0, 4, 8), start=1):
         _bulk_shelve(alice, 1, at + timedelta(minutes=offset), step_seconds=0)
-    entries = feed_entries(alice)
+    entries = unpaged(alice)
     assert len(entries) == 1
     assert entries[0].other_count == 2
 
@@ -851,7 +851,7 @@ def test_feed_entries_bulk_watched_absorbs_rating_statuses(db):
             rating="4",
             published_date=at + timedelta(seconds=i),
         )
-    entries = feed_entries(alice)
+    entries = unpaged(alice)
     assert len(entries) == 1
     assert entries[0].kind == "watched"
     assert entries[0].other_count == 2
@@ -872,7 +872,7 @@ def test_feed_entries_bulk_with_written_review_stays_separate(db):
         published_date=at + timedelta(seconds=1),
     )
     # The written review must stay visible — no aggregation for this group.
-    entries = feed_entries(alice)
+    entries = unpaged(alice)
     assert len(entries) == 2
     by_film = {e.film.title: e for e in entries}
     assert by_film["Bulk Film 01"].content == "<p>Great.</p>"

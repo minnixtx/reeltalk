@@ -51,11 +51,11 @@ from reeltalk.core.models import (
     Status,
     add_reply,
     conversation,
-    feed_entries,
     mark_watched,
     reply_counts,
     shelve_to_watchlist,
 )
+from reeltalk.tests.feed import unpaged
 from reeltalk.tests.members import member, site_admin
 
 User = get_user_model()
@@ -321,9 +321,9 @@ def test_a_reply_adds_no_feed_row(alice, bob, dune, admin):
     # and replying to it never grows the feed.
     alice.follows.add(bob)
     parent = _review(bob, dune)
-    before = len(feed_entries(alice))
+    before = len(unpaged(alice))
     _reply(alice, parent)
-    assert len(feed_entries(alice)) == before
+    assert len(unpaged(alice)) == before
 
 
 @pytest.mark.django_db
@@ -351,13 +351,13 @@ def test_feed_reply_counts_are_batched_not_paid_per_row(alice, bob, dune):
         for _ in range(index + 1):
             _reply(bob, post)
     with CaptureQueriesContext(connection) as ctx:
-        entries = feed_entries(bob)
+        entries = unpaged(bob)
     with_replies = len(ctx.captured_queries)
     assert sum(e.reply_count for e in entries) == 21  # the counts are real…
     assert with_replies > 0  # …and the probe can see queries at all
     Status.objects.filter(reply_parent__isnull=False).delete()
     with CaptureQueriesContext(connection) as ctx2:
-        feed_entries(bob)
+        unpaged(bob)
     assert len(ctx2.captured_queries) == with_replies
 
 
@@ -367,13 +367,13 @@ def test_a_folded_row_counts_the_replies_on_the_review_it_stands_for(alice, dune
     # number on it has to be the review's replies, not the shelf's.
     mark_watched(alice, dune, rating="4.5", content="<p>Desert planet.</p>")
     review = Status.objects.get(user=alice, film=dune)
-    entry = next(e for e in feed_entries(alice) if e.status_id == review.pk)
+    entry = next(e for e in unpaged(alice) if e.status_id == review.pk)
     assert entry.kind == "watched"
     assert entry.reply_count == 0
     member(localname="zoe", password="s3cretpass")
     zoe = User.objects.get(localname="zoe")
     _reply(zoe, review)
-    entry = next(e for e in feed_entries(alice) if e.status_id == review.pk)
+    entry = next(e for e in unpaged(alice) if e.status_id == review.pk)
     assert entry.reply_count == 1
 
 
