@@ -11,16 +11,20 @@ this file disagrees with this block, **this block is current and the other
 is history.**
 
 - **Next planned work: §2I — endless scroll on the home feed, and the
-  footer in the right rail. Plan reviewed and approved 2026-10-03; nothing
-  in it is built yet.** Recorded there: the owner's ask verbatim, the
-  finding that Mastodon's columns are independent scroll containers rather
-  than `position: sticky` (so it has the same second scroll container we
-  would, and only shows one scrollbar because the other column is short),
-  the live measurements the shape rests on, and **R131** — the rail gets
-  its own scroll with a thin themed scrollbar, trending stays at 8 films,
-  and the footer's brand block is centred on the tagline with REELTALK's
-  left edge meeting it. **Increment 1 is the next thing to build:** the
-  footer moves into the rail, CSS and templates only, no JS and no
+  footer in the right rail. ALL EIGHT DECISIONS SETTLED by the owner
+  2026-10-03 (R131 + R132); nothing in it is built yet.** Recorded there:
+  the owner's ask verbatim, the finding that Mastodon's columns are
+  independent scroll containers rather than `position: sticky` (so it has
+  the same second scroll container we would, and only shows one scrollbar
+  because the other column is short), the live measurements the shape rests
+  on, **R131** (rail scrolls on its own with a thin themed scrollbar,
+  trending stays at 8 films, footer brand block centred on the tagline),
+  and **R132** (page the already-computed list rather than in SQL, 20 rows
+  per page, 300-row DOM cap with the "Older" link always remaining, no-JS
+  gets a real paged link, scrolling pushes no URLs, home-only scope,
+  increments 2 and 3 deployed back-to-back). **Nothing is open — build to
+  the record and do not re-ask.** Increment 1 is the next thing to build:
+  the footer moves into the rail, CSS and templates only, no JS and no
   migration.
 - **Latest increment — the whole feed row opens its post — COMMITTED,
   gate-verified, DEPLOYED and live-proven on `reeltalk.minnix.dev`.** The
@@ -130,7 +134,7 @@ is history.**
 | Product contract — domain model, watch state, TMDB, federation surface, deployment shape | `PLAN.md` §3 |
 | **D-series** — the original product decisions (D1–D17) | `PLAN.md` §2 |
 | License audit | `PLAN.md` §4 |
-| **R-series** — rewrite-era decisions (R1–R131) | `PROGRESS.md` §4 |
+| **R-series** — rewrite-era decisions (R1–R132) | `PROGRESS.md` §4 |
 | What was actually built, with commit hashes | `PROGRESS.md` §2 |
 | Host and deploy facts for this box | `PROGRESS.md` §3 |
 | What is live right now | the block above |
@@ -5974,18 +5978,29 @@ wordmark's width and the column sizes to the wordmark instead, the tagline
 centres inside it, and the two left edges stop meeting. Degrades without
 breaking, but it is a live dependency, not a coincidence.
 
-### The eight decisions — one settled, seven recommended
+### The eight decisions — ALL SETTLED by the owner 2026-10-03
+
+The owner reviewed all eight in plain prose on 2026-10-03 and answered: *"I agree
+with all of your recommendations."* **None of these is open, and none is to be
+re-litigated at build time.** The reasoning below is kept as the record of what
+was weighed, not as an outstanding question.
 
 | # | Question | Status |
 | --- | --- | --- |
-| 1 | The R37 aggregation boundary | **Recommended:** page the already-computed list |
-| 2 | The sticky-column tension | **SETTLED — R131** |
-| 3 | Home-only or site-wide footer | **Recommended:** home only, via a shared partial |
-| 4 | Mechanism | **Recommended:** server-rendered fragment + hand-rolled vanilla JS |
-| 5 | History and deep links | **Recommended:** scrolling pushes nothing |
-| 6 | JS disabled | **Recommended:** a real "Older" page link |
-| 7 | End of data and a ceiling | **Recommended:** end marker + 300-row DOM cap |
-| 8 | Scope beyond home | **Recommended:** strictly the home feed |
+| 1 | The R37 aggregation boundary | **SETTLED (R132):** page the already-computed list |
+| 2 | The sticky-column tension | **SETTLED (R131):** rail scrolls on its own, thin themed scrollbar |
+| 3 | Home-only or site-wide footer | **SETTLED (R132):** home only, via a shared partial |
+| 4 | Mechanism | **SETTLED (R132):** server-rendered fragment + hand-rolled vanilla JS |
+| 5 | History and deep links | **SETTLED (R132):** scrolling pushes nothing |
+| 6 | JS disabled | **SETTLED (R132):** a real "Older" page link |
+| 7 | End of data and a ceiling | **SETTLED (R132):** end marker + 300-row DOM cap |
+| 8 | Scope beyond home | **SETTLED (R132):** strictly the home feed |
+
+Also settled with them: **`FEED_PAGE_SIZE = 20`** (matching `GENRE_PAGE_SIZE`;
+invisible under endless scroll, so it is a first-paint knob), and **the tie-order
+side effect of the stable sort key** — rows sharing an exact timestamp may come
+out in a different order than they do today. The owner accepted that explicitly
+rather than being told after the fact.
 
 **1 — The R37 aggregation boundary.** The straddling problem only exists if
 you refuse to compute the whole list. `feed_entries` already returns a
@@ -6118,11 +6133,12 @@ per-button init → the appended-like test goes red; hand-copy the row markup
 into a second template instead of sharing the partial → the HTML-equality
 test between the fragment and the matching slice of the full page goes red.
 
-**Ship 2 and 3 back-to-back.** They stay two commits with two gate runs so a
-failure is attributable, but the intermediate should not sit live: on its
-own, increment 2 changes the home feed from "everything on one page" to
-"20 rows and a link", which reads as a step backwards even though it is
-the same pagination genre pages and notifications already use.
+**Ship 2 and 3 back-to-back — settled with the owner 2026-10-03.** They stay two
+commits with two gate runs so a failure is attributable, but the intermediate
+should not sit live: on its own, increment 2 changes the home feed from
+"everything on one page" to "20 rows and a link", which reads as a step
+backwards even though it is the same pagination genre pages and notifications
+already use.
 
 ### Out of scope here
 
@@ -6451,3 +6467,5 @@ not an optimisation.
 - **R130 — §2G built: the admin's password field is writable, session eviction is Django's auth hash and not our code, an unverified account cannot reset at all, and a reset credential is its own table on shared abstract mechanics (owner decisions 2026-10-02, taken before the code was written).** Six answers, and the second one overturned how the fourth was going to be built. **(1) The admin's password field is now writable, which closes R129's reopened question.** `AdminUserChangeForm` sets `password = None` to drop the inherited `ReadOnlyPasswordHashField` and replaces it with unbound `password1`/`password2` inputs routed through `set_password()` in `save_model`; the old hash display survives as a separate read-only `password_hash`. **Why the owner took it:** the recovery case self-service reset cannot reach is a member who has lost the password *and* cannot use the address on file, and after decision (3) below that member has no self-service path whatsoever — so if the admin could not set a credential either, the only recovery was a shell on the server. **These two decisions are load-bearing on each other; do not undo one and keep the other.** **How to apply:** never re-bind `password` to a form field. The plain model save must never have the password column in its hands, which is what makes "no plaintext in the password column" a property of the code rather than of a disabled widget. **(2) Session eviction is already provided by Django and needs no code from us — and the standing rule is now a prohibition, not an implementation.** R129's premise ("Django's DB session backend cannot query sessions by user") is true and irrelevant: `get_user()` runs on every request and compares the session's `_auth_user_hash` against an HMAC of the user's *current* password, flushing the session on mismatch. Proven in this app's own stack before the build. The owner chose **rely on the auth hash** over a `password_updated_at` column, so there is no eviction migration and no per-request scan. **How to apply:** the invariant is protected by forbidding `update_session_auth_hash` in shipped code — a test scans `reeltalk/**/*.py` (excluding migrations and tests) for it as a call or an import. That function exists precisely to keep a session alive across a password change, which is the exception R129(4) refuses. If anyone adds it "to be kind" after a reset, the rule is silently gone. If anyone later adds a `password_updated_at` column, know it is redundant for eviction; the auth hash already does the job, O(1), across processes, surviving restarts. **(3) An account must have a verified address before it can do anything at all, including resetting its password — the owner's rule, verbatim: "A user must have a verified address before they are able to do anything at all on the site, this includes resetting their password. They should not even be able to login without verifying their email address first."** So `request_reset` refuses unverified accounts, and this is a deliberate security narrowing: the reset link is only ever mailed to an address we have already proven the member controls, which removes the worst case of a reset link landing in a stranger's inbox. **What it costs, named:** a member stuck at unverified and locked out of the password has exactly one door, the admin — which is why (1) had to land in the same increment. **(4) The reset credential is its own concrete table on a shared abstract base — not one table with a `purpose` column.** `SingleUseToken` (abstract) holds the mechanics once: code, clock, `live()`, `mint()` with supersede, `lock_live()`, the derived `link_state`/`send_state`, the refusal copy. `PasswordResetToken` and `EmailVerificationToken` are siblings with their own TTL, route, and meaning. **Why not a shared table:** a `purpose` column would make every verification link — minted to an address *not yet proven*, opened by mail clients and link scanners nobody controls — also a credential that sets a password, with only a `purpose` check at each consume between a forwarded email and a takeover. Two tables make the confusion structurally impossible rather than checked. The refactor is provably inert on the deployed verification table: `makemigrations` emitted only `+ Create model PasswordResetToken`. **How to apply:** a third single-use credential extends `SingleUseToken`; never widen a verification token into a password-setting credential. **(5) No auto-login after a reset.** The flow stays logged-out end to end, so a session on this instance is only ever created by the login form and the eviction rule needs no carve-out for "except the one that just did the resetting". **(6) An admin who changes their own password through the admin is signed out too** — accepted, and pinned as a test so it reads as the rule rather than as a bug. **"Every password change kills sessions" means no exception, including the actor's own.** **Copy rule that follows from (3):** the reset page states the verified-address precondition **statically, to every visitor**, and the post-submit answer is one uniform sentence that promises nothing. Making the copy conditional on the account's state would turn the form into a three-way oracle over registered / registered-but-unverified / unknown, which is a worse leak than a verified member reading one line they do not need.
 
 - **R131 — §2I: the right rail scrolls on its own with a thin themed scrollbar, trending stays at 8 films, and the footer's brand block centres on the tagline (owner decision 2026-10-03, approved against a browser prototype rather than a description).** Three parts, all settled by looking at rendered pixels. **(1) The rail gets its own scroll container** — `position: sticky; top: 0; max-height: 100vh; overflow-y: auto; overscroll-behavior: contain`. **Why this and not the alternatives, which both look plausible:** shrinking the rail so everything fits without scrolling is viewport-dependent — it breaks on any shorter window and on the first widget anyone adds to the rail later — and *sticky with no height cap is the original bug, not a fix*: it pins the rail's top and its bottom 270–450px, where the footer is meant to live, never comes into view. The owner's own objection to the first mock-up ("you wouldn't be able to reach the footer in the first place") is what rules option 3 out. **Why the second scrollbar is acceptable:** Mastodon has one too. Read off the owner's 4.7.2 peer, its columns are `display: flex; height: 100%` with the inner `.scrollable` at `overflow-y: scroll`, the document never scrolls, and the footer is a `LinkFooter` inside `.compose-panel` which itself is `overflow-y: auto` — **two scroll containers, one visible scrollbar, and only one shows because the other column is short.** That is the whole trick, so the honest framing is not "we accept a second scrollbar" but "we have the same container Mastodon does and we make ours barely visible instead of short". **(2) The scrollbar is thin and themed**, copied directly: `scrollbar-width: thin`, `scrollbar-color: rgba(90, 67, 44, 0.55) rgba(9, 8, 7, 0.35)`, `::-webkit-scrollbar` at 8px brightening on rail hover. **How to apply:** the thin treatment is load-bearing on the decision, not decoration — a default-width scrollbar beside the feed's is what makes the layout read as broken. Keep it in the same rule block as the sticky so no one strips one and keeps the other. **(3) Trending stays at 8.** Trimming to 5 was prototyped and measured: it saves 166px and the stacked footer costs 170px, so the rail ends up **47px taller than today either way**. **How to apply:** do not re-propose a trending trim as the way to avoid the rail scroll — it buys nothing and was tried. If the rail ever needs to genuinely fit, the lever is dropping a banner graphic (122px), not the trending list. **(4) The footer brand block is centred on the tagline, not on itself.** The first mock-up shrink-wrapped `.footer-brand` to 320px and centred the box while the tagline stayed left-aligned inside it, leaving 59px of dead space on its right — tagline centre 1074 against a rail centre of 1104. The owner asked for the tagline centred with REELTALK's left edge meeting the beginning of the phrase; the fix is one auto column sized by the tagline and centred, with the wordmark `justify-self: start` in the same column. **The dependency to know:** this works because the tagline (261px) is wider than the wordmark (119px), so the tagline sizes the column. Shorten the tagline below the wordmark and the column sizes to the wordmark, the tagline centres inside it, and the two left edges stop meeting — degrades without breaking, but it is a live dependency, not a coincidence. **How to apply:** if the tagline text or the wordmark size changes, re-measure rather than assuming the alignment survives.
+
+- **R132 — §2I increments 2 and 3: page the already-computed feed list rather than aggregating in SQL, 20 rows per page, a 300-row DOM ceiling, no pushed URLs, home-only scope, and the two increments deployed back-to-back (owner decisions 2026-10-03, all seven taken in one pass after the eight were laid out in plain prose).** The owner's answer was a blanket agreement — *"I agree with all of your recommendations"* — so the reasoning below is the record of what was weighed, not an open question. **(1) Page the computed list.** `feed_entries` already returns a fully grouped, fully sorted Python list, so slicing it changes nothing about aggregation — a bulk group cannot split, double, or lose its `absorbed` rating-only statuses because the grouping pass never sees a partial input. **The accepted cost, named before agreeing:** we keep doing the full O(all shelf rows + all statuses) computation on *every* page request. Per-request latency is unchanged from today's home page, which already does exactly this; total work grows with feed size, so a 250-page scroll over a 5,000-row feed means 250 full assemblies. **Why not SQL:** window functions make paging cheap but do not retire the Python — `_group_has_written_review`, the review→watched fold and the `absorbed` skip all still need cross-referencing — so it buys complicated SQL *and* the surviving Python, and it is a rewrite of the feed core with every existing feed test needing re-validation. **Why not per-page aggregation:** the `absorbed` set becomes page-local, so a rating-only status of a film absorbed on page 1 resurfaces as a duplicate row on page 2 — a correctness break, not a cosmetic one — and the boundary can't even be expressed cleanly, because the page boundary is over *entries* while entries are what grouping produces. **How to apply:** query-level aggregation stays a genuinely isolated later optimisation. The seam is clean — swapping to it changes no template, no URL and nothing a user sees — so do not pay for it before the feed is actually slow. **(2) Cursor, never offset.** `?page=N` over a live feed re-shows the last row of page 1 every time anyone posts mid-session. Each entry carries a stable sort key independent of list position — `(date, kind_rank, source_id)`, `source_id` being the `ShelfFilm.id` for a shelf entry and the `Status.id` for a status entry — and the page cursor carries that. **Accepted side effect, agreed explicitly rather than discovered later:** adopting a composite tiebreaker can reorder rows that share an exact timestamp, because the existing sort is stable on `date` alone and ties currently keep insertion order. The concatenation test pins "no loss, no duplication" regardless of tie order; a second test pins ties to a *defined* order so they are not arbitrary. **(3) `FEED_PAGE_SIZE = 20`,** matching `GENRE_PAGE_SIZE` — invisible under endless scroll, so it is purely a first-paint knob. **(4) A 300-row DOM ceiling.** Rows are not recycled off-screen (no virtualisation), so auto-load stops at 300 and the observer disconnects, leaving the "Older" link as the only way forward. **The property that matters is that it never silently stops** — there is always a visible way to continue. **(5) No-JS gets a real paged feed:** the "Older" link is always rendered as a genuine `<a href="?c=…">` and JS hides it to auto-load instead. This costs nothing on top of the home-only footer, because `position: sticky` and the rail's `overflow-y` are CSS, not JS. **How to apply:** never let the no-JS path become a second rendering path for the feed — one template, one link, JS only changes how it is triggered. **(6) Scrolling pushes nothing.** No `pushState`, the URL stays `/`, the back button leaves normally, no mid-scroll deep links and no resume-where-you-were. **Why:** a URL per scrolled page fills the back button with dozens of entries to click through just to leave the site, and a scroll position has no natural deep-link form anyway — sharing a specific post already has `/status/<id>/`. **Accepted cost:** you cannot link someone to "row 300 of my feed". **(7) Strictly the home feed.** The genre subfeed keeps its 20-per-page numbered links — it is public and anonymous-facing, numbered pages are genuinely useful there, and it has no tall-column problem. Same shape as §2H's scope call, where the click-target overlay deliberately went to home only and not to the film page. **How to apply:** the site is deliberately inconsistent between home and genre; do not "fix" it by extending endless scroll to genre without the owner. **(8) Deploy 2 and 3 back-to-back** as two commits with two gate runs so a failure is attributable, but never let the intermediate sit live — increment 2 alone turns the home feed into "20 rows and a link", which reads as a step backwards even though it is the same pagination genre pages and notifications already use.
