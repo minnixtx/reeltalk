@@ -24,13 +24,29 @@
             text. Caught by test_a_row_with_no_replies_shows_no_count.
             {% endcomment %}
             <li class="review" data-status="{{ entry.status_id|default:'none' }}">
+              {% if entry.status_id is not None %}
+                {# The whole row opens the post (owner ask, restated 2026-09-28). #}
+                {# A real anchor stretched over the row by .review-open rather #}
+                {# than a JS click handler on the <li>: a list item is not #}
+                {# focusable, so a scripted row would be unreachable by Tab #}
+                {# and have no middle-click-open-in-new-tab. The anchor holds #}
+                {# no content of its own, so nothing in the row can end up #}
+                {# nested inside it — the Like button, the film link and any #}
+                {# link in the review prose stay siblings and paint above it. #}
+                {# Its accessible name has to be supplied: with no text inside, #}
+                {# a screen reader would otherwise announce a nameless link. #}
+                <a class="review-open" href="{% url 'status' entry.status_id %}" aria-label="Open {{ entry.user.localname }}'s post"></a>
+              {% endif %}
               <div class="review-head">
                 {% if entry.user.avatar %}
                   <img class="avatar avatar-row" src="{{ entry.user.avatar.url }}" alt="">
                 {% else %}
                   <span class="avatar avatar-row avatar-placeholder" aria-hidden="true"></span>
                 {% endif %}
-                <span class="review-author">{{ entry.user.localname }}</span>
+                {# A link, as it already is on the post page, the reply partial #}
+                {# and notifications — the bare span here was why no profile #}
+                {# was reachable from the feed at all. #}
+                <a class="review-author" href="{% url 'user-profile' entry.user.localname %}">{{ entry.user.localname }}</a>
                 {% if entry.rating %}<span title="{{ entry.rating|floatformat:'-1' }} / 5">{{ entry.rating|stars }}</span>{% endif %}
                 {# R84: the row links on status_id, never on interactive — a remote mirror gets the page, not a control. #}
                 <span class="muted">{% if entry.status_id is not None %}<a href="{% url 'status' entry.status_id %}" title="Open this post">{{ entry.date|date:"Y-m-d" }}</a>{% else %}{{ entry.date|date:"Y-m-d" }}{% endif %}</span>

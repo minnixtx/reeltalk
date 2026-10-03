@@ -67,7 +67,7 @@
             {% else %}
               <span class="avatar avatar-row avatar-placeholder" aria-hidden="true"></span>
             {% endif %}
-            <span class="review-author">{{ review.user.localname }}</span>
+            <a class="review-author" href="{% url 'user-profile' review.user.localname %}">{{ review.user.localname }}</a>
             {% if review.rating %}<span class="rating" title="{{ review.rating|floatformat:'-1' }} / 5">{{ review.rating|stars }}</span>{% endif %}
             <span class="muted">{{ review.published_date|date:"Y-m-d" }}</span>
             {% if user.is_authenticated and review.user_id == user.id %}

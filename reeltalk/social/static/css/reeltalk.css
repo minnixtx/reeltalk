@@ -549,6 +549,47 @@ ul.errorlist {
 .review {
   padding: 0.75rem 0;
   border-bottom: 1px solid var(--border);
+  /* Containing block for the row's stretched open-the-post link. Without it
+     the overlay would size itself to the nearest positioned ancestor and
+     cover whatever else wears that name. */
+  position: relative;
+}
+
+/* The whole feed row opens its post (owner ask, restated 2026-09-28). A real
+   anchor stretched over the row rather than a JS click handler on the <li>:
+   a list item is not focusable, so a scripted row would be unreachable by
+   Tab and would lose middle-click / ctrl-click open-in-a-new-tab. The anchor
+   carries no content, so no control can be nested inside it — which also
+   keeps this out of invalid-HTML territory, since review prose is rendered
+   markdown and can contain links of its own. */
+.review-open {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  cursor: pointer;
+}
+
+/* Everything interactive inside the row paints above that overlay, or the
+   overlay swallows its clicks. Scoped to the three containers a row is made
+   of rather than listed control by control, so a control added to a row
+   later is covered by the rule instead of silently losing its click. */
+.review-head a,
+.review-head button,
+.feed-item a,
+.review-body a {
+  position: relative;
+  z-index: 1;
+}
+
+/* Hover says "this opens" without arriving lit: underline only, no colour
+   shift and no background lift, so it reads as text you can follow rather
+   than as the lit-red control treatment. Scoped off the overlay itself, so
+   hovering the Like button — which sits above it and never becomes the
+   overlay's hover target — does not underline the prose. R32: keyboard focus
+   gets the same signal as the mouse. */
+.review-open:hover ~ .review-body,
+.review-open:focus-visible ~ .review-body {
+  text-decoration: underline;
 }
 
 .review-head {
