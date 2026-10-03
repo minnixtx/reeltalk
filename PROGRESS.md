@@ -10,214 +10,169 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **Next planned work: §2I increments 2 and 3 — the cursor-paged home feed
-  and the endless scroll on top of it. Increment 1 (the footer in the rail) is
-  BUILT, PROVEN and DEPLOYED — the live site now draws the footer at the foot
-  of the rail, not as a wide band under the page. Nothing else in §2I is
-  built.** All eight decisions in §2I were
-  settled by the owner 2026-10-03 (R131 + R132) — build to the record and do
-  not re-ask. Recorded there: the owner's ask verbatim, the finding that
-  Mastodon's columns are independent scroll containers rather than
-  `position: sticky` (so it has the same second scroll container we would,
-  and only shows one scrollbar because the other column is short), the live
-  measurements the shape rests on, **R131** (rail scrolls on its own with a
-  thin themed scrollbar, trending stays at 8 films, footer brand block centred
-  on the tagline), and **R132** (page the already-computed list rather than in
-  SQL, 20 rows per page, 300-row DOM cap with the "Older" link always
-  remaining, no-JS gets a real paged link, scrolling pushes no URLs,
-  home-only scope, increments 2 and 3 deployed back-to-back). **Ship 2 and 3
-  back-to-back:** alone, increment 2 turns the home feed into "20 rows and a
-  link", which reads as a step backwards even though it is the same
-  pagination genre pages and notifications already use. The approved prototype
-  and its proof scripts are still on disk at `.qwen/tmp/rail-prototype.html`
-  and `.qwen/tmp/pw_*.mjs` — read them before re-deriving any geometry.
-- **Latest increment — the footer moves into the right rail (§2I increment 1,
-  R131) — COMMITTED, gate-verified, DEPLOYED and live-checked on
-  `reeltalk.minnix.dev`.** CSS and templates
-  only, exactly as scoped: no JS, no Python, no migration. The footer body is
-  now one partial (`templates/_footer.html`) with two wrappers — `base.html`
-  draws it inside `<footer class="site-footer">` unless a page suppresses the
-  `site_footer` block, and `home.html` suppresses that block and draws the
-  same partial at the foot of `.rail` with the `site-footer--rail` modifier.
-  `.rail` carries the R131 set (`position: sticky; top: 0; max-height: 100vh;
-  overflow-y: auto; overscroll-behavior: contain`) plus Mastodon's thin themed
-  scrollbar, and the brand block is centred on the tagline with the wordmark at
-  that column's left edge. **The values are the ones the owner approved in the
-  browser prototype**, recovered from `.qwen/tmp/rail-prototype.html` rather
-  than reconstructed — which surfaced two details the §2I prose did not carry:
-  the rail footer's `margin-top: 1.25rem` with `border-top-width: 2px` (a 3px
-  seam read as a second band boundary sitting on the genres panel), and that
-  the stacking is `display: flex; flex-direction: column`, not a grid.
-  **One judgment call beyond the record, open to veto:** below the
-  `@media (max-width: 64rem)` stack point the rail is reset to
-  `position: static; max-height: none; overflow: visible; overscroll-behavior:
-  auto`, because a viewport-capped sticky scroller sitting under a long feed
-  would hide the footer behind its own scrollbar. That follows the
-  narrow-layout mapping §2I already records for Mastodon
-  (`layout-single-column { height: auto }`) rather than making a new decision,
-  but §2I named the mapping without stating it as a rule to implement. The
-  same reset has to undo `overflow`, not just `position`. **A second addition
-  beyond the literal rule list, for a measured cause:** `.rail` also carries
-  `overflow-x: hidden`. Once one axis is non-visible the other cannot stay
-  `visible` and computes to `auto`, and the rotated rail banners overhang
-  their column by ~1px on each side (`scrollWidth` 353 against `clientWidth`
-  352 at 1440 and 1280) — which under classic scrollbars would raise a
-  horizontal scrollbar inside the rail. Headless Chromium here uses overlay
-  scrollbars and showed no bar either way (`clientHeight` 900 with
-  `overflow-x: auto` forced and with it hidden), so this is a defensive rule
-  against other configurations rather than a fix for something observed; it
-  costs nothing visually, because the scroll container was already clipping
-  that overhang.
-  **Browser proof — 17 checks in headless Chromium against the page the real
-  view rendered, served with the shipped stylesheet:** scrolling the document
-  600px leaves `.rail` at `top: 0` while the first `li.review` moves by
-  exactly −600; exactly one `.site-footer` on home and
-  `.rail.contains(footer) === true`; scrolling the rail to its own bottom
-  leaves the footer fully visible with `footer.bottom <= rail.bottom`; on
-  `/about/` exactly one footer, not inside a rail, carrying no modifier. The
-  settled brand geometry reproduces the prototype's numbers exactly — rail
-  centre 1104 = tagline centre 1104, wordmark left edge 974 = tagline left
-  edge 974, a 119px wordmark inside a 261px tagline column and not clipped.
-  **Measured, not assumed:** the footer is 178px against the recorded 170px,
-  and its internals sum to exactly that (2 border + 17.6 pad-top + 60 brand +
-  11.2 gap + 25 links + 11.2 gap + 32 sign-off + 19.2 pad-bottom), so the 8px
-  is font metric and not drift. The rail's *total* height is data-determined —
-  this fixture's eight trending titles wrap to two lines each, +174px on that
-  panel — so what is asserted there is the property that matters: the rail is
-  taller than the viewport, which is exactly why the footer needs its own
-  scroll.
-  **Non-vacuity proven by three mutations, each turning only the intended
-  checks red.** Drop `position: sticky` → the pinned-top check goes red in the
-  suite *and* in the browser, where the rail top drifts to −429.6 instead of
-  holding 0. Drop the base suppression → home renders two footers and the
-  three one-footer checks go red. Move the include out of the rail → the
-  containment checks go red. **The third mutation caught a vacuity in the
-  test itself:** the "last thing in the rail" slice ran past the end of the
-  rail's inner markup, came back empty, and so passed for a footer that was not
-  in the rail at all — now guarded by an explicit containment assert before
-  the slice. **Non-home pages are byte-identical:** the footer region of
-  `/about/` is 1462 bytes before and after, and the `base.html` diff is
-  confined to that region (3 insertions, 33 deletions, all inside the footer).
-  **Two traps worth carrying.** A multi-line `{# … #}` is not a comment in
-  Django — it renders as page text, and here it leaked a literal `<footer>`
-  into the footer and broke the page; §2H records this trap for `home.html` and
-  it arrived again from the partial's direction, so use `{% comment %}` blocks.
-  And the anti-drift comparison needs per-line whitespace normalisation,
-  because Django's `include` does not reindent: the blank line the partial's
-  comment leaves behind picks up whatever indentation each call site has.
-  **Deployed 2026-10-03** (`docker compose build` all services, then
-  `up -d`; `reeltalk-web-1` reported Healthy). **How the live instance was
-  checked without touching member data:** the served stylesheet
-  `/static/css/reeltalk.1086ac58a65c.css` diffs byte-identical against the
-  repo source once `collectstatic`'s `url()` rewriting is normalised, and the
-  `<footer class="site-footer site-footer--rail"> … </aside>` region the live
-  host serves is byte-identical (1501 chars) to the member render the 17-check
-  browser proof ran on. Same markup, same stylesheet, so the browser proof
-  transfers rather than needing a repeat. The live anonymous home does render
-  the rail and the footer inside it; it renders no feed rows, so the
-  scroll-pinning check itself has not been re-run against production — it
-  rests on that equivalence. **A live member-path proof was deliberately not
-  run here:** this stack holds 61 real user accounts, and minting a session
-  against any of them to satisfy a check that has already passed on identical
-  markup is not worth the intrusion. If a live member-path proof is ever
-  wanted, do it on a staging DB or a purpose-made account, not by borrowing
-  one of the 61.
-- **The whole feed row opens its post — COMMITTED, gate-verified, DEPLOYED
-  and live-proven on `reeltalk.minnix.dev`.** The
-  parked ask (owner restated 2026-09-28) is landed. A real anchor stretched
-  over the row (`.review-open`), gated on `status_id` and never on
-  `interactive`, with `aria-label="Open {author}'s post"` because an empty
-  anchor otherwise announces nothing. The Like button, the film link and
-  every link rendered out of review markdown keep their own clicks through
-  one rule scoped to the three containers a row is made of. Hover underlines
-  the prose only — no colour shift, no background lift. The author name is
-  now a profile link on home, genre and the film page; it already was one on
-  the post page, the reply partial and notifications. **No migration was
-  needed.** Record and live-proof detail: **§2H**.
-- **Credential-surface throttling — COMMITTED, gate-verified, DEPLOYED and
-  live-proven.** Sign-in, admin sign-in and signup are each throttled per
-  source address on a Postgres `CredentialAttempt` table
-  (`reeltalk/social/attempts.py`), mirroring the mail throttles so the
-  count is shared across every web process and survives a restart
-  (LocMemCache would reset on each deploy and disagree between workers).
-  Three separate budgets so none drains another; a correct login clears
-  its address's counter; a lock expires on the sliding window rather than
-  needing an admin to clear it — with one admin and no second admin, an
-  admin-cleared lock is a denial-of-service lever, so there is none here;
-  signup counts every attempt that reaches the name/email uniqueness
-  checks, bounding the account-existence oracle the necessary "name is
-  taken" disclosure creates; the reveal names the address and the wait,
-  never an account. Only a wrong password counts against the login/admin
-  budget (an unverified or suspended account got its password right, so
-  it is not a guess). Source is always `client_ip()`, never a raw header.
-- **Signup throttle live-proven on `reeltalk.minnix.dev` 2026-10-02** after
-  the owner flipped `signup_policy` to `OPEN` and confirmed the instance is
-  throwaway test data. Over HTTPS through the real Cloudflare→NPM→container
-  chain with CSRF: 7 signup POSTs using the already-taken name `minnix` — so
-  no account is created and no verification mail is sent, yet each still
-  reaches the uniqueness check. Attempts 1–5 returned the normal "name is
-  already taken"; attempts 6–7 were blocked with **"Too many attempts from
-  this address. Try again in 60 minutes."** and rendered a fresh empty form,
-  so the "name is taken" oracle is closed once throttled. The DB shows
-  exactly 5 signup rows under one resolved `source_ip`, the block persists
-  on the 60-min sliding window, and that same address's **login and admin
-  budgets read unblocked** — the three budgets are separate live, not just in
-  the mock. `social.0019_credentialattempt` applied on the web container's
-  own `migrate`. **What is still mock-only:** the login/admin wrong-password
-  counting and correct-login-clears paths were not exercised with real bad
-  credentials against the live instance — the throttle mechanism they share
-  is the code the signup test just exercised, but a live wrong-password login
-  test remains open if the owner wants that half seen live too.
-- **Live on `reeltalk.minnix.dev` and proven there:** everything through
-  **§2G**, plus the R127/R128 client-address work. Deployed 2026-10-02;
-  `social.0018_passwordresettoken` applied cleanly on the web container's
-  own `migrate`. Email verification is live-proven; sign-in is gated on a
-  verified address (R119); the admin can read the verified state and
-  trigger the mail but can never attest it (R123); and password recovery
-  works end to end over real mail.
-- **§2F is COMPLETE.** Nothing inside it is outstanding — do not re-run its
-  proofs. The spec is §2F; the outcome is its "Executed" records and the
-  four "Live proof" sections at its end.
-- **§2G is COMPLETE and live-proven — no work remains.** The owner drove the
-  browser proof on 2026-10-02: reset by email link and reset by the admin's
-  new field both worked against a live account, and the instance's own
-  records back it up — one spent token with no send error, **one**
-  password-changed notice queued for the admin change and **none** for the
-  self-service one, and the session picture consistent with the auth-hash
-  eviction (the only live warden session postdates the change; all the
-  admin's sessions untouched). The record is the "Executed — §2G is DONE"
-  section at the end of §2F, including the live-proof detail.
-- **Gate baseline: `2129 passed + 5 skipped`.** `ruff check`,
-  `ruff format --check` and `makemigrations --check` all clean. The +23
-  over the prior 2106 is 21 tests in `test_footer_in_rail.py` plus 2
-  clean-room param instances — one for that test file and one for the new
-  `templates/_footer.html`. `makemigrations --check` reporting *No changes
-  detected* is the confirmation that increment 1 needed no migration.
+- **§2I IS CLOSED OUT. All three increments are BUILT, PROVEN AND DEPLOYED
+  on `reeltalk.minnix.dev`, and nothing in §2I is open.** The footer lives
+  at the foot of the rail (increment 1, R131); the home feed is paged by
+  cursor at 20 rows (increment 2, R132 1–3); and it pulls the next page in
+  on scroll so the reader never clicks (increment 3, R132 4–6). Increments
+  2 and 3 went out back-to-back exactly as decision 8 required, so the
+  intermediate "20 rows and a link" state never sat live on the site.
+  **There is no queued §2I work — the next thing is the owner's call.**
+- **Increment 2 — the feed is paged by cursor, not by offset (R132 1–3).**
+  `feed_entries(user, *, limit=None, cursor=None)` now returns
+  `(entries, next_cursor)` over the *already grouped and sorted* list, so
+  aggregation never sees a partial input and a bulk group cannot split,
+  double, or lose its absorbed statuses at a boundary. Each entry carries a
+  stable sort key independent of list position — `(date, kind_rank,
+  source_id)`, `source_id` being the `ShelfFilm.id` for a shelf event and
+  the `Status.id` for a status — and the cursor is that key, base64url in
+  the URL as `?c=`. `FEED_PAGE_SIZE = 20`, matching `GENRE_PAGE_SIZE`.
+  `index()` renders page 1 plus a real `<a href="?c=…">` "Older" link, so
+  the no-JS path reaches older rows without any script. **The accepted cost
+  is unchanged and deliberate:** the full O(all shelf rows + all statuses)
+  computation still runs on every page request. Per-request latency is what
+  the home page already paid; total work grows with feed size. Query-level
+  aggregation stays an isolated later optimisation whose seam is clean — it
+  changes no template, no URL, nothing a user sees.
+- **Increment 3 — the endless scroll (R132 4–6).** The row markup moved into
+  one shared partial (`templates/_feed_row.html`) that both `home.html` and
+  the new `/feed/page/` fragment route include. **That sharing is the whole
+  anti-drift guarantee of the increment**: the §2H click-target overlay, its
+  `status_id` gate and its `aria-label` cannot become two things that drift,
+  because only one file draws a row. A JSON payload with a JS-built row was
+  rejected outright for exactly that reason. `feed.js` watches a sentinel
+  with `IntersectionObserver`, appends the fragment through a
+  `<template>` element (the only place a bare run of `<li>` parses legally),
+  and pushes **no URL at all** — no `pushState`, no `replaceState`, no hash
+  — so the back button still means "leave" and sharing a specific post keeps
+  `/status/<id>/`. At the 300-row DOM ceiling the observer disconnects and
+  the "Older" link is **un-hidden** rather than the feed simply stopping.
+  `likes.js` moved to one delegated `document` listener, because per-button
+  binding at `DOMContentLoaded` would have left every Like button on an
+  appended row dead.
+- **The property increment 3 was really built to hold is "never silently
+  stops"**, and it is proven in both directions rather than asserted. Against
+  a 320-entry throwaway feed the clean build plateaus at exactly 300 rows
+  after 14 fragment requests, `#feed-more` flips back to visible, its href
+  points at exactly the cursor the scroll stopped on, and following it
+  renders a real 20-row page whose first row is not a repeat of row 300.
+  With the ceiling block removed the same run grows to all 320 rows and
+  `#feed-more` **stays hidden** — silently stuck with no way forward, which
+  is the failure decision 4 exists to prevent. The two lines that make it
+  happen are pinned in CI by
+  `test_the_scroll_js_stops_at_the_dom_ceiling_and_reveals_the_link`, since
+  a browser run cannot be part of the gate.
+- **Browser proof, both fixtures, all checks green with the mutations
+  confirmed non-vacuous.** `.qwen/tmp/pw_scroll.mjs` (60-entry fixture) —
+  20 rows on first paint, the Older link hidden while JS is active, 20→40→60
+  append steps with zero duplicate `data-cursor` or `data-status` values
+  across the whole DOM, **a Like on a row that did not exist at page load
+  toggles for real**, that row's `.review-open` navigates to its own
+  `/status/<id>/` and reports `closest('a.review-open') === null` on its own
+  Like button (§2H holds on rows created after page load), the rail stays
+  pinned at `top: 0` across the append with the footer still reachable inside
+  it, the end marker appears at the last page, request counts stop
+  increasing, and the URL never leaves `/`. `.qwen/tmp/pw_ceiling.mjs`
+  (320-entry fixture) — the ceiling set described above. **Three mutations,
+  each turning exactly the checks that should catch it red:** reverting
+  `likes.js` to per-button init kills only the appended-Like check;
+  hand-copying the row markup into `_feed_page.html` instead of sharing the
+  partial kills both HTML-equality tests; removing the ceiling block kills
+  the ceiling, the reveal, the premature-end-marker and the link-continues
+  checks.
+- **Deployed and live-checked without touching a real account.** The live
+  stack is the real site with 61 real members, so the increment-1 pattern
+  holds — verify the artifact, do not sign in as somebody. The anonymous
+  home page still renders the landing and ships **neither** `feed.js` nor
+  `likes.js`; the deployed `/static/js/feed.3911e9b117a9.js` is
+  **byte-identical** to the repo's `reeltalk/core/static/js/feed.js`
+  (4656 bytes both sides, with the hash recomputed here using Django's own
+  md5-first-12 algorithm, so a match proves the served file came from this
+  tree); and `/feed/page/` answers `302 → /login/?next=/feed/page/` to an
+  anonymous request, with the cursor variant gated the same way.
+  `.qwen/tmp/deploy_check_inc3.py` is that check.
+- **Gate baseline is now `2172 passed + 5 skipped`** (from 2129 + 5).
+  `ruff check`, `ruff format --check` and `makemigrations --check` all
+  clean, and `makemigrations --check` reporting *No changes detected* is the
+  confirmation that neither increment needed a migration. The +43 is +21 in
+  increment 2 (19 paging tests + 2 clean-room params) and +22 in increment 3
+  (17 scroll tests + 5 clean-room params — one each for `feed.js`,
+  `_feed_row.html`, `_feed_end.html`, `_feed_page.html` and
+  `test_feed_endless_scroll.py`).
+- **Five things were decided beyond the literal R132 rule list. All are open
+  to veto; none are load-bearing on a decision the owner took.** (1) The
+  route is `feed/page/` with a trailing slash, not the record's literal
+  `/feed/page?c=` — the slash follows this project's convention everywhere,
+  and `CommonMiddleware`'s `APPEND_SLASH` turns the literal form into a
+  redirect rather than a 404. (2) `data-cursor` was added to the row element
+  and `id`/`data-next` to the page (`#feed-list`, `#feed-more`,
+  `#feed-older`, `#feed-sentinel`), so the scroll reads "where to next" off
+  the last row it appended instead of holding separate state that could
+  disagree with the DOM. (3) The sentinel renders
+  `data-next="{{ next_cursor|default:'' }}"` and **the `|default:''` is
+  load-bearing, not tidiness** — Django renders a variable that resolves to
+  `None` as the literal string `"None"`, so without it a one-page feed hands
+  the scroll a truthy cursor it cannot decode, the unreadable-cursor fallback
+  returns page 1, and the page appends a duplicate of what is already on
+  screen. (4) An unreadable cursor falls back to page 1 rather than erroring:
+  a hand-mangled `?c=` should show the reader the top of their feed, not a
+  500. (5) `spread_shelve` and `bulk_shelve` moved into
+  `reeltalk/tests/feed.py` as shared public helpers, because the paging
+  tests and the scroll tests needed the same fixtures and two copies of a
+  fixture is how two tests start meaning two different things.
+- **One consequence of (2) broke 17 §2H tests, and it is worth recording
+  because the failure message pointed at the wrong thing.** Both
+  `test_feed_click_target.py` and `test_comments.py` located a feed row by
+  the *exact* opening tag `<li class="review" data-status="N">`. Adding
+  `data-cursor` to that element made all 17 report "the target row did not
+  render at all" — the rows rendered fine; the helper's marker was just too
+  tight for a change that had nothing to do with what those tests check. Both
+  now match up to the closing bracket, with the status value still matched
+  exactly (the closing quote stays in the marker, so row 39 cannot satisfy a
+  lookup for row 392). **How to apply:** a test helper that pins a whole
+  opening tag is a claim that no attribute will ever be added to that element.
+  Match the attributes you are actually testing.
+- **A static-file trap that cost two wasted proof runs, recorded so no one
+  re-derives it: mutating a static file on disk does not change what the
+  browser runs.** `CompressedManifestStaticFilesStorage` means templates
+  reference `feed.<hash>.js`, so editing `js/feed.js` changes nothing the
+  page loads — and WhiteNoise indexes the pre-compressed `.gz` sibling at
+  startup, so *deleting* that sibling does not fall back to the plain file
+  either: a request carrying `Accept-Encoding: gzip` (every real browser)
+  gets **HTTP 500**, the script never runs, and the page then looks like the
+  feature is simply absent. Both mutant runs that "passed" were actually
+  running the clean file. **How to apply:** to run a JS mutation proof here,
+  intercept the request at the network layer (`ctx.route` + `fulfill`) and
+  assert the interception happened, rather than editing served files. The
+  guard is why `pw_ceiling.mjs` fails fast on any non-200 for `feed*.js` or
+  any `pageerror` — a dead script must never be mistakable for a feed that
+  stopped early.
+- **The comments in the increment 2/3 code now cite R132 by its own
+  numbering.** They were written against a different ordering and pointed at
+  the wrong paragraphs — the ceiling is R132 **(4)**, the no-JS link and the
+  "one template, one link" rule are **(5)**, no pushed URLs is **(6)**,
+  home-only scope is **(7)**. Corrected in place; treat the numbers in the
+  code as accurate against the record now.
+- **Scope is strictly the home feed, and the inconsistency with the genre
+  subfeed is deliberate.** Genre keeps its numbered 20-per-page links: it is
+  public and anonymous-facing, numbered pages are genuinely useful there,
+  and it has no tall-column problem. Same shape as §2H's scope call. **Do
+  not "fix" it** by extending endless scroll to genre without the owner. No
+  third column (R64), no virtualisation, no mid-scroll deep links, no
+  resume-where-you-were, no live updates.
 - **A real browser can be driven over SSH without the Chrome extension, and
-  that is how this increment's click geometry was proven.** There is no GUI
-  session for `minnix` and the Qwen extension cannot be installed
-  headlessly, but `playwright-core` ships inside the browser-use runtime
-  and drives the system Chromium 151 headlessly via `executablePath`.
-  `node_repl` is now registered at user scope against
-  `/home/minnix/.local/share/qwen-node-repl/node_modules/@qwen-code/node-repl-mcp/dist/index.js`
-  and needs a Qwen restart to load. Two traps worth not re-deriving: the
-  bundled `npm`/`npx` are unusable because they sit under
-  `/home/minnix/.local/lib/qwen-code/package.json`, which declares
-  `"type": "module"`, so npm's CommonJS entry throws `require is not
-  defined` — call `node/lib/node_modules/npm/bin/npm-cli.js` with the
-  bundled node instead; and the browser skill pins
-  `@qwen-code/node-repl-mcp@0.1.7`, which is not published — latest is
-  `0.1.6`, which that same skill names as the real minimum. The extension
-  path itself stays dead: nothing connects to the native host without a
-  browser wearing it.
-- **Three rules bind anyone who touches §2G** (all in R130, none
-  re-openable): session eviction is **Django's auth hash, not our code** —
-  a test scans shipped code for `update_session_auth_hash` and fails on it,
-  because that function exists to keep a session alive across a password
-  change, which is the exception "no exception" refuses; a spent reset
-  token **never** writes verified state (R123's single writer); and the
-  admin's password input goes through `set_password()`, never a bound
-  `password` form field.
+  that is how every increment here was proven.** There is no GUI session for
+  `minnix` and the Qwen extension cannot be installed headlessly, but
+  `playwright-core` ships inside the browser-use runtime and drives the
+  system Chromium headlessly via `executablePath`
+  (`/usr/bin/chromium-browser`, `--no-sandbox`). Reuse
+  `.qwen/tmp/pw_scroll.mjs` and `.qwen/tmp/pw_ceiling.mjs` rather than
+  rebuilding a harness, and `.qwen/tmp/seed_scroll_proof.py` for the
+  fixture — it takes `SEED_ENTRIES` so one script serves both the 60-row
+  and the 320-row proof. **All session minting and every fixture write goes
+  to a throwaway database on a separate container, never the live one**,
+  with `SECURE_COOKIES=0` so the session survives over plain http and a
+  private `STATIC_ROOT` so the shared static volume is never touched.
 - **git:** read the current state with `git status` and `git log -n 1
   --oneline` rather than trusting anything written here. Anything a single
   command answers for free is a pointer in this block, not a value; only a
