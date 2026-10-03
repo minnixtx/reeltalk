@@ -10,20 +10,18 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **Latest increment — the whole feed row opens its post — COMMITTED and
-  gate-verified; NOT YET DEPLOYED.** The parked ask (owner restated
-  2026-09-28) is landed. A real anchor stretched over the row
-  (`.review-open`), gated on `status_id` and never on `interactive`, with
-  `aria-label="Open {author}'s post"` because an empty anchor otherwise
-  announces nothing. The Like button, the film link and every link rendered
-  out of review markdown keep their own clicks through one rule scoped to
-  the three containers a row is made of. Hover underlines the prose only —
-  no colour shift, no background lift. The author name is now a profile
-  link on home, genre and the film page; it already was one on the post
-  page, the reply partial and notifications. Record: **§2H**.
-- **This increment is not deployed and needs no migration.** The live
-  instance still shows the timestamp-only link; `up -d web` on the rebuilt
-  image is all it needs.
+- **Latest increment — the whole feed row opens its post — COMMITTED,
+  gate-verified, DEPLOYED and live-proven on `reeltalk.minnix.dev`.** The
+  parked ask (owner restated 2026-09-28) is landed. A real anchor stretched
+  over the row (`.review-open`), gated on `status_id` and never on
+  `interactive`, with `aria-label="Open {author}'s post"` because an empty
+  anchor otherwise announces nothing. The Like button, the film link and
+  every link rendered out of review markdown keep their own clicks through
+  one rule scoped to the three containers a row is made of. Hover underlines
+  the prose only — no colour shift, no background lift. The author name is
+  now a profile link on home, genre and the film page; it already was one on
+  the post page, the reply partial and notifications. **No migration was
+  needed.** Record and live-proof detail: **§2H**.
 - **Credential-surface throttling — COMMITTED, gate-verified, DEPLOYED and
   live-proven.** Sign-in, admin sign-in and signup are each throttled per
   source address on a Postgres `CredentialAttempt` table
@@ -5788,10 +5786,61 @@ row-scoped, not borrowed from a neighbour. Hover over the overlay left
 `.review-body` at `text-decoration: underline`, `background: rgba(0,0,0,0)`,
 `color: rgb(233,223,203)` — underlined, not lit, exactly the decision.
 
-**What this does not cover:** the real Like round trip and the real
-`/status/` page load, because the probe served static files rather than the
-running app. Both are covered by existing tests from earlier increments.
-**Not deployed** — the live instance still shows the timestamp-only link.
+### Deployed and live-proven on `reeltalk.minnix.dev` (2026-10-03)
+
+Deployed with `docker compose up -d` on a clean rebuild of HEAD. **No
+migration** — `makemigrations --check` was clean and the entrypoint applied
+nothing new. The live page now loads
+`/static/css/reeltalk.d9a3ee7922ed.css`, which carries all three overlay
+rules; the collected `static_volume` copy that had been sitting since
+2026-09-22 was refreshed by this deploy, so the stale-volume trap that bit
+the earlier local probe is gone on the live host.
+
+Probed in a real headless Chromium against the running instance over real
+HTTPS, authenticated as `minnix` through a session minted in-container.
+Live feed: 8 rows, 6 of them carrying a post.
+
+| Point in `li.review[data-status=31]` | Element that receives the click |
+| --- | --- |
+| overlay | `href="/status/31/"`, `aria-label="Open minnix@upallnight.minnix.dev's post"`, covering the **whole row** (width and height matched to within 2px) |
+| author name | `a.review-author` → `/user/minnix@upallnight.minnix.dev/`, `closest('a.review-open')` null |
+| Like button | the button's own label span, `closest('a.review-open')` null |
+| date link | its own anchor → `/status/31/`, outside the overlay |
+| review prose | `a.review-open` → `/status/31/` |
+
+On `li.review[data-status=25]`, the row that has both a poster thumb and a
+film link: the film title takes its own click (`/film/421/`), the author
+takes its own (`/user/minnix/`), and **the poster thumb falls through to
+the row's overlay** (`/status/25/`). That last one is the adjacency the
+proposal named as the cost of a whole-row target and the owner accepted:
+the thumbnail opens the post while the title beside it opens the film. It
+is now confirmed behaviour rather than a predicted tradeoff — if it reads
+wrong in use, the fix is to raise `.feed-item` the same way the controls
+are raised, which is a one-line change and does not disturb anything else.
+
+The public genre subfeed was probed too, since its author link changed with
+no overlay by design: `/genre/thriller/` renders 4 rows, `.review-author`
+is an `<a href="/user/minnix/">` and takes its own click, and
+`li.review` there contains **no** `.review-open` — the scope decision
+holding on the live host, not just in the template.
+
+**Probe teardown:** the three sessions minted for this check were deleted by
+exact key; the 34 sessions that predate it, including the owner's own, are
+untouched. No user, status, shelf row or other data was created.
+
+### The session-minting trap worth recording
+
+The first two minted sessions authenticated as nothing at all, and the
+failure was invisible: the page rendered normally, anonymously. The stored
+`_auth_user_backend` was `django.contrib.auth.backends.ModelBackend`,
+which is **not** in this project's `AUTHENTICATION_BACKENDS` — the only
+entry is `reeltalk.social.backends.EmailVerificationBackend` (R119). A
+session naming a backend that is not configured does not error; `get_user()`
+simply returns `AnonymousUser`. **Mint with
+`reeltalk.social.backends.EmailVerificationBackend` and nothing else**,
+and assert the render carries `Log out` before trusting any member-path
+check — the same rule as every other anonymous-check trap, arriving from a
+direction the earlier records did not name.
 
 ## 3. Host facts (this box)
 
