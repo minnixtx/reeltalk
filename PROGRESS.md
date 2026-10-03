@@ -10,8 +10,22 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **Latest increment — credential-surface throttling — COMMITTED, gate-verified,
-  DEPLOYED and live-proven.** Sign-in, admin sign-in and signup are each throttled per
+- **Latest increment — the whole feed row opens its post — COMMITTED and
+  gate-verified; NOT YET DEPLOYED.** The parked ask (owner restated
+  2026-09-28) is landed. A real anchor stretched over the row
+  (`.review-open`), gated on `status_id` and never on `interactive`, with
+  `aria-label="Open {author}'s post"` because an empty anchor otherwise
+  announces nothing. The Like button, the film link and every link rendered
+  out of review markdown keep their own clicks through one rule scoped to
+  the three containers a row is made of. Hover underlines the prose only —
+  no colour shift, no background lift. The author name is now a profile
+  link on home, genre and the film page; it already was one on the post
+  page, the reply partial and notifications. Record: **§2H**.
+- **This increment is not deployed and needs no migration.** The live
+  instance still shows the timestamp-only link; `up -d web` on the rebuilt
+  image is all it needs.
+- **Credential-surface throttling — COMMITTED, gate-verified, DEPLOYED and
+  live-proven.** Sign-in, admin sign-in and signup are each throttled per
   source address on a Postgres `CredentialAttempt` table
   (`reeltalk/social/attempts.py`), mirroring the mail throttles so the
   count is shared across every web process and survives a restart
@@ -63,11 +77,27 @@ is history.**
   eviction (the only live warden session postdates the change; all the
   admin's sessions untouched). The record is the "Executed — §2G is DONE"
   section at the end of §2F, including the live-proof detail.
-- **Gate baseline: `2086 passed + 5 skipped`.** `ruff check`,
-  `ruff format --check` and `makemigrations --check` all clean. The +24
-  over the prior 2062 is 21 new throttle tests plus 3 clean-room param
-  instances for the three new files (`attempts.py`, the `0019` migration,
-  and the throttle test file).
+- **Gate baseline: `2106 passed + 5 skipped`.** `ruff check`,
+  `ruff format --check` and `makemigrations --check` all clean. The +20
+  over the prior 2086 is 19 tests in `test_feed_click_target.py` plus 1
+  clean-room param instance for that new file.
+- **A real browser can be driven over SSH without the Chrome extension, and
+  that is how this increment's click geometry was proven.** There is no GUI
+  session for `minnix` and the Qwen extension cannot be installed
+  headlessly, but `playwright-core` ships inside the browser-use runtime
+  and drives the system Chromium 151 headlessly via `executablePath`.
+  `node_repl` is now registered at user scope against
+  `/home/minnix/.local/share/qwen-node-repl/node_modules/@qwen-code/node-repl-mcp/dist/index.js`
+  and needs a Qwen restart to load. Two traps worth not re-deriving: the
+  bundled `npm`/`npx` are unusable because they sit under
+  `/home/minnix/.local/lib/qwen-code/package.json`, which declares
+  `"type": "module"`, so npm's CommonJS entry throws `require is not
+  defined` — call `node/lib/node_modules/npm/bin/npm-cli.js` with the
+  bundled node instead; and the browser skill pins
+  `@qwen-code/node-repl-mcp@0.1.7`, which is not published — latest is
+  `0.1.6`, which that same skill names as the real minimum. The extension
+  path itself stays dead: nothing connects to the native host without a
+  browser wearing it.
 - **Three rules bind anyone who touches §2G** (all in R130, none
   re-openable): session eviction is **Django's auth hash, not our code** —
   a test scans shipped code for `update_session_auth_hash` and fails on it,
@@ -1501,14 +1531,14 @@ Each is sized for one session and ends at a committed, deployed, verified checkp
 
 Notifications (`PLAN.md:58`, `§5`) — "you got a like / someone replied" needs the whole unbuilt `Notification` model, page and count badge. This feature will want it, but it is a separate piece of work, not a tail on these six.
 
-**PARKED — click the post body to open it (restated by the owner 2026-09-28, explicitly out of scope for the moderation arc).** The owner's original §2A ask was *"clicking on a post in the feed and having it open in its own page similar to how it works in Mastodon."* What shipped satisfies the navigation half but not the interaction half: `templates/home.html:36` puts the link on the **muted timestamp** (`title="Open this post"`) and nothing else. The review body, the row, and the author name are all inert — `review-author` is a plain `<span>`, so **a profile is not reachable from the feed at all**. Mastodon makes the post content itself the click target, which is what the owner wants here.
+**CLOSED 2026-10-02 — click the post body to open it (parked at R84, restated by the owner 2026-09-28, landed in §2H).** The owner's original §2A ask was *"clicking on a post in the feed and having it open in its own page similar to how it works in Mastodon."* What shipped satisfies the navigation half but not the interaction half: `templates/home.html:36` puts the link on the **muted timestamp** (`title="Open this post"`) and nothing else. The review body, the row, and the author name are all inert — `review-author` is a plain `<span>`, so **a profile is not reachable from the feed at all**. Mastodon makes the post content itself the click target, which is what the owner wants here.
 
 This is the exact item **R84 deferred** — *"the link's visual affordance — whole row vs timestamp permalink vs title, and how a linked row should look different from a plain one — is not in increment 2. That is design work, which stays parked at R73"* — so it is a parked decision coming back, not a bug. Two things to settle when it is picked up, neither of which is styling-only:
 
 - **The click target must not swallow the controls inside the row.** A Like button and the reply count live inside the same row; making the row clickable means the button's click must not also navigate. Mastodon solves this by linking the content and leaving controls outside the link, not by putting a click handler on a container that holds buttons.
 - **The author name is a separate link, not part of this one.** Whether `review-author` points at the profile is a question R84 never addressed, and it is what makes a suspended account's profile reachable from the feed — relevant to the moderation surface, where the unsuspend control now lives on that profile.
 
-**How to apply:** when the R73 pass resumes, this is a feed-IA item as much as a visual one. Do not treat it as "add a hover colour."
+**Resolved in §2H, 2026-10-02.** Both questions above are settled there and neither is open: the whole row is the target via a stretched-link overlay whose deliberate emptiness keeps every control a sibling rather than a descendant (so the Like button, the film link and any link rendered out of the review markdown keep their own clicks), and `review-author` is now a real profile link on the feed, the genre subfeed and the film page. The R73 pass inherits a feed that already answers this — do not re-open it.
 
 ### Feed interactions increment 1 — feed row identity (executed 2026-09-22, commit `9b78651`)
 
@@ -5652,6 +5682,116 @@ unknown to the person who needs it.
 
 **§2G has no remaining work.** Built, gate-verified, deployed, and proven in
 a real browser on both the self-service and the admin path.
+
+## 2H. The feed row as the click target (parked item, picked up 2026-10-02)
+
+**The ask, in the owner's words:** *"clicking on a post in the feed and
+having it open in its own page similar to how it works in Mastodon."*
+§2A increment 2 satisfied the navigation half by putting a permalink on
+the row's muted timestamp and parked the interaction half at R84 → R73.
+The parked record is §2A's "PARKED — click the post body to open it", and
+this section closes it.
+
+### The four things settled with the owner before any code was written
+
+All four landed on the recommended option, 2026-10-02.
+
+| # | Question | Decision |
+| --- | --- | --- |
+| 1 | Whole row, or the review body only? | **The whole row.** Body-only is the closer Mastodon analogue and was recommended against on a concrete hole: a rating-only review is `review_rating` with empty content (`core/models.py:1062`), so `{% if entry.content %}` renders no `.review-body` at all — a row with a real post behind it and nothing to click. |
+| 2 | Mechanism | **Stretched-link overlay.** A real `<a class="review-open">` with `position:absolute; inset:0` over a `position:relative` `.review`, its accessible name supplied as `aria-label`. Rejected: a JS row handler on the `<li>` — a list item is not focusable, so a scripted row would be unreachable by Tab and would lose middle-click / ctrl-click open-in-a-new-tab. Ruled out outright: wrapping the body in an `<a>`, because review prose is rendered markdown and can contain its own links, and an anchor inside an anchor is invalid HTML. |
+| 3 | Scope | **Full click target on the home feed only.** The author-name link goes further: home, `genre.html` and `film/detail.html`, which were the three outliers — the class was already a link on the post page, the reply partial and notifications. The overlay deliberately does **not** extend to the film page: there, "open this review" navigates away from the page you are already reading, which is a different decision from the feed and not one to take implicitly. |
+| 4 | Hover affordance | **Underline only**, plus the pointer cursor the anchor brings. No colour shift, no background lift — R82's objection is to a control arriving pre-lit, and a red wash or a `--panel-2` lift over a paragraph of prose reads that way. Follows the rail's existing scoped-anchor pattern (`a.trending-film:hover`) and R32 by giving `:focus-visible` the same signal as `:hover`. |
+
+### Why the accessible name is a label and not the row's text
+
+An empty anchor has no accessible name, so a screen reader tabbing the feed
+would meet a nameless link. `aria-label="Open {author}'s post"` supplies it
+on the anchor itself. The label is deliberately **not** put inside the
+anchor, because emptiness is the property that guarantees no control in the
+row can end up nested inside it — and that guarantee is what keeps the
+markup legal against links rendered out of the review markdown.
+
+### The one permanent cost
+
+`position: relative; z-index: 1` on `.review-head a, .review-head button,
+.feed-item a, .review-body a`. Without it the overlay paints over those
+controls and the row navigates when the user meant to like the film. It is
+scoped to the three containers a row is made of rather than listed control
+by control, so a control added to a row later inherits the raise instead of
+silently losing its click. **Anyone adding a fourth container to `.review`
+must add it to that selector list.**
+
+### Executed — DONE and gate-verified (2026-10-02, `b06d0a1`)
+
+Five files: the stretched anchor and the author link in `home.html`, the
+overlay and raise rules in `reeltalk.css`, the author link in `genre.html`
+and `film/detail.html`, and `reeltalk/tests/test_feed_click_target.py`.
+
+**Non-vacuity proven by five mutations**, each turning exactly the intended
+tests red and nothing else:
+
+| Mutation | Tests that went red |
+| --- | --- |
+| overlay guard removed (`{% if True %}`) | `test_a_bare_shelf_row_gets_no_overlay`, `test_the_bulk_aggregate_row_gets_no_overlay` |
+| label moved inside the anchor, `aria-label` dropped | the emptiness test, the naming test, the mirror test |
+| `.review` no longer `position: relative` | `test_the_row_is_the_containing_block_for_its_overlay` |
+| `.review-head button` dropped from the raise rule | `test_every_interactive_part_of_a_row_is_raised_above_the_overlay` |
+| hover switched from underline to a lit background | `test_the_hover_signal_is_an_underline_not_a_colour_change` |
+
+**Gate: `2106 passed + 5 skipped`** (baseline 2086; **+20 = 19 new tests +
+1 clean-room param** for the new test file). `ruff check` — *All checks
+passed!*; `ruff format --check` — clean; `makemigrations --check` — *No
+changes detected*.
+
+**Containing-block audit, done rather than assumed.** Adding `position:
+relative` to `.review` re-points the containing block for every absolutely
+positioned descendant, so each of the nine `position: absolute`/`fixed`
+rules in the stylesheet was checked for sitting inside a `.review`. None
+does: the header nav bar, `.stars-fg` (anchored to `.stars`, itself
+relative), `.star-hits` (anchored to `.star-rating`), `.modal-backdrop`
+(inside a `fixed` `.modal`), the search suggest list, the header/footer
+rails, and `.visually-hidden` (used in the home rail and a profile label,
+never inside a row). The change is inert everywhere except where the overlay
+is rendered.
+
+### Browser proof, driven headlessly over SSH
+
+The extension path is unavailable on this box — no GUI session for
+`minnix`, and the Qwen Chrome extension cannot be installed without a
+browser UI. It was not needed. `playwright-core` 1.62.1 ships inside the
+browser-use runtime, and the system Chromium 151 launches headlessly under
+the bundled node with `executablePath`. The real page was rendered by the
+real view in the container, dumped out, and served locally with the real
+shipped stylesheet, so what the browser was asked is the actual shipped
+combination and not a mock-up.
+
+On `li.review[data-status="1"]`, asking `document.elementFromPoint` at the
+centre of each element — i.e. which element actually receives a click
+there:
+
+| Point in the row | Element that receives the click | |
+| --- | --- | --- |
+| author name | `a.review-author` | its own link ✅ |
+| Like button | `span.like-label`, `closest('button')` **is** the button, `closest('a.review-open')` is **null** | not inside the overlay ✅ |
+| date link | the anchor | ✅ |
+| film link | the anchor | ✅ |
+| review prose | `a.review-open` → the post | ✅ |
+| row far-right, no control | `a.review-open` | ✅ |
+
+Behaviour, not just geometry: clicking the prose navigated to
+`/status/1/`; clicking the Like button produced **zero** navigations. On
+the row whose prose contains a mention, the mention anchor took its own
+click (`href="/user/bob/"`) while a point in the same row's prose away
+from it fell through to **that row's own** overlay, `href="/status/2/"` —
+row-scoped, not borrowed from a neighbour. Hover over the overlay left
+`.review-body` at `text-decoration: underline`, `background: rgba(0,0,0,0)`,
+`color: rgb(233,223,203)` — underlined, not lit, exactly the decision.
+
+**What this does not cover:** the real Like round trip and the real
+`/status/` page load, because the probe served static files rather than the
+running app. Both are covered by existing tests from earlier increments.
+**Not deployed** — the live instance still shows the timestamp-only link.
 
 ## 3. Host facts (this box)
 
