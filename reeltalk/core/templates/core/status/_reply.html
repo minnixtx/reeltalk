@@ -21,7 +21,7 @@ something this viewer is not shown.
     {% endif %}
     <a class="review-author" href="{% url 'user-profile' reply.user.localname %}">{{ reply.user.localname }}</a>
     {% if reply_to %}<span class="reply-to muted">replying to {{ reply_to }}</span>{% endif %}
-    <span class="muted">{{ reply.published_date|date:"Y-m-d" }}</span>
+    <span class="post-date">{{ reply.published_date|date:"Y-m-d" }}</span>
   </div>
   {% if reply.content %}<div class="review-body">{{ reply.content|safe }}</div>{% endif %}
 </li>

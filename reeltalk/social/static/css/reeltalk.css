@@ -16,6 +16,7 @@
   --panel-2:  #1b1713;  /* raised panel / hover */
   --cream:        #e9dfcb;  /* body text */
   --cream-muted:  #b8aa91;  /* secondary text */
+  --white:        #ffffff;  /* post prose, dates and header links (owner pass, 2026-10-04) */
   --red:        #d42b26;  /* primary red — fills, display headings */
   --red-bright: #ff4138;  /* neon/bright red — active, glow, key highlights */
   --red-dark:   #721713;  /* dark red — deep fills, shadows */
@@ -34,11 +35,14 @@
   --neon-mottle: url("../images/button-mottle.png");
 
   /* Grunge surface stack — dark scrim over the weathered plate; used by the body.
-     The scrim sits at .62 (was .86 over the raw tile) because the page background
-     measured luminance stddev 1.9 — flat — where the reference look sits at 15-32.
-     Prominence comes from the plate's contrast, not from lifting this scrim: the
-     plate averages near-black, so the mean holds at ~7.8 while stddev rises. */
-  --grunge-stack: linear-gradient(rgba(9, 8, 7, 0.62), rgba(9, 8, 7, 0.62)),
+     Pure black at .80 (owner pass, 2026-10-04: "the background is too brown").
+     The brown was never the plate's average — that measures lum 7.4, already
+     near-black — but its bright speckles: the top 1% sit at lum ~69, RGB 70/69/66.
+     Raising the alpha of the old warm 9/8/7 scrim only dims those (top-decile
+     warmth 2.4 -> 2.2); blackening it is what removes the cast (2.4 -> 0.6) while
+     the texture survives at p90 lum 2.7. .88 measured flatter still and was not
+     taken — the grain is the point of the plate. */
+  --grunge-stack: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.8)),
     url("../images/grunge-weathered.png");
   --grunge-size: auto, 1000px;
 
@@ -115,10 +119,10 @@ body {
   font-family: var(--body);
   line-height: 1.55;
   color: var(--fg);
-  /* Site-wide weathered plate under a dark scrim (owner pass, 2026-09-18): the
-     scrim lets ~38% of the plate through so the wear actually reads, while the
-     plate's near-black average keeps the page dark enough for cream body copy.
-     Raise the alpha if it ever fights text; see --grunge-stack above. */
+  /* Site-wide weathered plate under a dark scrim (owner pass, 2026-09-18; scrim
+     blackened to .80 on 2026-10-04, so ~20% of the plate now reads through).
+     The plate's near-black average keeps the page dark enough for the white post
+     prose above it. Raise the alpha if it ever fights text; see --grunge-stack. */
   background-color: var(--black);
   background-image: var(--grunge-stack);
   background-size: var(--grunge-size);
@@ -199,13 +203,13 @@ a {
 }
 
 .header-user a {
-  color: var(--muted);
+  color: var(--white);
   text-decoration: none;
   font-size: 0.88rem;
 }
 
 .header-user a:hover {
-  color: var(--cream);
+  color: var(--red-bright);
 }
 
 /* The signed-in handle is the only item on this side — kept lit like a
@@ -215,7 +219,7 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 0.7rem;
-  color: var(--cream);
+  color: var(--white);
 }
 
 .header-user .user-name:hover {
@@ -235,7 +239,7 @@ a {
 }
 
 .site-nav a {
-  color: var(--muted);
+  color: var(--white);
   text-decoration: none;
   font-size: 0.88rem;
   letter-spacing: 0.02em;
@@ -244,12 +248,15 @@ a {
   border-bottom: 2px solid transparent;
 }
 
+/* Hover takes the lit-red the rest of the site already uses for "interactive"
+   (owner decision, 2026-10-04). With the resting colour now white, the old
+   brighter-cream hover would have been no feedback at all. */
 .site-nav a:hover {
-  color: var(--cream);
+  color: var(--red-bright);
 }
 
 .site-nav a.active {
-  color: var(--cream);
+  color: var(--white);
   text-shadow: 0 0 10px rgba(255, 65, 56, 0.5);
 }
 
@@ -283,13 +290,13 @@ a {
   border: none;
   padding: 0.2rem 0.1rem;
   box-shadow: none;
-  color: var(--muted);
+  color: var(--white);
   font-size: 0.88rem;
   letter-spacing: 0.02em;
 }
 
 .site-nav form.inline button:hover {
-  color: var(--cream);
+  color: var(--red-bright);
 }
 
 /* Narrow screens: the search box drops to its own full-width line so the
@@ -581,16 +588,17 @@ ul.errorlist {
   z-index: 1;
 }
 
-/* Hover says "this opens" without arriving lit: underline only, no colour
-   shift and no background lift, so it reads as text you can follow rather
-   than as the lit-red control treatment. Scoped off the overlay itself, so
-   hovering the Like button — which sits above it and never becomes the
-   overlay's hover target — does not underline the prose. R32: keyboard focus
-   gets the same signal as the mouse. */
-.review-open:hover ~ .review-body,
-.review-open:focus-visible ~ .review-body {
-  text-decoration: underline;
+/* Post prose reads white, not cream (owner pass, 2026-10-04). Site-wide by the
+   owner's explicit choice, so a feed row and the post it opens agree. Links
+   inside the rendered markdown keep --accent: prose and links must not match. */
+.review-body {
+  color: var(--white);
 }
+
+/* The row deliberately carries no hover treatment on its prose — the owner
+   removed the underline-on-hover signal on 2026-10-04. The overlay still has
+   cursor: pointer, so the row reads as clickable without the text lighting up.
+   Do not re-add it: it is the one thing here that was taken away on purpose. */
 
 /* The way forward at the foot of the feed (§2I increment 2, R132 decision 6).
    Deliberately NOT `.btn`: this is a link to more of what the reader is already
@@ -641,6 +649,14 @@ ul.errorlist {
   align-items: center;
   margin-bottom: 0.25rem;
   font-size: 0.95rem;
+}
+
+/* A post's date is plain text, never a link (owner pass, 2026-10-04). On the
+   feed the row already opens through .review-open, so the linked date was a
+   second way to the same page — and it read as red underlined text. White
+   rather than --muted so it sits with the prose instead of receding from it. */
+.post-date {
+  color: var(--white);
 }
 
 .review-author {
@@ -893,6 +909,8 @@ ul.errorlist {
 .tabs a {
   padding: 0.4rem 0.9rem;
   color: var(--muted);
+  /* The nav row's size, so the two read as one type (owner pass, 2026-10-04). */
+  font-size: 0.88rem;
   text-decoration: none;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
@@ -1692,7 +1710,6 @@ h2 {
 
 .meta-list,
 .handle,
-.tabs a,
 table.results th,
 .search-row .watchlist-btn,
 .pane-sub,
@@ -1741,10 +1758,14 @@ form.inline button,
 /* The header's text takes the film-title face (owner pass, R69): the nav row, its
    borderless Log out control and the profile link read in Archivo at the trending
    card's weight, so the marquee speaks the same voice as the rail it leads into.
-   Log out is listed because the `button` role above claims it otherwise. */
+   Log out is listed because the `button` role above claims it otherwise.
+   The films-page tabs join here on the owner's pass of 2026-10-04 — "the same
+   font as the nav bar type". They keep their own padding and active underline,
+   which is what makes them tabs rather than nav links; only the voice changes. */
 .site-nav a,
 .site-nav form.inline button,
-.header-user a {
+.header-user a,
+.tabs a {
   font-family: var(--body);
   font-weight: 600;
 }

@@ -16,7 +16,7 @@
     {% endif %}
     <a class="review-author" href="{% url 'user-profile' status.user.localname %}">{{ status.user.localname }}</a>
     {% if status.rating %}<span class="rating" title="{{ status.rating|floatformat:'-1' }} / 5">{{ status.rating|stars }}</span>{% endif %}
-    <span class="muted">{{ status.published_date|date:"Y-m-d" }}</span>
+    <span class="post-date">{{ status.published_date|date:"Y-m-d" }}</span>
     {% comment %}
     Any member gets the control, on a local post or on a mirror of another
     instance's. Increment 5 made a like on a remote post deliverable, so

@@ -20,7 +20,7 @@
             {% endif %}
             <a class="review-author" href="{% url 'user-profile' review.user.localname %}">{{ review.user.localname }}</a>
             {% if review.rating %}<span title="{{ review.rating|floatformat:'-1' }} / 5">{{ review.rating|stars }}</span>{% endif %}
-            <span class="muted">{{ review.published_date|date:"Y-m-d" }}</span>
+            <span class="post-date">{{ review.published_date|date:"Y-m-d" }}</span>
           </div>
           <div class="feed-item">
             {% if review.film.poster %}

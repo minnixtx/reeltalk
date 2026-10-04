@@ -38,8 +38,9 @@ a second channel to say so.
     {# was reachable from the feed at all. #}
     <a class="review-author" href="{% url 'user-profile' entry.user.localname %}">{{ entry.user.localname }}</a>
     {% if entry.rating %}<span title="{{ entry.rating|floatformat:'-1' }} / 5">{{ entry.rating|stars }}</span>{% endif %}
-    {# R84: the row links on status_id, never on interactive — a remote mirror gets the page, not a control. #}
-    <span class="muted">{% if entry.status_id is not None %}<a href="{% url 'status' entry.status_id %}" title="Open this post">{{ entry.date|date:"Y-m-d" }}</a>{% else %}{{ entry.date|date:"Y-m-d" }}{% endif %}</span>
+    {# Plain text, never a link: the .review-open overlay above already opens this #}
+    {# post (owner pass, 2026-10-04). #}
+    <span class="post-date">{{ entry.date|date:"Y-m-d" }}</span>
     {# The control takes the *narrower* flag (R84): "may I put a control here", never "may I open this". Since increment 5 that set includes mirrors — a Like now reaches their home instance. #}
     {% if entry.interactive %}
       <button type="button" class="like-btn" data-url="{% url 'status-like' entry.status_id %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}">

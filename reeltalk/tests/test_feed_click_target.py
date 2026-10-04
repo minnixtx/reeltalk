@@ -13,10 +13,11 @@ Two halves, settled with the owner before any code was written:
   the feed, the genre subfeed and the film page is why no profile was
   reachable from the feed at all.
 
-The overlay is gated on ``status_id`` exactly as the timestamp link is (R84):
-a row with no post behind it has nothing to open, and that includes the R37
-bulk aggregate, which has no single post for structural reasons no policy
-change can fix.
+The overlay is gated on ``status_id`` (R84): a row with no post behind it has
+nothing to open, and that includes the R37 bulk aggregate, which has no single
+post for structural reasons no policy change can fix. The row's own date used to
+be a second link to the same page; the owner made it static text on 2026-10-04,
+so the overlay is now the only way a row opens.
 """
 
 import re
@@ -389,16 +390,56 @@ def test_every_interactive_part_of_a_row_is_raised_above_the_overlay():
 
 
 @pytest.mark.django_db
-def test_the_hover_signal_is_an_underline_not_a_colour_change():
-    # R82: the row must not arrive lit. Underline only — no background and
-    # no colour shift over a paragraph of prose.
-    rules = {
-        tuple(selectors): decls
-        for selectors, decls in _css_rules()
-        if any(s.startswith(".review-open:") for s in selectors)
-    }
-    assert rules, "no .review-open hover/focus rule in the shipped stylesheet"
-    for selectors, declarations in rules.items():
-        assert "text-decoration: underline" in declarations
-        assert "background" not in declarations
-        assert "color" not in declarations
+def test_nothing_underlines_the_prose_when_the_row_is_hovered():
+    # The owner took the hover underline away on 2026-10-04: post text must not
+    # light up as followable text merely because the row opens. The overlay keeps
+    # ``cursor: pointer`` (pinned above), so the row still reads as clickable.
+    #
+    # This is written as an absence check over *any* hover/focus rule that names
+    # the prose, not just the one selector that used to exist — a re-introduced
+    # underline under a different selector is the same regression. Against the
+    # stylesheet as it stood before this change it fails on
+    # ``.review-open:hover ~ .review-body``, which is what makes it real.
+    offenders = [
+        selectors
+        for selectors, declarations in _css_rules()
+        if any(
+            "review-body" in s and (":hover" in s or ":focus" in s) for s in selectors
+        )
+        and re.search(r"text-decoration:\s*underline", declarations)
+    ]
+    assert offenders == [], f"a hover/focus rule underlines the prose: {offenders}"
+
+
+@pytest.mark.django_db
+def test_post_prose_is_white_not_cream():
+    # Owner pass, 2026-10-04. Asserted against the token rather than a literal so
+    # the palette stays the single place the colour is decided.
+    declarations = _rule_for(".review-body")
+    assert declarations is not None, "no .review-body rule in the shipped stylesheet"
+    assert "color: var(--white)" in declarations
+    assert "var(--cream)" not in declarations
+
+
+@pytest.mark.django_db
+def test_the_row_date_is_static_text_not_a_link(alice, dune, admin):
+    # The row already opens through .review-open, so the linked date was a second
+    # way to the same page — and it rendered as red underlined text. Owner pass,
+    # 2026-10-04.
+    mark_watched(alice, dune, rating="4.5", content="<p>Desert planet.</p>")
+    review = Status.objects.get(user=alice, film=dune)
+    row = _row(_home(_login("alice")), review.pk)
+    assert '<span class="post-date">' in row
+    date_start = row.index('<span class="post-date">')
+    date_span = row[date_start : row.index("</span>", date_start)]
+    assert "<a " not in date_span, f"the date is still a link: {date_span}"
+
+
+@pytest.mark.django_db
+def test_the_date_style_is_white_not_the_muted_cream():
+    # The class carries the colour; the template only names it. Asserted on the
+    # token so the palette stays the one place white is decided.
+    declarations = _rule_for(".post-date")
+    assert declarations is not None, "no .post-date rule in the shipped stylesheet"
+    assert "color: var(--white)" in declarations
+    assert "var(--cream)" not in declarations
