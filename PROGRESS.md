@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-04
 
 ---
 
@@ -10,169 +10,72 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **§2I IS CLOSED OUT. All three increments are BUILT, PROVEN AND DEPLOYED
-  on `reeltalk.minnix.dev`, and nothing in §2I is open.** The footer lives
-  at the foot of the rail (increment 1, R131); the home feed is paged by
-  cursor at 20 rows (increment 2, R132 1–3); and it pulls the next page in
-  on scroll so the reader never clicks (increment 3, R132 4–6). Increments
-  2 and 3 went out back-to-back exactly as decision 8 required, so the
-  intermediate "20 rows and a link" state never sat live on the site.
-  **There is no queued §2I work — the next thing is the owner's call.**
-- **Increment 2 — the feed is paged by cursor, not by offset (R132 1–3).**
-  `feed_entries(user, *, limit=None, cursor=None)` now returns
-  `(entries, next_cursor)` over the *already grouped and sorted* list, so
-  aggregation never sees a partial input and a bulk group cannot split,
-  double, or lose its absorbed statuses at a boundary. Each entry carries a
-  stable sort key independent of list position — `(date, kind_rank,
-  source_id)`, `source_id` being the `ShelfFilm.id` for a shelf event and
-  the `Status.id` for a status — and the cursor is that key, base64url in
-  the URL as `?c=`. `FEED_PAGE_SIZE = 20`, matching `GENRE_PAGE_SIZE`.
-  `index()` renders page 1 plus a real `<a href="?c=…">` "Older" link, so
-  the no-JS path reaches older rows without any script. **The accepted cost
-  is unchanged and deliberate:** the full O(all shelf rows + all statuses)
-  computation still runs on every page request. Per-request latency is what
-  the home page already paid; total work grows with feed size. Query-level
-  aggregation stays an isolated later optimisation whose seam is clean — it
-  changes no template, no URL, nothing a user sees.
-- **Increment 3 — the endless scroll (R132 4–6).** The row markup moved into
-  one shared partial (`templates/_feed_row.html`) that both `home.html` and
-  the new `/feed/page/` fragment route include. **That sharing is the whole
-  anti-drift guarantee of the increment**: the §2H click-target overlay, its
-  `status_id` gate and its `aria-label` cannot become two things that drift,
-  because only one file draws a row. A JSON payload with a JS-built row was
-  rejected outright for exactly that reason. `feed.js` watches a sentinel
-  with `IntersectionObserver`, appends the fragment through a
-  `<template>` element (the only place a bare run of `<li>` parses legally),
-  and pushes **no URL at all** — no `pushState`, no `replaceState`, no hash
-  — so the back button still means "leave" and sharing a specific post keeps
-  `/status/<id>/`. At the 300-row DOM ceiling the observer disconnects and
-  the "Older" link is **un-hidden** rather than the feed simply stopping.
-  `likes.js` moved to one delegated `document` listener, because per-button
-  binding at `DOMContentLoaded` would have left every Like button on an
-  appended row dead.
-- **The property increment 3 was really built to hold is "never silently
-  stops"**, and it is proven in both directions rather than asserted. Against
-  a 320-entry throwaway feed the clean build plateaus at exactly 300 rows
-  after 14 fragment requests, `#feed-more` flips back to visible, its href
-  points at exactly the cursor the scroll stopped on, and following it
-  renders a real 20-row page whose first row is not a repeat of row 300.
-  With the ceiling block removed the same run grows to all 320 rows and
-  `#feed-more` **stays hidden** — silently stuck with no way forward, which
-  is the failure decision 4 exists to prevent. The two lines that make it
-  happen are pinned in CI by
-  `test_the_scroll_js_stops_at_the_dom_ceiling_and_reveals_the_link`, since
-  a browser run cannot be part of the gate.
-- **Browser proof, both fixtures, all checks green with the mutations
-  confirmed non-vacuous.** `.qwen/tmp/pw_scroll.mjs` (60-entry fixture) —
-  20 rows on first paint, the Older link hidden while JS is active, 20→40→60
-  append steps with zero duplicate `data-cursor` or `data-status` values
-  across the whole DOM, **a Like on a row that did not exist at page load
-  toggles for real**, that row's `.review-open` navigates to its own
-  `/status/<id>/` and reports `closest('a.review-open') === null` on its own
-  Like button (§2H holds on rows created after page load), the rail stays
-  pinned at `top: 0` across the append with the footer still reachable inside
-  it, the end marker appears at the last page, request counts stop
-  increasing, and the URL never leaves `/`. `.qwen/tmp/pw_ceiling.mjs`
-  (320-entry fixture) — the ceiling set described above. **Three mutations,
-  each turning exactly the checks that should catch it red:** reverting
-  `likes.js` to per-button init kills only the appended-Like check;
-  hand-copying the row markup into `_feed_page.html` instead of sharing the
-  partial kills both HTML-equality tests; removing the ceiling block kills
-  the ceiling, the reveal, the premature-end-marker and the link-continues
-  checks.
-- **Deployed and live-checked without touching a real account.** The live
-  stack is the real site with 61 real members, so the increment-1 pattern
-  holds — verify the artifact, do not sign in as somebody. The anonymous
-  home page still renders the landing and ships **neither** `feed.js` nor
-  `likes.js`; the deployed `/static/js/feed.3911e9b117a9.js` is
-  **byte-identical** to the repo's `reeltalk/core/static/js/feed.js`
-  (4656 bytes both sides, with the hash recomputed here using Django's own
-  md5-first-12 algorithm, so a match proves the served file came from this
-  tree); and `/feed/page/` answers `302 → /login/?next=/feed/page/` to an
-  anonymous request, with the cursor variant gated the same way.
-  `.qwen/tmp/deploy_check_inc3.py` is that check.
-- **Gate baseline is now `2172 passed + 5 skipped`** (from 2129 + 5).
-  `ruff check`, `ruff format --check` and `makemigrations --check` all
-  clean, and `makemigrations --check` reporting *No changes detected* is the
-  confirmation that neither increment needed a migration. The +43 is +21 in
-  increment 2 (19 paging tests + 2 clean-room params) and +22 in increment 3
-  (17 scroll tests + 5 clean-room params — one each for `feed.js`,
-  `_feed_row.html`, `_feed_end.html`, `_feed_page.html` and
-  `test_feed_endless_scroll.py`).
-- **Five things were decided beyond the literal R132 rule list. All are open
-  to veto; none are load-bearing on a decision the owner took.** (1) The
-  route is `feed/page/` with a trailing slash, not the record's literal
-  `/feed/page?c=` — the slash follows this project's convention everywhere,
-  and `CommonMiddleware`'s `APPEND_SLASH` turns the literal form into a
-  redirect rather than a 404. (2) `data-cursor` was added to the row element
-  and `id`/`data-next` to the page (`#feed-list`, `#feed-more`,
-  `#feed-older`, `#feed-sentinel`), so the scroll reads "where to next" off
-  the last row it appended instead of holding separate state that could
-  disagree with the DOM. (3) The sentinel renders
-  `data-next="{{ next_cursor|default:'' }}"` and **the `|default:''` is
-  load-bearing, not tidiness** — Django renders a variable that resolves to
-  `None` as the literal string `"None"`, so without it a one-page feed hands
-  the scroll a truthy cursor it cannot decode, the unreadable-cursor fallback
-  returns page 1, and the page appends a duplicate of what is already on
-  screen. (4) An unreadable cursor falls back to page 1 rather than erroring:
-  a hand-mangled `?c=` should show the reader the top of their feed, not a
-  500. (5) `spread_shelve` and `bulk_shelve` moved into
-  `reeltalk/tests/feed.py` as shared public helpers, because the paging
-  tests and the scroll tests needed the same fixtures and two copies of a
-  fixture is how two tests start meaning two different things.
-- **One consequence of (2) broke 17 §2H tests, and it is worth recording
-  because the failure message pointed at the wrong thing.** Both
-  `test_feed_click_target.py` and `test_comments.py` located a feed row by
-  the *exact* opening tag `<li class="review" data-status="N">`. Adding
-  `data-cursor` to that element made all 17 report "the target row did not
-  render at all" — the rows rendered fine; the helper's marker was just too
-  tight for a change that had nothing to do with what those tests check. Both
-  now match up to the closing bracket, with the status value still matched
-  exactly (the closing quote stays in the marker, so row 39 cannot satisfy a
-  lookup for row 392). **How to apply:** a test helper that pins a whole
-  opening tag is a claim that no attribute will ever be added to that element.
-  Match the attributes you are actually testing.
-- **A static-file trap that cost two wasted proof runs, recorded so no one
-  re-derives it: mutating a static file on disk does not change what the
-  browser runs.** `CompressedManifestStaticFilesStorage` means templates
-  reference `feed.<hash>.js`, so editing `js/feed.js` changes nothing the
-  page loads — and WhiteNoise indexes the pre-compressed `.gz` sibling at
-  startup, so *deleting* that sibling does not fall back to the plain file
-  either: a request carrying `Accept-Encoding: gzip` (every real browser)
-  gets **HTTP 500**, the script never runs, and the page then looks like the
-  feature is simply absent. Both mutant runs that "passed" were actually
-  running the clean file. **How to apply:** to run a JS mutation proof here,
-  intercept the request at the network layer (`ctx.route` + `fulfill`) and
-  assert the interception happened, rather than editing served files. The
-  guard is why `pw_ceiling.mjs` fails fast on any non-200 for `feed*.js` or
-  any `pageerror` — a dead script must never be mistakable for a feed that
-  stopped early.
-- **The comments in the increment 2/3 code now cite R132 by its own
-  numbering.** They were written against a different ordering and pointed at
-  the wrong paragraphs — the ceiling is R132 **(4)**, the no-JS link and the
-  "one template, one link" rule are **(5)**, no pushed URLs is **(6)**,
-  home-only scope is **(7)**. Corrected in place; treat the numbers in the
-  code as accurate against the record now.
-- **Scope is strictly the home feed, and the inconsistency with the genre
-  subfeed is deliberate.** Genre keeps its numbered 20-per-page links: it is
-  public and anonymous-facing, numbered pages are genuinely useful there,
-  and it has no tall-column problem. Same shape as §2H's scope call. **Do
-  not "fix" it** by extending endless scroll to genre without the owner. No
-  third column (R64), no virtualisation, no mid-scroll deep links, no
-  resume-where-you-were, no live updates.
-- **A real browser can be driven over SSH without the Chrome extension, and
-  that is how every increment here was proven.** There is no GUI session for
-  `minnix` and the Qwen extension cannot be installed headlessly, but
-  `playwright-core` ships inside the browser-use runtime and drives the
-  system Chromium headlessly via `executablePath`
-  (`/usr/bin/chromium-browser`, `--no-sandbox`). Reuse
-  `.qwen/tmp/pw_scroll.mjs` and `.qwen/tmp/pw_ceiling.mjs` rather than
-  rebuilding a harness, and `.qwen/tmp/seed_scroll_proof.py` for the
-  fixture — it takes `SEED_ENTRIES` so one script serves both the 60-row
-  and the 320-row proof. **All session minting and every fixture write goes
-  to a throwaway database on a separate container, never the live one**,
-  with `SECURE_COOKIES=0` so the session survives over plain http and a
-  private `STATIC_ROOT` so the shared static volume is never touched.
+- **§2J, the colour pass, is BUILT AND PROVEN — and NOT YET DEPLOYED.**
+  All six owner asks are implemented and verified against the live site in a
+  browser; nothing has been pushed to the running containers. **Deploying is
+  the owner's call, not this block's.** What is live on
+  `reeltalk.minnix.dev` right now is still §2I (footer in the rail,
+  cursor-paged feed, endless scroll) rendered in the old warm palette. Read
+  `git log -n 1 --oneline` for the actual state rather than trusting any
+  sentence here.
+- **The six asks, as built (R133).** (1) The page background's scrim went
+  from warm `rgba(9, 8, 7, 0.62)` to pure black `rgba(0, 0, 0, 0.8)`.
+  (2) Post dates are static text in a `.post-date` span, white, no anchor,
+  no underline — the feed row already opens through `.review-open`, so the
+  linked date was a second way to the same page. (3) Post prose
+  (`.review-body`) is `#ffffff`. (4) The hover underline on a row's prose
+  is deleted. (5) Header links are white at rest and `--red-bright` on
+  hover. (6) The films-page tabs moved from Oswald to the nav's Archivo at
+  the nav's weight and size.
+- **The finding that drove the background decision, because it is not
+  obvious from looking.** The plate's *mean* was never brown — it measures
+  luminance 7.4, already near-black. The brown lives in its bright
+  speckles: the raw tile's top 1% sits at lum ~69, RGB 70/69/66. **So
+  raising the scrim's alpha cannot fix brown — only changing its hue can.**
+  At `.80` the warm scrim moves top-decile warmth 2.4 → 2.2; the black
+  scrim at the same alpha moves it 2.4 → 0.6. Measured on painted pixels
+  after the change: warmth 1.15, brightest sampled pixel 99 → 24. `.88`
+  was prototyped and rejected — the grain flattens out of existence.
+  **How to apply:** if anyone re-warms this scrim the brown comes straight
+  back, and darkening further will not take it away again.
+- **Four owner decisions, all taken against rendered swatches rather than
+  descriptions (R133).** Black scrim at `.80`; pure `#ffffff`, not a
+  softened off-white (the halation objection was raised and declined);
+  scope **site-wide**, so a feed row and the post it opens agree; and nav
+  hover goes lit red — with white at rest, the old brighter-cream hover
+  would have been *no feedback at all*, which is arithmetic, not taste.
+- **What was deliberately NOT swept, so the boundary is on the record and
+  not an oversight.** Notification timestamps and moderation-console
+  timestamps are not posts and keep `--muted`. The feed's event line
+  (`.feed-film` — "watched *Film* (1990)") is not post prose and keeps
+  cream. The reply count keeps `--muted`. If those should go white too,
+  that is a new owner decision, not an extension by analogy.
+- **Verification, stated exactly for what ran against what.** The full gate
+  ran **2174 passed + 5 skipped, `PYTEST_EXIT=0`**, on a build that
+  contained every CSS and template change plus three of the four new tests.
+  The fourth test (`test_the_date_style_is_white_not_the_muted_cream`) and a
+  ruff line-length fix landed after that build; both are verified on the
+  final tree — `ruff check` clean, `ruff format --check` clean across 149
+  files, and `test_feed_click_target.py` **22 passed** on the final
+  source. **A single full-suite run over the final tree has not been done.**
+  The delta is one added test in a file that passes plus a whitespace-only
+  format fix; say the word if you want the 30-minute clean gate anyway.
+  `makemigrations --check` reports no changes — this increment touches no
+  models.
+- **The removed affordance is pinned, not just removed.**
+  `test_nothing_underlines_the_prose_when_the_row_is_hovered` was proven
+  non-vacuous by mutation: re-adding the old rule makes it fail on
+  `.review-open:hover ~ .review-body`. It checks *any* hover/focus
+  selector that names the prose, so an underline reintroduced under a
+  different selector is caught as the same regression. R82's
+  "underline only, no colour shift" affordance is superseded, not
+  balanced — do not restore a middle ground.
+- **Standing constraints, unchanged and not up for re-litigation.** No
+  user-made lists under any name (owner: "We won't do lists"). No third
+  column on the home feed (R64). The genre subfeed keeps its numbered
+  20-per-page links, and its inconsistency with the endless home feed is
+  deliberate (R132 7) — do not "fix" it. No virtualisation, no mid-scroll
+  deep links, no resume-where-you-were, no live updates on the home feed.
 - **git:** read the current state with `git status` and `git log -n 1
   --oneline` rather than trusting anything written here. Anything a single
   command answers for free is a pointer in this block, not a value; only a
@@ -187,7 +90,7 @@ is history.**
 | Product contract — domain model, watch state, TMDB, federation surface, deployment shape | `PLAN.md` §3 |
 | **D-series** — the original product decisions (D1–D17) | `PLAN.md` §2 |
 | License audit | `PLAN.md` §4 |
-| **R-series** — rewrite-era decisions (R1–R132) | `PROGRESS.md` §4 |
+| **R-series** — rewrite-era decisions (R1–R133) | `PROGRESS.md` §4 |
 | What was actually built, with commit hashes | `PROGRESS.md` §2 |
 | Host and deploy facts for this box | `PROGRESS.md` §3 |
 | What is live right now | the block above |
@@ -6522,3 +6425,5 @@ not an optimisation.
 - **R131 — §2I: the right rail scrolls on its own with a thin themed scrollbar, trending stays at 8 films, and the footer's brand block centres on the tagline (owner decision 2026-10-03, approved against a browser prototype rather than a description).** Three parts, all settled by looking at rendered pixels. **(1) The rail gets its own scroll container** — `position: sticky; top: 0; max-height: 100vh; overflow-y: auto; overscroll-behavior: contain`. **Why this and not the alternatives, which both look plausible:** shrinking the rail so everything fits without scrolling is viewport-dependent — it breaks on any shorter window and on the first widget anyone adds to the rail later — and *sticky with no height cap is the original bug, not a fix*: it pins the rail's top and its bottom 270–450px, where the footer is meant to live, never comes into view. The owner's own objection to the first mock-up ("you wouldn't be able to reach the footer in the first place") is what rules option 3 out. **Why the second scrollbar is acceptable:** Mastodon has one too. Read off the owner's 4.7.2 peer, its columns are `display: flex; height: 100%` with the inner `.scrollable` at `overflow-y: scroll`, the document never scrolls, and the footer is a `LinkFooter` inside `.compose-panel` which itself is `overflow-y: auto` — **two scroll containers, one visible scrollbar, and only one shows because the other column is short.** That is the whole trick, so the honest framing is not "we accept a second scrollbar" but "we have the same container Mastodon does and we make ours barely visible instead of short". **(2) The scrollbar is thin and themed**, copied directly: `scrollbar-width: thin`, `scrollbar-color: rgba(90, 67, 44, 0.55) rgba(9, 8, 7, 0.35)`, `::-webkit-scrollbar` at 8px brightening on rail hover. **How to apply:** the thin treatment is load-bearing on the decision, not decoration — a default-width scrollbar beside the feed's is what makes the layout read as broken. Keep it in the same rule block as the sticky so no one strips one and keeps the other. **(3) Trending stays at 8.** Trimming to 5 was prototyped and measured: it saves 166px and the stacked footer costs 170px, so the rail ends up **47px taller than today either way**. **How to apply:** do not re-propose a trending trim as the way to avoid the rail scroll — it buys nothing and was tried. If the rail ever needs to genuinely fit, the lever is dropping a banner graphic (122px), not the trending list. **(4) The footer brand block is centred on the tagline, not on itself.** The first mock-up shrink-wrapped `.footer-brand` to 320px and centred the box while the tagline stayed left-aligned inside it, leaving 59px of dead space on its right — tagline centre 1074 against a rail centre of 1104. The owner asked for the tagline centred with REELTALK's left edge meeting the beginning of the phrase; the fix is one auto column sized by the tagline and centred, with the wordmark `justify-self: start` in the same column. **The dependency to know:** this works because the tagline (261px) is wider than the wordmark (119px), so the tagline sizes the column. Shorten the tagline below the wordmark and the column sizes to the wordmark, the tagline centres inside it, and the two left edges stop meeting — degrades without breaking, but it is a live dependency, not a coincidence. **How to apply:** if the tagline text or the wordmark size changes, re-measure rather than assuming the alignment survives.
 
 - **R132 — §2I increments 2 and 3: page the already-computed feed list rather than aggregating in SQL, 20 rows per page, a 300-row DOM ceiling, no pushed URLs, home-only scope, and the two increments deployed back-to-back (owner decisions 2026-10-03, all seven taken in one pass after the eight were laid out in plain prose).** The owner's answer was a blanket agreement — *"I agree with all of your recommendations"* — so the reasoning below is the record of what was weighed, not an open question. **(1) Page the computed list.** `feed_entries` already returns a fully grouped, fully sorted Python list, so slicing it changes nothing about aggregation — a bulk group cannot split, double, or lose its `absorbed` rating-only statuses because the grouping pass never sees a partial input. **The accepted cost, named before agreeing:** we keep doing the full O(all shelf rows + all statuses) computation on *every* page request. Per-request latency is unchanged from today's home page, which already does exactly this; total work grows with feed size, so a 250-page scroll over a 5,000-row feed means 250 full assemblies. **Why not SQL:** window functions make paging cheap but do not retire the Python — `_group_has_written_review`, the review→watched fold and the `absorbed` skip all still need cross-referencing — so it buys complicated SQL *and* the surviving Python, and it is a rewrite of the feed core with every existing feed test needing re-validation. **Why not per-page aggregation:** the `absorbed` set becomes page-local, so a rating-only status of a film absorbed on page 1 resurfaces as a duplicate row on page 2 — a correctness break, not a cosmetic one — and the boundary can't even be expressed cleanly, because the page boundary is over *entries* while entries are what grouping produces. **How to apply:** query-level aggregation stays a genuinely isolated later optimisation. The seam is clean — swapping to it changes no template, no URL and nothing a user sees — so do not pay for it before the feed is actually slow. **(2) Cursor, never offset.** `?page=N` over a live feed re-shows the last row of page 1 every time anyone posts mid-session. Each entry carries a stable sort key independent of list position — `(date, kind_rank, source_id)`, `source_id` being the `ShelfFilm.id` for a shelf entry and the `Status.id` for a status entry — and the page cursor carries that. **Accepted side effect, agreed explicitly rather than discovered later:** adopting a composite tiebreaker can reorder rows that share an exact timestamp, because the existing sort is stable on `date` alone and ties currently keep insertion order. The concatenation test pins "no loss, no duplication" regardless of tie order; a second test pins ties to a *defined* order so they are not arbitrary. **(3) `FEED_PAGE_SIZE = 20`,** matching `GENRE_PAGE_SIZE` — invisible under endless scroll, so it is purely a first-paint knob. **(4) A 300-row DOM ceiling.** Rows are not recycled off-screen (no virtualisation), so auto-load stops at 300 and the observer disconnects, leaving the "Older" link as the only way forward. **The property that matters is that it never silently stops** — there is always a visible way to continue. **(5) No-JS gets a real paged feed:** the "Older" link is always rendered as a genuine `<a href="?c=…">` and JS hides it to auto-load instead. This costs nothing on top of the home-only footer, because `position: sticky` and the rail's `overflow-y` are CSS, not JS. **How to apply:** never let the no-JS path become a second rendering path for the feed — one template, one link, JS only changes how it is triggered. **(6) Scrolling pushes nothing.** No `pushState`, the URL stays `/`, the back button leaves normally, no mid-scroll deep links and no resume-where-you-were. **Why:** a URL per scrolled page fills the back button with dozens of entries to click through just to leave the site, and a scroll position has no natural deep-link form anyway — sharing a specific post already has `/status/<id>/`. **Accepted cost:** you cannot link someone to "row 300 of my feed". **(7) Strictly the home feed.** The genre subfeed keeps its 20-per-page numbered links — it is public and anonymous-facing, numbered pages are genuinely useful there, and it has no tall-column problem. Same shape as §2H's scope call, where the click-target overlay deliberately went to home only and not to the film page. **How to apply:** the site is deliberately inconsistent between home and genre; do not "fix" it by extending endless scroll to genre without the owner. **(8) Deploy 2 and 3 back-to-back** as two commits with two gate runs so a failure is attributable, but never let the intermediate sit live — increment 2 alone turns the home feed into "20 rows and a link", which reads as a step backwards even though it is the same pagination genre pages and notifications already use.
+
+- **R133 — §2J colour pass: black scrim on the grunge plate, white post prose and dates, no hover underline on a row, nav-white-with-lit-red-hover, and the films tabs moved onto the nav's face (owner decisions 2026-10-04, all four taken against rendered swatches rather than descriptions).** Six asks from the owner, four real decisions. **(1) The background scrim goes to pure black at `.80`, from the warm `rgba(9, 8, 7, 0.62)`.** The finding that settled it: the plate's *mean* was never the problem — it measures luminance 7.4, already near-black — its **bright speckles** are. The raw tile's top 1% sits at lum ~69 with RGB 70/69/66, and that warm cast is what reads as brown. **So raising the alpha alone cannot fix this**: at `.80` with the warm scrim the top-decile warmth only moves 2.4 → 2.2, while blackening it at the same alpha moves 2.4 → 0.6. Measured on real painted pixels after the change: top-decile warmth 1.15, brightest sampled pixel 99 → 24, p90 lum 4.1. **How to apply:** the lever on brown is the scrim's *hue*, not its alpha. If anyone re-warms this scrim, the brown comes straight back, and no amount of darkening will remove it again. `.88` was prototyped and rejected — darker, but the grain starts to flatten out of existence and the plate stops being a plate. **(2) White is `#ffffff`, not a softened off-white.** The halation objection (pure white at 0.88rem on near-black shimmers for some readers) was raised and declined; the owner wants white. A single `--white` token holds it so the palette stays the one place it is decided. **(3) Scope is site-wide, deliberately, not home-feed-only.** `.review-body` is white on every surface that draws one — feed, post page, replies, film-page reviews, genre pages — because a feed row and the post it opens must not disagree. **What was deliberately left alone, so this is a boundary and not an oversight:** notification timestamps and moderation-console timestamps are not posts and keep `--muted`; the feed's event line (`.feed-film`, "watched *Film* (1990)") is not post prose and keeps cream; the reply count keeps `--muted`. If the owner later wants those swept too, say so explicitly rather than extending by analogy. **(4) The hover underline on a row's prose is gone, and that removal is deliberate enough to be pinned.** `test_nothing_underlines_the_prose_when_the_row_is_hovered` fails against the pre-change stylesheet on `.review-open:hover ~ .review-body`, which is what makes it a real test rather than a tautology. It is written as an absence check over *any* hover/focus selector naming the prose, so re-introducing the underline under a different selector is caught as the same regression. The overlay keeps `cursor: pointer`, so the row still reads as clickable. **How to apply:** R82's "underline only, no colour shift" affordance is superseded, not balanced. Do not restore some middle ground. **(5) Nav goes white at rest with `--red-bright` on hover** — the site's existing "lit red means interactive" language, and the reason is arithmetic rather than taste: with white at rest, the old brighter-cream hover would have been *no feedback at all*. Applied to the whole header (`.site-nav a`, its borderless Log out control, `.header-user a`, and the signed-in handle). **(6) The films tabs move from Oswald to the nav's Archivo, at the nav's weight and size** (measured equal: `Archivo`, `600`, `14.08px`). They keep their own padding and active underline — only the voice changes. **How to apply:** `.tabs a` now lives in the header typography group, not the `--ui` group. If the nav's face changes, the tabs follow with it; that coupling is the point.
