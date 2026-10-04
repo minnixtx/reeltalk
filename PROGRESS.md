@@ -10,13 +10,16 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **§2J, the colour pass, is BUILT AND PROVEN — and NOT YET DEPLOYED.**
-  All six owner asks are implemented and verified against the live site in a
-  browser; nothing has been pushed to the running containers. **Deploying is
-  the owner's call, not this block's.** What is live on
-  `reeltalk.minnix.dev` right now is still §2I (footer in the rail,
-  cursor-paged feed, endless scroll) rendered in the old warm palette. Read
-  `git log -n 1 --oneline` for the actual state rather than trusting any
+- **§2J, the colour pass, is BUILT, PROVEN AND DEPLOYED on
+  `reeltalk.minnix.dev` (2026-10-04).** All six owner asks are live and
+  were confirmed in a real browser against the deployed site — 16 checks,
+  all passing — on the newly served stylesheet
+  `reeltalk.619add409518.css`. `DEPLOYING.md` §11 checks 1 and 2 were
+  re-run after the deploy and still hold (published actor id is
+  `https://reeltalk.minnix.dev/...` with no `:3030`; clean-LAN and
+  spoofed-LAN cookies carry no `Secure`, the public one does). No
+  migrations were needed. Read `git log -n 1 --oneline` and
+  `docker compose ps` for the actual state rather than trusting any
   sentence here.
 - **The six asks, as built (R133).** (1) The page background's scrim went
   from warm `rgba(9, 8, 7, 0.62)` to pure black `rgba(0, 0, 0, 0.8)`.
