@@ -8,9 +8,9 @@ The frozen original lives at minnixtx/reeltalk-legacy (archived, reference-only 
 
 ## What Is ReelTalk?
 
-🌐 Federated — built on ActivityPub; instances can follow each other across the fediverse
-🎬 Film-first — track what you've watched, rate it, write reviews, and build shelves of favorites
-👥 Community-driven — small, trusted communities instead of one giant feed
+🌐 Federated — built on ActivityPub; instances can follow each other across the fediverse  
+🎬 Film-first — track what you've watched, rate it, write reviews, and build shelves of favorites  
+👥 Community-driven — small, trusted communities instead of one giant feed  
 🔓 Free and open source — AGPLv3, no corporate middleman
 
 ## License

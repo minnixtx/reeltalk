@@ -1,17 +1,63 @@
 #!/usr/bin/env bash
 #
-# Guard: refuse to push any commit carrying a co-author trailer.
+# Guard: refuse to push anything that could put a stranger in this repo's
+# contributor list, or leak AI-attribution metadata onto its commit pages.
 #
-# The commit-msg hook stops a trailer being *created*; this stops one arriving by
-# another route -- amend, cherry-pick, merge, a rebased branch, or a commit made
-# with --no-verify. It scans exactly the commits about to leave this machine.
+# Three leak vectors, all real:
 #
-# See .githooks/commit-msg for why a co-author trailer is harmful here.
+#  1. Co-author trailers. GitHub parses `Co-authored-by:` into the contributors
+#     graph and credits whatever account the email resolves to. Blocking that
+#     account does nothing -- the graph is recomputed on every push and simply
+#     re-reads the trailer. The only fix is to never create one.
+#
+#  2. A stranger as AUTHOR. A commit authored by an address the owner does not
+#     control adds that account to the contributor list with no trailer involved
+#     at all. The trailer check alone does not see this.
+#
+#  3. Git notes. GitHub renders pushed notes on commit pages. The local tooling
+#     writes refs/notes/ai-attribution carrying generator metadata that
+#     contradicts README.md's "no external provider" disclosure. Notes never
+#     touch the contributor graph, but they must never leave this machine.
+#
+# Owner's standing rule (2026-09-09; re-affirmed 2026-09-20; author-identity and
+# notes rules added 2026-10-04).
+#
+# The CI mirror is .github/workflows/attribution-guard.yml and it is a REQUIRED
+# status check on main. Keep its patterns identical to the ones below -- the two
+# layers disagreeing is how a variant slips through.
+#
+# Enabled by `git config core.hooksPath .githooks` (done by ./setup.sh).
 
 set -uo pipefail
 
+# The only author address this repo accepts. Extend deliberately.
+ALLOWED_AUTHOR_EMAILS=(
+  "61262716+minnixtx@users.noreply.github.com"
+)
+
+# Committers may additionally be GitHub's own web-flow address. The committer
+# field does not create a contributor entry, so this is not a widening.
+ALLOWED_COMMITTER_EMAILS=(
+  "61262716+minnixtx@users.noreply.github.com"
+  "noreply@github.com"
+)
+
+# The whole trailer family, not one spelling. A narrower pattern here than in
+# commit-msg is exactly the gap that lets a --no-verify commit through.
+TRAILER_RE='^[[:space:]]*(co-?authored-by|coauthor-by)[[:space:]]*:'
+
 ZERO="0000000000000000000000000000000000000000"
 blocked=0
+
+in_list() {
+  local needle="$1"
+  shift
+  local item
+  for item in "$@"; do
+    [ "$item" = "$needle" ] && return 0
+  done
+  return 1
+}
 
 # git feeds one line per ref being pushed:
 #   <local_ref> <local_sha> <remote_ref> <remote_sha>
@@ -19,30 +65,80 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   # Deleting a branch -- nothing to check.
   [ "$local_sha" = "$ZERO" ] && continue
 
+  # --- leak vector 3: git notes must never leave this machine ---
+  case "$remote_ref$local_ref" in
+    *refs/notes/*)
+      {
+        echo ""
+        echo "  PUSH REJECTED -- refusing to push ${remote_ref:-$local_ref}"
+        echo ""
+        echo "  GitHub renders pushed git notes on commit pages. This repo's"
+        echo "  tooling writes refs/notes/ai-attribution carrying generator"
+        echo "  metadata that contradicts README.md's AI disclosure."
+        echo ""
+        echo "  Push the branch only, e.g.  git push origin main"
+        echo "  Never use --mirror, --all or --tags on this repo."
+        echo ""
+      } >&2
+      blocked=1
+      continue
+      ;;
+  esac
+
   if [ "$remote_sha" = "$ZERO" ]; then
     range="$local_sha"
   else
     range="${remote_sha}..${local_sha}"
   fi
 
-  bad="$(git log -i --grep='co-authored-by' --pretty='      %h  %s' "$range" 2>/dev/null || true)"
-
+  # --- leak vector 1: co-author trailers ---
+  bad="$(git log -i -E --grep="$TRAILER_RE" --pretty='      %h  %s' "$range" 2>/dev/null || true)"
   if [ -n "$bad" ]; then
     {
       echo ""
       echo "  PUSH REJECTED -- $remote_ref contains co-author trailer(s):"
       echo "$bad"
       echo ""
-      echo "  Strip them before pushing, e.g.:"
-      echo "    git filter-branch -f --msg-filter \\"
-      echo "      'grep -viE \"^[[:space:]]*(co-?authored-by|coauthor-by)[[:space:]]*:\"' \\"
-      echo "      <first-offender>~1..\${local_ref#refs/heads/}"
+      echo "  GitHub credits these to the account the email maps to, which puts"
+      echo "  strangers in this repo's contributor list."
       echo ""
-      echo "  Rule: PROGRESS.md -> 'Contributor attribution re-clean' (2026-09-20)."
+      echo "  Rule: this repo takes no co-author trailer of any kind."
       echo ""
     } >&2
     blocked=1
   fi
+
+  # --- leak vector 2: a stranger authoring or committing ---
+  while IFS=$'\t' read -r sha aemail cemail; do
+    [ -z "${sha:-}" ] && continue
+
+    if ! in_list "$aemail" "${ALLOWED_AUTHOR_EMAILS[@]}"; then
+      {
+        echo ""
+        echo "  PUSH REJECTED -- $sha has a non-owner author address:"
+        echo "      author    <$aemail>"
+        echo "      allowed   ${ALLOWED_AUTHOR_EMAILS[*]}"
+        echo ""
+        echo "  A commit authored by an address you do not control adds that"
+        echo "  GitHub account to this repo's contributor list, with no trailer"
+        echo "  involved. Rewrite the author before pushing:"
+        echo "      git rebase <sha>~1 --exec 'git commit --amend --author=\"NAME <allowed>\" --no-edit'"
+        echo ""
+      } >&2
+      blocked=1
+    fi
+
+    if ! in_list "$cemail" "${ALLOWED_COMMITTER_EMAILS[@]}"; then
+      {
+        echo ""
+        echo "  PUSH REJECTED -- $sha has a non-owner committer address:"
+        echo "      committer <$cemail>"
+        echo "      allowed   ${ALLOWED_COMMITTER_EMAILS[*]}"
+        echo ""
+      } >&2
+      blocked=1
+    fi
+  done < <(git log "$range" --pretty='%H%x09%ae%x09%ce' 2>/dev/null || true)
 done
 
 exit "$blocked"

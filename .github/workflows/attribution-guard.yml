@@ -1,14 +1,17 @@
 name: attribution-guard
 
 # Last line of defence. Local hooks can be skipped with `git commit --no-verify`;
-# this cannot. GitHub turns `Co-authored-by:` trailers into contributor-graph
-# entries credited to whatever account the email maps to, so a trailer naming an
-# address the owner does not control puts a stranger in this repo's contributor
-# list. No co-author trailer of any kind is allowed.
+# this cannot. It is a REQUIRED status check on main, so it blocks rather than
+# merely warns.
 #
-# Make this job REQUIRED (Settings -> Branches -> branch protection for main ->
-# "Require a status check to pass" -> attribution-guard) so it blocks rather
-# than merely warns.
+# GitHub turns `Co-authored-by:` trailers into contributor-graph entries credited
+# to whatever account the email maps to, so a trailer naming an address the owner
+# does not control puts a stranger in this repo's contributor list. A commit
+# *authored* by such an address does the same thing with no trailer at all. No
+# co-author trailer of any kind is allowed, and no non-owner author.
+#
+# Patterns here MUST match .githooks/commit-msg and .githooks/pre-push. The three
+# layers disagreeing is how a variant spelling slips through.
 
 on:
   push:
@@ -26,19 +29,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Scan pushed commits for co-author trailers
+      - name: Scan pushed commits for co-author trailers and foreign identities
         env:
           BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
+          ALLOWED_AUTHOR_EMAILS: "61262716+minnixtx@users.noreply.github.com"
+          ALLOWED_COMMITTER_EMAILS: "61262716+minnixtx@users.noreply.github.com noreply@github.com"
         run: |
+          set -uo pipefail
+
           ZERO="0000000000000000000000000000000000000000"
-          PATTERN='^[[:space:]]*(co-?authored-by|coauthor-by)[[:space:]]*:'
+          # Whole trailer family -- identical to the local hooks.
+          TRAILER_RE='^[[:space:]]*(co-?authored-by|coauthor-by)[[:space:]]*:'
+          fail=0
 
           # Empty/unknown "before" (new branch, force-push, initial push) -> scan
           # the whole branch rather than nothing.
           if [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "$ZERO" ] \
              && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-            RANGE="${BEFORE}..${SHA}"
+            RANGE="$BEFORE..$SHA"
             SCOPE="pushed range"
           else
             RANGE="$SHA"
@@ -47,8 +56,7 @@ jobs:
 
           echo "Scanning ${SCOPE}: ${RANGE}"
 
-          BAD="$(git log -i --grep='co-authored-by' --pretty='  %h  %s' "$RANGE" || true)"
-
+          BAD="$(git log -i -E --grep="$TRAILER_RE" --pretty='  %h  %s' "$RANGE" || true)"
           if [ -n "$BAD" ]; then
             echo ""
             echo "::error::Co-author trailers are not allowed in this repo."
@@ -58,8 +66,50 @@ jobs:
             echo "Offending commits:"
             echo "$BAD"
             echo ""
-            echo "Strip them and force-push, or amend the commits before merging."
+            fail=1
+          fi
+
+          # A foreign author adds that account as a contributor with no trailer.
+          while IFS=$'\t' read -r sha aemail cemail; do
+            [ -z "${sha:-}" ] && continue
+            case " $ALLOWED_AUTHOR_EMAILS " in
+              *" $aemail "*) : ;;
+              *)
+                echo "::error::${sha:0:10} has a non-owner author <$aemail>. Allowed: $ALLOWED_AUTHOR_EMAILS"
+                fail=1
+                ;;
+            esac
+            case " $ALLOWED_COMMITTER_EMAILS " in
+              *" $cemail "*) : ;;
+              *)
+                echo "::error::${sha:0:10} has a non-owner committer <$cemail>. Allowed: $ALLOWED_COMMITTER_EMAILS"
+                fail=1
+                ;;
+            esac
+          done < <(git log "$RANGE" --pretty='%H%x09%ae%x09%ce' || true)
+
+          if [ "$fail" -ne 0 ]; then
+            echo ""
+            echo "Guard failed. Strip trailers / fix identities before merging."
             exit 1
           fi
 
-          echo "Clean: no co-author trailers found."
+          echo "Clean: no co-author trailers, no foreign author or committer."
+
+      - name: Refuse AI-attribution notes on the remote
+        run: |
+          set -uo pipefail
+          # GitHub renders pushed git notes on commit pages. This repo's local
+          # tooling writes refs/notes/ai-attribution carrying generator
+          # metadata that contradicts README.md's AI disclosure. Notes never
+          # touch the contributor graph, but they must never be published.
+          NOTES="$(git ls-remote origin 'refs/notes/*' || true)"
+          if [ -n "$NOTES" ]; then
+            echo "::error::refs/notes/* exist on the remote and must be removed."
+            echo "GitHub renders pushed notes on commit pages, which would"
+            echo "surface generator metadata the README disclosure denies."
+            echo ""
+            echo "$NOTES"
+            exit 1
+          fi
+          echo "Clean: no refs/notes/* published."

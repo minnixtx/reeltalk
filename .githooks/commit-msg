@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Guard: this repo takes NO co-author trailers.
+# Guard: this repo takes NO co-author trailer, and no non-owner author.
 #
 # GitHub parses `Co-authored-by:` trailers into the contributors graph and credits
 # whatever account the email resolves to. A trailer naming an address the owner does
@@ -8,13 +8,24 @@
 # blocking that account does not help -- the graph is recomputed on every push and
 # just re-reads the trailer. The only fix is to never create one.
 #
-# Owner's standing rule (2026-09-09, re-affirmed 2026-09-20 after two clean-ups):
-# no Co-authored-by trailer of ANY kind. Commits show only the repo identity.
+# The author address is checked for the same reason from the other direction: a
+# commit *authored* by an address the owner does not control adds that account as
+# a contributor with no trailer involved at all.
+#
+# Owner's standing rule (2026-09-09, re-affirmed 2026-09-20; author-identity
+# check added 2026-10-04).
 #
 # Enabled by `git config core.hooksPath .githooks` (done by ./setup.sh).
 # Bypassing it with --no-verify is caught by the pre-push hook and by CI.
 
 set -uo pipefail
+
+ALLOWED_AUTHOR_EMAILS=(
+  "61262716+minnixtx@users.noreply.github.com"
+)
+
+# The whole trailer family, not one spelling. Keep identical to pre-push and CI.
+TRAILER_RE='^[[:space:]]*(co-?authored-by|coauthor-by)[[:space:]]*:'
 
 msg_file="${1:-}"
 if [ -z "$msg_file" ] || [ ! -f "$msg_file" ]; then
@@ -22,23 +33,54 @@ if [ -z "$msg_file" ] || [ ! -f "$msg_file" ]; then
   exit 1
 fi
 
-if grep -qiE '^[[:space:]]*(co-?authored-by|coauthor-by)[[:space:]]*:' "$msg_file"; then
+if grep -qiE "$TRAILER_RE" "$msg_file"; then
   {
     echo ""
     echo "  COMMIT REJECTED -- co-author trailer not allowed in this repo."
     echo ""
     echo "  Found:"
-    grep -inE '^[[:space:]]*(co-?authored-by|coauthor-by)[[:space:]]*:' "$msg_file" \
-      | sed 's/^/      /'
+    grep -inE "$TRAILER_RE" "$msg_file" | sed 's/^/      /'
     echo ""
     echo "  GitHub credits co-author trailers to the GitHub account that the"
     echo "  email maps to, which puts strangers in this repo's contributor list."
-    echo "  Remove every Co-authored-by line and commit again."
+    echo "  Remove every co-author line and commit again."
     echo ""
-    echo "  Rule: PROGRESS.md -> 'Contributor attribution re-clean' (2026-09-20)."
+    echo "  Rule: this repo takes no co-author trailer of any kind."
     echo ""
   } >&2
   exit 1
+fi
+
+# --- author identity ---
+author_ident="$(git var GIT_AUTHOR_IDENT 2>/dev/null || true)"
+author_email="$(printf '%s' "$author_ident" | sed -nE 's/.*<([^>]*)>.*/\1/p')"
+
+if [ -n "$author_email" ]; then
+  ok=0
+  for allowed in "${ALLOWED_AUTHOR_EMAILS[@]}"; do
+    [ "$author_email" = "$allowed" ] && ok=1 && break
+  done
+  if [ "$ok" -ne 1 ]; then
+    {
+      echo ""
+      echo "  COMMIT REJECTED -- author address is not the repo owner's."
+      echo ""
+      echo "      author    <$author_email>"
+      echo "      allowed   ${ALLOWED_AUTHOR_EMAILS[*]}"
+      echo ""
+      echo "  A commit authored by an address you do not control adds that"
+      echo "  GitHub account to this repo's contributor list."
+      echo ""
+      echo "  Fix the identity for this repo:"
+      echo "      git config user.email \"${ALLOWED_AUTHOR_EMAILS[0]}\""
+      echo ""
+      echo "  If you are intentionally committing as someone else, add that"
+      echo "  address to ALLOWED_AUTHOR_EMAILS in .githooks/commit-msg and"
+      echo "  .githooks/pre-push -- both layers must agree."
+      echo ""
+    } >&2
+    exit 1
+  fi
 fi
 
 exit 0
