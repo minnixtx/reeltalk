@@ -10,82 +10,77 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **R134 — the stamped applaud control is BUILT, PROVEN AND DEPLOYED on
-  `reeltalk.minnix.dev` (2026-10-05).** The text like button is gone from
-  the home feed, the status detail page and the notifications copy,
-  replaced by the owner's four hand-stamped states. Confirmed in a real
-  browser against the deployed site as a signed-in member, in both the
-  unliked (white) and applauded (red) states. `DEPLOYING.md` §11 checks 1
-  and 2 were re-run after the deploy and still hold: the published actor id
-  is `https://reeltalk.minnix.dev/user/minnix/` with `endpoints.
-  sharedInbox = https://reeltalk.minnix.dev/inbox/` and no `:3030`; a
-  clean LAN request and a LAN request spoofing `X-Forwarded-Proto: https`
-  both set cookies with **no** `Secure`, and the public one does. No
-  migrations — this increment touches no models.
-- **Three constraints the artwork imposed, because none of them are
-  visible in the source.** (1) The four stamps were drawn at different
-  sizes and sat at different vertical centres — border rects 1338×371,
-  1381×394, 1297×378, 1366×391, with a 24px centre drift between hover
-  and applauded — so hovering or applauding visibly jumped the control.
-  All four are resampled onto one registered 730×208 border, which is why
-  the shipped PNGs are 758×236 and not the originals' 2172×724. (2) The
-  baked word fills the pill to 95% of its width, so the count **cannot**
-  live inside the art. (3) The art carries a transparent margin: the
-  visible outline is 208 of the 236 source height, so the button's
-  *visible* height is 2.2rem, not its 2.5rem box.
-- **How the count is attached, and why exactly 6px.** The count is a
-  sibling of the button, never inside it — a number must not toggle
-  anything when clicked. It is styled off the button's own `aria-pressed`
-  with the general-sibling combinator, so there is no second copy of the
-  state to keep in step. It overlaps the button's rounded right cap by
-  6px and stands 2.2rem tall, which puts the two outlines level and reads
-  as one shape with a divider. 6px is the ceiling: the baked word ends
-  ~6.7px from the button's right edge at this size, so anything deeper
-  clips the "d" in "Applaud". Its fill is the art's own interior
-  (`rgba(7,7,7,.99)` unliked, `rgba(11,1,1,.99)` applauded) so the join
-  shows no tonal step.
-- **There is no applauded-and-hovered art, and the fallback was wrong.**
-  Falling back to the plain hover state would flip the baked word back to
-  "Applaud" on a post you have already applauded — the word is baked in,
-  so this is not a colour choice. The hover lift is CSS
-  (`filter: brightness(1.22)`) on the applauded art instead, so the word
-  stays true and the control still answers the cursor.
-- **The base `button` rule is the reason the first deploy sat crooked.**
-  `button, .btn` carries `margin-top: 1rem`, and the new `.applaud-btn`
-  did not reset it, so the control hung ~16px below the avatar it is meant
-  to line up with. The old `.like-btn` had that reset and it was dropped in
-  the rewrite. **How to apply:** any control placed inside `.review-head`
-  must reset `margin-top` explicitly — the base rule is not opt-in.
-- **Internal naming is deliberately unchanged.** The model, the routes, the
-  ActivityPub wire and the notification enum all stay `like`. Only UI copy
-  moved to "applaud". `Notification.Kind.LIKE`'s human label is
-  model-internal — `get_kind_display` has no callers, so leaving it did not
-  leak the old word into the surface.
-- **Verification, stated exactly for what ran against what.** The full gate
-  ran **2180 passed + 5 skipped, `PYTEST_EXIT=0`** (baseline was 2174 + 5;
-  the four new PNGs add six tests through `test_clean_room.py`'s
-  parametrisation). That run covered every template, JS and copy change. The
-  final CSS-only correction — the `margin-top: 0` reset, `gap: 0`, and the
-  count box's 2.2rem height and white border — landed **after** that gate
-  and is verified by re-running the five test files that read the real
-  `reeltalk.css` plus the like tests: **116 passed** on the final tree.
-  **A single full-suite run over the final tree has not been done.** The
-  delta is CSS values only, in a file four tests already parse.
-- **The repo and attribution facts still stand.** `github.com/minnixtx/
-  reeltalk` is the new repository (2026-10-04); the old one is private as
-  `reeltalk-old`. No co-author trailer — blocked by `.githooks/commit-msg`
-  on creation and by `pre-push` + CI on the way out, all three matching the
-  whole trailer family and checking author and committer addresses against
-  an explicit allowlist. Never push `refs/notes/*`: `pre-push` refuses it
-  and CI fails if any exist on the remote. `attribution-guard` is a
-  required status check on `main`. **The one thing no guard stops is a
-  history rewrite** — published history here stays as it is.
+- **R135 — the applaud control is a bare clapperboard icon, BUILT, PROVEN
+  AND DEPLOYED on `reeltalk.minnix.dev` (2026-10-05).** It replaces the
+  pill button from R134, which the owner rejected on sight. 26px icon,
+  plain monospace count, no border and no baked word. Confirmed in a real
+  browser against the deployed site as a signed-in member across all three
+  resting states. Full gate **2183 passed + 5 skipped, `PYTEST_EXIT=0`**
+  (28:10). No migrations — this increment touches no models.
+- **The resting icon reports WHO applauded, which is two facts, not one.**
+  Solid red when it is yours; red outline when others applauded and you did
+  not; white outline when nobody has. Both facts were already on the feed
+  row (`liked_by_viewer` and `like_count`), so no model change was needed.
+  `data-state` is derived in the template and recomputed by `likes.js` from
+  the **server's** answer after each toggle — never from a client-side
+  increment, which is the difference between the icon and the tally being
+  allowed to drift and not being allowed to.
+- **Hover is a uniform `scale(1.08)`, and the resets on that selector are
+  load-bearing.** `button:hover, .btn:hover` paints a five-stop red bloom
+  and `button:hover` adds `filter: brightness(1.1)`; both are specificity
+  (0,1,1) and therefore **outspecify** the (0,1,0) `.applaud-btn` resets in
+  the base rule. `.applaud-btn:hover` must repeat `box-shadow: none` and
+  `filter: none` or the icon lights up with the site's button halo the
+  moment the cursor arrives. **How to apply:** any control that opts out of
+  the base button chrome must repeat those resets on the hover selector, not
+  just on the base one. This is the second time the base `button` rule has
+  bitten this control — the first was `margin-top: 1rem`.
+- **Why brightness could not be the hover.** The idle art is already at
+  253,253,253, so `brightness()` clamps at 255 and is invisible on it. A
+  lift would have registered on the red states only, making the three states
+  feel inconsistent. `transform` is paint-only, so the row never reflows.
+- **The three shipped PNGs are registered by core area, not by ink bbox.**
+  At alpha≥200 the clapperboard bodies measured 1059×973 (white outline),
+  1028×976 (red outline) and 1023×989 (solid red) — the source art is not
+  the same size. Registering by ink bbox shifts the clapperboard between
+  states. The generation recipe and the measured numbers are in the
+  `.applaud` comment block in `reeltalk.css`; any future state of this
+  artwork must be registered the same way before it ships.
+- **The count is always white and never tracks the icon.** The icon alone
+  carries who applauded, so a red number was a second, redundant copy of
+  the same signal.
+- **Dead assets are removed, not left behind.** The four pill PNGs from R134
+  and the supplied white-glow PNG are all gone. `ManifestStaticFilesStorage`
+  hashes and ships every file in the static tree whether or not a rule points
+  at it, so an unused asset is ~250KB of dead weight per file. The whole
+  control is now three PNGs totalling ~43KB against the pill's ~1MB.
+- **Process rule that now governs all design work here.** Deploy and get the
+  owner's browser review **before** running the full gate, not after. The
+  gate costs ~30 minutes and a design change routinely needs two or three
+  visual rounds, so running it first burns a cycle every time the answer is
+  "no". Targeted tests needed to deploy safely are fine earlier; the long
+  full-suite run waits.
+- **Verify a hover with a browser, not with the cascade.** The glow the owner
+  reported was real and my first two explanations of it were wrong.
+  `playwright-core` from the browser-use runtime drives system Chromium
+  headlessly; hovering the element and reading `getComputedStyle` settled it
+  in one run. **How to apply:** for any claim about what a control does under
+  a pseudo-class, read the computed style in a real browser.
 - **Standing constraints, unchanged and not up for re-litigation.** No
   user-made lists under any name (owner: "We won't do lists"). No third
   column on the home feed (R64). The genre subfeed keeps its numbered
   20-per-page links, and its inconsistency with the endless home feed is
   deliberate (R132 7) — do not "fix" it. No virtualisation, no mid-scroll
   deep links, no resume-where-you-were, no live updates on the home feed.
+  TMDB search is the primary add-film flow; manual create is the fallback.
+- **The repo and attribution facts still stand.** `github.com/minnixtx/
+  reeltalk` is the repository (2026-10-04); the old one is private as
+  `reeltalk-old`. No co-author trailer — blocked by `.githooks/commit-msg`
+  on creation and by `pre-push` + CI on the way out. Never push
+  `refs/notes/*`: `pre-push` refuses it and CI fails if any exist on the
+  remote. `attribution-guard` is a required status check on `main`. **The
+  one thing no guard stops is a history rewrite** — published history here
+  stays as it is.
 - **git:** read the current state with `git status` and `git log -n 1
   --oneline` rather than trusting anything written here. Anything a single
   command answers for free is a pointer in this block, not a value; only a
@@ -100,7 +95,7 @@ is history.**
 | Product contract — domain model, watch state, TMDB, federation surface, deployment shape | `PLAN.md` §3 |
 | **D-series** — the original product decisions (D1–D17) | `PLAN.md` §2 |
 | License audit | `PLAN.md` §4 |
-| **R-series** — rewrite-era decisions (R1–R134) | `PROGRESS.md` §4 |
+| **R-series** — rewrite-era decisions (R1–R135) | `PROGRESS.md` §4 |
 | What was actually built, with commit hashes | `PROGRESS.md` §2 |
 | Host and deploy facts for this box | `PROGRESS.md` §3 |
 | What is live right now | the block above |
@@ -6439,3 +6434,5 @@ not an optimisation.
 - **R133 — §2J colour pass: black scrim on the grunge plate, white post prose and dates, no hover underline on a row, nav-white-with-lit-red-hover, and the films tabs moved onto the nav's face (owner decisions 2026-10-04, all four taken against rendered swatches rather than descriptions).** Six asks from the owner, four real decisions. **(1) The background scrim goes to pure black at `.80`, from the warm `rgba(9, 8, 7, 0.62)`.** The finding that settled it: the plate's *mean* was never the problem — it measures luminance 7.4, already near-black — its **bright speckles** are. The raw tile's top 1% sits at lum ~69 with RGB 70/69/66, and that warm cast is what reads as brown. **So raising the alpha alone cannot fix this**: at `.80` with the warm scrim the top-decile warmth only moves 2.4 → 2.2, while blackening it at the same alpha moves 2.4 → 0.6. Measured on real painted pixels after the change: top-decile warmth 1.15, brightest sampled pixel 99 → 24, p90 lum 4.1. **How to apply:** the lever on brown is the scrim's *hue*, not its alpha. If anyone re-warms this scrim, the brown comes straight back, and no amount of darkening will remove it again. `.88` was prototyped and rejected — darker, but the grain starts to flatten out of existence and the plate stops being a plate. **(2) White is `#ffffff`, not a softened off-white.** The halation objection (pure white at 0.88rem on near-black shimmers for some readers) was raised and declined; the owner wants white. A single `--white` token holds it so the palette stays the one place it is decided. **(3) Scope is site-wide, deliberately, not home-feed-only.** `.review-body` is white on every surface that draws one — feed, post page, replies, film-page reviews, genre pages — because a feed row and the post it opens must not disagree. **What was deliberately left alone, so this is a boundary and not an oversight:** notification timestamps and moderation-console timestamps are not posts and keep `--muted`; the feed's event line (`.feed-film`, "watched *Film* (1990)") is not post prose and keeps cream; the reply count keeps `--muted`. If the owner later wants those swept too, say so explicitly rather than extending by analogy. **(4) The hover underline on a row's prose is gone, and that removal is deliberate enough to be pinned.** `test_nothing_underlines_the_prose_when_the_row_is_hovered` fails against the pre-change stylesheet on `.review-open:hover ~ .review-body`, which is what makes it a real test rather than a tautology. It is written as an absence check over *any* hover/focus selector naming the prose, so re-introducing the underline under a different selector is caught as the same regression. The overlay keeps `cursor: pointer`, so the row still reads as clickable. **How to apply:** R82's "underline only, no colour shift" affordance is superseded, not balanced. Do not restore some middle ground. **(5) Nav goes white at rest with `--red-bright` on hover** — the site's existing "lit red means interactive" language, and the reason is arithmetic rather than taste: with white at rest, the old brighter-cream hover would have been *no feedback at all*. Applied to the whole header (`.site-nav a`, its borderless Log out control, `.header-user a`, and the signed-in handle). **(6) The films tabs move from Oswald to the nav's Archivo, at the nav's weight and size** (measured equal: `Archivo`, `600`, `14.08px`). They keep their own padding and active underline — only the voice changes. **How to apply:** `.tabs a` now lives in the header typography group, not the `--ui` group. If the nav's face changes, the tabs follow with it; that coupling is the point.
 
 - **R134 — The like button becomes the owner's stamped applaud control; the count is a sibling that overlaps the art's right cap, and the four stamps are resampled onto one registered border so the control stops jumping (owner decisions 2026-10-05, taken against rendered variants rather than descriptions).** Six things the artwork forced that are not visible in the source files. **(1) The four stamps were drawn at different sizes and at different vertical centres.** Border rects: default 1338×371, hover 1381×394, active 1297×378, applauded 1366×391 — a ~6% spread with a 24px centre drift between hover and applauded. Shipped as drawn, hovering or applauding visibly jumped the control. All four are resampled onto one registered 730×208 border centred in a 758×236 canvas, which is why the shipped PNGs are that size and not the originals' 2172×724. **How to apply:** any future state of this artwork must be registered to the same border before it ships, not dropped in at its own size. **(2) The baked word fills the pill to 95% of its width, so the count cannot live inside the art.** Measured, not assumed — an earlier reading of the alpha *ink* bbox landed outside the button and produced a wrong "there's plenty of room"; the interior is solid opaque. **How to apply:** do not try to move the count inside the pill. It needs the art redrawn with a shorter word. **(3) The count is a sibling of the button, never its child** — a number must not toggle anything when clicked. It is styled off the button's own `aria-pressed` with the general-sibling combinator (`~`), so there is no second copy of the state to keep in step. **(4) The overlap is exactly 6px and the height is exactly 2.2rem, both for measured reasons.** The count box covers the button's rounded right cap so the pair reads as one shape with a divider. 6px is the ceiling: the baked word ends ~6.7px from the button's right edge at this size, so deeper clips the "d" in "Applaud". The height is 2.2rem rather than the button's 2.5rem because the art carries a transparent margin — the visible outline is 208 of the 236 source height, so 2.2rem is the button's *visible* height and puts the two outlines level. Its fill is the art's own interior (`rgba(7,7,7,.99)` unliked, `rgba(11,1,1,.99)` applauded) so the join shows no tonal step. **How to apply:** if the button's rendered size changes, both numbers must be recomputed from the art's border rect, not scaled by eye. **(5) There is no applauded-and-hovered art, and the obvious fallback is wrong.** Falling back to the plain hover state would flip the baked word back to "Applaud" on a post you have already applauded — the word is baked in, so this is not a colour choice that CSS can fix. The hover lift is `filter: brightness(1.22)` on the applauded art instead, so the word stays true and the control still answers the cursor. **(6) The base `button` rule is a trap for anything placed in `.review-head`.** `button, .btn` carries `margin-top: 1rem`; the new `.applaud-btn` did not reset it and hung ~16px below the avatar it was meant to line up with. The old `.like-btn` had the reset and it was dropped in the rewrite. **How to apply:** any control added to that row must reset `margin-top` explicitly — the base rule is not opt-in. **Naming, deliberately unchanged:** the model, the routes, the ActivityPub wire and `Notification.Kind.LIKE` all stay `like`; only UI copy moved to "applaud". `get_kind_display` has no callers, so the enum's human label is model-internal and leaving it did not leak the old word. **Process decision that came out of this increment, and now governs design work:** deploy and get the owner's browser review **before** running the full gate, not after — the gate costs ~30 minutes and a design change routinely needs two or three visual rounds, so running it first burns a cycle every time the answer is "no".
+
+- **R135 — The applaud control becomes a bare 26px clapperboard icon whose resting state reports WHO applauded; the supplied glow art is dropped and hover is a uniform scale (owner decisions 2026-10-05, taken against rendered variants).** Six things worth keeping. **(1) The resting icon carries three states, not two.** Solid red when the applause is yours, red outline when others applauded and you did not, white outline when nobody has. **How to apply:** this is a three-way state, not a boolean — any new surface that shows applause must derive all three, and must derive them from the server's answer rather than incrementing client-side, or the icon and the tally are permitted to drift. **(2) Both facts were already on the row.** `liked_by_viewer` picks mine-vs-not and `like_count` picks others-vs-nobody, so the richer state cost no model change and no extra query. Worth checking for that before proposing schema work. **(3) Hover must repeat the base-rule resets on the hover selector.** `button:hover, .btn:hover` paints a five-stop red bloom and `button:hover` adds `filter: brightness(1.1)`; both are (0,1,1) and outspecify the (0,1,0) `.applaud-btn` resets, so the class-level `box-shadow: none` loses exactly when the cursor arrives. `.applaud-btn:hover` therefore carries `box-shadow: none; filter: none` alongside its transform. **How to apply:** any control opting out of the base button chrome must repeat those resets on the hover selector too — the base-rule reset alone does not cover hover. This is the second bite from the same rule; the first was `margin-top: 1rem`. **(4) Brightness cannot serve as a hover lift on near-white art.** The idle icon sits at 253,253,253, so `brightness()` clamps at 255 and produces nothing visible there, while the same lift is clearly visible on the red art — which would have made the three states feel inconsistent rather than uniform. `scale(1.08)` registers on all three and is paint-only, so nothing reflows. **How to apply:** before choosing a brightness-based affordance, check the lightest value in the artwork; if it is near 255 the affordance is a no-op there. **(5) The supplied white-glow hover art is deliberately unused, and the dead assets are deleted.** The owner rejected the outside glow. The four pill PNGs from R134 and the glow PNG are all removed, because `ManifestStaticFilesStorage` hashes and ships every file in the static tree whether or not a rule points at it — an orphan asset is ~250KB of dead weight per file, forever. The whole control is now three PNGs totalling ~43KB against the pill's ~1MB. **How to apply:** after replacing an asset, grep for references and delete the orphans rather than leaving them "in case". **(6) The three shipped PNGs were drawn at different sizes and are registered by core area.** At alpha≥200 the clapperboard bodies measured 1059×973 (white outline), 1028×976 (red outline) and 1023×989 (solid red). They are scaled to a common geometric mean and pasted so the core centre lands on the canvas centre, which keeps the clapperboard still across state changes; registering by ink bbox shifts it. The recipe and the numbers live in the `.applaud` comment in `reeltalk.css`. **How to apply:** any future state of this artwork must be registered the same way before it ships. **Also settled this increment: verify a hover with a browser, not with the cascade.** The glow the owner reported was real and my first two explanations of it were wrong; hovering the element in headless Chromium via `playwright-core` and reading `getComputedStyle` settled it in one run. **Process rule now governing all design work:** deploy and get the owner's browser review **before** running the full gate, not after.
