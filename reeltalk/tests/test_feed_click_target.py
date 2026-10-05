@@ -164,15 +164,15 @@ def test_the_overlay_is_named_for_its_author(alice, dune, admin):
 
 
 @pytest.mark.django_db
-def test_the_overlay_closes_before_the_like_button(alice, dune, admin):
-    # Order plus emptiness is what makes the Like button a sibling that paints
+def test_the_overlay_closes_before_the_applaud_button(alice, dune, admin):
+    # Order plus emptiness is what makes the applaud button a sibling that paints
     # above the overlay rather than a child the overlay would swallow.
     mark_watched(alice, dune, rating="4.5", content="<p>Desert planet.</p>")
     review = Status.objects.get(user=alice, film=dune)
     row = _row(_home(_login("alice")), review.pk)
     overlay_end = row.index('class="review-open"')
     overlay_end = row.index("</a>", overlay_end)
-    assert row.index('class="like-btn"') > overlay_end
+    assert row.index('class="applaud-btn"') > overlay_end
 
 
 @pytest.mark.django_db

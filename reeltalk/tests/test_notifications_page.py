@@ -113,8 +113,8 @@ def test_a_member_gets_their_own_ledger_newest_first(member, alice, bob, post):
     # the filter left the original assertions all green.)
     assert content.count('<li class="review">') == 2
     assert "followed you" in content
-    assert "liked" in content
-    assert content.index("followed you") > content.index("liked")
+    assert "applauded" in content
+    assert content.index("followed you") > content.index("applauded")
 
 
 def test_the_page_renders_every_kind_it_holds(member, alice, bob, post):
@@ -123,7 +123,7 @@ def test_the_page_renders_every_kind_it_holds(member, alice, bob, post):
     notify(alice, bob, Notification.Kind.REPLY, post)
     content = member.get("/notifications/").content.decode()
     assert "followed you" in content
-    assert "liked" in content
+    assert "applauded" in content
     assert "replied to your post" in content
 
 
@@ -174,7 +174,7 @@ def test_a_status_that_was_hard_deleted_keeps_the_row_and_loses_the_link(
     Status.objects.filter(pk=post.pk).delete()
     content = member.get("/notifications/").content.decode()
     assert status_url not in content
-    assert "liked a post that is no longer here" in content
+    assert "applauded a post that is no longer here" in content
 
 
 def test_a_soft_deleted_post_loses_the_link_too(member, alice, bob, post):
@@ -188,7 +188,7 @@ def test_a_soft_deleted_post_loses_the_link_too(member, alice, bob, post):
     post.delete()
     content = member.get("/notifications/").content.decode()
     assert status_url not in content
-    assert "liked a post that is no longer here" in content
+    assert "applauded a post that is no longer here" in content
     # The row survives — the like happened whatever became of the post.
     assert content.count('<li class="review">') == 1
 
@@ -220,7 +220,7 @@ def test_a_deleted_actor_keeps_the_row_and_loses_the_profile_link(
     assert 'href="/user/bob/"' not in content
     # The event is still on the ledger; only the name is gone.
     assert "Someone" in content
-    assert "liked" in content
+    assert "applauded" in content
     assert Notification.objects.filter(recipient=alice, actor__isnull=True).count() == 1
 
 
@@ -286,7 +286,7 @@ def test_mark_all_read_clears_the_unread_state(member, alice, bob, post):
     content = member.get("/notifications/").content.decode()
     assert "Mark all read" not in content
     # The rows are still on the page — read is a timestamp, not a delete.
-    assert "liked" in content
+    assert "applauded" in content
 
 
 def test_mark_all_read_touches_only_the_callers_user_row(member, alice, bob, post):
@@ -359,10 +359,10 @@ def test_the_page_paginates_at_the_named_size(alice):
     client = Client()
     client.force_login(alice)
     first = client.get("/notifications/").content.decode()
-    assert first.count("liked <a") == NOTIFICATIONS_PAGE_SIZE
+    assert first.count("applauded <a") == NOTIFICATIONS_PAGE_SIZE
     assert "Page 1 of 2" in first
     second = client.get("/notifications/?page=2").content.decode()
-    assert second.count("liked <a") == 1
+    assert second.count("applauded <a") == 1
     assert "Page 2 of 2" in second
 
 

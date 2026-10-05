@@ -385,7 +385,7 @@ def test_folded_review_row_carries_a_like_control_for_the_review(alice, dune, ad
     mark_watched(alice, dune, rating="4.5", content="<p>Desert planet.</p>")
     review = Status.objects.get(user=alice, film=dune)
     body = _home(_login("alice"))
-    assert f'class="like-btn" data-url="/status/{review.pk}/like/"' in body
+    assert f'class="applaud-btn" data-url="/status/{review.pk}/like/"' in body
 
 
 @pytest.mark.django_db
@@ -404,7 +404,9 @@ def test_feed_row_shows_the_like_count(alice, bob, dune, admin):
     Like.objects.create(user=bob, status=status)
     bob.follows.add(alice)  # otherwise alice's review is not in bob's feed
     body = _home(_login("bob"))
-    assert "Liked" in body  # bob's own state…
+    # The word is baked into the artwork now, so the viewer's own state is
+    # carried by the button's accessible name, not by a visible text node.
+    assert "Applauded — remove your applause" in body  # bob's own state…
     assert 'aria-pressed="true"' in body
 
 
@@ -413,7 +415,7 @@ def test_bare_shelf_row_has_no_like_control(alice, dune, admin):
     shelve_to_watchlist(alice, dune)
     body = _home(_login("alice"))
     assert "to their Watchlist" in body  # the row really rendered…
-    assert "like-btn" not in body  # …and really carries no control
+    assert "applaud-btn" not in body  # …and really carries no control
 
 
 @pytest.mark.django_db
@@ -427,7 +429,7 @@ def test_bulk_aggregate_row_has_no_like_control(alice, admin):
         )
     body = _home(_login("alice"))
     assert "2 other films" in body  # the aggregate really rendered…
-    assert "like-btn" not in body  # …and really carries no control
+    assert "applaud-btn" not in body  # …and really carries no control
 
 
 @pytest.mark.django_db
@@ -469,7 +471,7 @@ def test_post_page_shows_a_liked_state_for_a_user_who_liked_it(alice, dune):
     Like.objects.create(user=alice, status=status)
     body = _login("alice").get(f"/status/{status.pk}/").content.decode()
     assert 'aria-pressed="true"' in body
-    assert "Liked" in body
+    assert "Applauded — remove your applause" in body
 
 
 @pytest.mark.django_db
@@ -489,13 +491,13 @@ def test_post_page_shows_no_control_to_an_anonymous_visitor(alice, bob, dune):
     status = _review(alice, dune)
     Like.objects.create(user=bob, status=status)
     body = Client().get(f"/status/{status.pk}/").content.decode()
-    assert "like-btn" not in body
-    assert "1 like" in body  # the count is still a fact about the post
+    assert "applaud-btn" not in body
+    assert "Applauded 1 time" in body  # the count is still a fact about the post
 
 
 @pytest.mark.django_db
 def test_post_page_shows_no_count_span_when_nothing_likes_it(alice, dune):
     status = _review(alice, dune)
     body = Client().get(f"/status/{status.pk}/").content.decode()
-    assert "like-btn" not in body
-    assert " like<" not in body
+    assert "applaud-btn" not in body
+    assert "Applauded" not in body

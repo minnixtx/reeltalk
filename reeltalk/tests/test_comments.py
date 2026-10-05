@@ -643,7 +643,7 @@ def test_a_mirror_row_shows_its_reply_count_and_now_its_controls(alice, dune, ad
     # The composer still lives only on the post page, never on a feed row
     # (R86 decision 3) — that part of the absence is not a locality gate.
     assert "reply-form" not in mirror_row
-    assert 'class="like-btn"' in _row(body, own.pk)
+    assert 'class="applaud-btn"' in _row(body, own.pk)
 
 
 @pytest.mark.django_db

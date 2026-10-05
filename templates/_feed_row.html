@@ -41,12 +41,16 @@ a second channel to say so.
     {# Plain text, never a link: the .review-open overlay above already opens this #}
     {# post (owner pass, 2026-10-04). #}
     <span class="post-date">{{ entry.date|date:"Y-m-d" }}</span>
-    {# The control takes the *narrower* flag (R84): "may I put a control here", never "may I open this". Since increment 5 that set includes mirrors — a Like now reaches their home instance. #}
+    {# The control takes the *narrower* flag (R84): "may I put a control here", never "may I open this". Since increment 5 that set includes mirrors — an Applaud now reaches their home instance. #}
+    {# The button carries no text: "Applaud"/"Applauded" is baked into the #}
+    {# artwork, so the accessible name comes from aria-label and the state #}
+    {# from aria-pressed. The count is a SIBLING rather than a child of the #}
+    {# button — clicking a number must not toggle anything. #}
     {% if entry.interactive %}
-      <button type="button" class="like-btn" data-url="{% url 'status-like' entry.status_id %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}">
-        <span class="like-label">{% if entry.liked_by_viewer %}Liked{% else %}Like{% endif %}</span>
-        <span class="like-count">{{ entry.like_count }}</span>
-      </button>
+      <span class="applaud">
+        <button type="button" class="applaud-btn" data-url="{% url 'status-like' entry.status_id %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}" aria-label="{% if entry.liked_by_viewer %}Applauded — remove your applause{% else %}Applaud this post{% endif %}"></button>
+        <span class="applaud-count" aria-live="polite">{{ entry.like_count }}</span>
+      </span>
     {% endif %}
     {% comment %}
     The reply count, on every row that has a post behind it —

@@ -672,43 +672,109 @@ ul.errorlist {
   margin-left: auto;
 }
 
-/* Like control (feed interactions increment 3). Deliberately the same small
-   inline control as the header's log-out and the search row's watchlist
-   button — the bare `button` rule is the big lit red one, which would swamp
-   a row head. The liked state takes the accent red the hover already uses,
-   so "liked" reads as the lit colour rather than a new design. */
-.like-btn {
+/* Applaud control (owner pass, 2026-10-05 — the text Like button becomes the
+   clapperboard button). Three things the artwork forces on this CSS, none of
+   them visible from the mockup:
+
+   1. "Applaud"/"Applauded" is baked into the PNG. The label is not text, so
+      the state change is an image swap and the accessible name has to come
+      from aria-label rather than from a text node.
+   2. The base `button` rule paints a lit red mottle with a neon rim and a
+      four-stop bloom. Every bit of it has to be reset here — the first render
+      of this control showed that glow sitting around the art.
+   3. The four states are hand-stamped and were NOT the same drawing: border
+      rects measured 1338x371 (default), 1381x394 (hover), 1297x378 (active),
+      1366x391 (applauded) — ~6% spread, with the vertical centre drifting
+      24px. As-supplied the button jumps on hover and again on applause, so
+      the shipped assets are resampled onto one registered 730x208 border.
+
+   The count is a SIBLING of the button, not inside it: a number should not
+   toggle anything when clicked. It is styled off the button's own
+   aria-pressed with the general-sibling combinator, so there is no second
+   copy of the state to keep in step. */
+.applaud {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  vertical-align: middle;
+}
+
+.applaud-btn {
+  height: 2.5rem;
+  /* Locks the art to its own aspect so a height change here cannot squash it. */
+  aspect-ratio: 758 / 236;
+  padding: 0;
+  border: 0;
+  background: url("../images/applaud-default.png") center / 100% 100% no-repeat;
+  box-shadow: none;
+  text-shadow: none;
+  cursor: pointer;
+  /* The bare `button` rule carries margin-top: 1rem. Without this reset the art
+     sits that far below the avatar it is meant to line up with. */
   margin-top: 0;
-  padding: 0.25rem 0.7rem;
-  font-size: 0.9rem;
-  background: none;
-  color: var(--muted);
-  border: 1px solid var(--border);
+}
+
+.applaud-btn:hover {
+  background-image: url("../images/applaud-hover.png");
   box-shadow: none;
 }
 
-.like-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  filter: none;
+.applaud-btn:active {
+  background-image: url("../images/applaud-active.png");
   box-shadow: none;
 }
 
-.like-btn[aria-pressed="true"] {
-  color: var(--accent);
-  border-color: var(--accent);
+.applaud-btn[aria-pressed="true"] {
+  background-image: url("../images/applaud-applauded.png");
 }
 
-.like-btn:disabled {
-  color: var(--muted);
+/* There is no applauded-and-hovered artwork, and falling back to the plain
+   hover art would flip the baked word back to "Applaud" on a post you have
+   already applauded. The lift is CSS on the applauded art instead, so the
+   word stays true and the control still answers the cursor. */
+.applaud-btn[aria-pressed="true"]:hover {
+  filter: brightness(1.22);
+}
+
+.applaud-btn:disabled {
+  filter: saturate(0.5) brightness(0.7);
   cursor: default;
-  border-color: var(--border);
-  filter: none;
   box-shadow: none;
 }
 
-.like-btn .like-count {
-  margin-left: 0.35rem;
+/* Mono on purpose: the lettering baked into the art is a typewriter face, and
+   the digits are the one piece of this control that is real text.
+
+   Height is 2.2rem, not the button's 2.5rem: the art has a transparent margin,
+   so its visible outline is 208 of its 236 source height -- 2.2rem is that
+   fraction of 2.5rem, which puts the two outlines level. The -6px pull covers
+   the button's rounded right cap so the pair reads as one shape with a divider;
+   the baked word ends about 6.7px from the button's right edge at this size, so
+   6px is the most that can be covered without clipping it. */
+.applaud-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.4rem;
+  height: 2.2rem;
+  padding: 0 0.5rem;
+  margin-left: -6px;
+  position: relative;
+  z-index: 2;
+  font-family: ui-monospace, "DejaVu Sans Mono", "Liberation Mono", monospace;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #fff;
+  /* Matches the art's own interior fill so the join shows no tonal step. */
+  background: rgba(7, 7, 7, 0.99);
+  border: 1px solid #fff;
+  border-radius: 7px;
+}
+
+.applaud-btn[aria-pressed="true"] ~ .applaud-count {
+  color: #ff4652;
+  border-color: #ff2a34;
+  background: rgba(11, 1, 1, 0.99);
 }
 
 /* Shelve/edit controls under the film header. */
@@ -1738,15 +1804,14 @@ button,
 /* Ghost controls (Block / Follow / one-click Add to watchlist) share the
    `button` element but are not lit red, so they keep the metadata face and their
    own sentence case, weight, tracking and leading rather than inheriting the
-   marquee label above. The like control joins this list because it is not inside a
-   `form.inline` either — a bare `<button>` otherwise picks up the Bebas caps
-   marquee label, which reads wrong beside the Delete and Block controls it sits
-   next to. The reply composer's submit joins for the same reason: it is a bare
-   `<button>` in a form that is not `form.inline`, and a caps marquee label on a
-   reply box would read as a lit CTA rather than a small inline control. */
+   marquee label above. The reply composer's submit joins for the same reason: it
+   is a bare `<button>` in a form that is not `form.inline`, and a caps marquee
+   label on a reply box would read as a lit CTA rather than a small inline
+   control. The applaud control left this list on the 2026-10-05 pass — it carries
+   no text at all now, the word being baked into the artwork, so there is no
+   label here for it to get wrong. */
 form.inline button,
 .search-row .watchlist-btn,
-.like-btn,
 .reply-form button {
   font-family: var(--ui);
   font-weight: 600;

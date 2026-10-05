@@ -138,16 +138,16 @@ def test_the_fragment_template_body_is_the_home_page_list_body():
 
 def test_likes_js_binds_one_delegated_listener_not_one_per_button():
     """The trap the first appended rows would have sprung: ``init()`` runs once
-    at ``DOMContentLoaded``, so a listener bound per ``.like-btn`` there leaves
-    every Like button on a row appended later dead. Delegation is the fix, and
-    this pins it at the source."""
+    at ``DOMContentLoaded``, so a listener bound per ``.applaud-btn`` there
+    leaves every applaud button on a row appended later dead. Delegation is the
+    fix, and this pins it at the source."""
     src = LIKES_JS.read_text()
-    assert 'querySelectorAll(".like-btn")' not in src, (
-        "likes.js binds a listener per button again — Like buttons on rows the "
-        "endless scroll appends after page load would be dead"
+    assert 'querySelectorAll(".applaud-btn")' not in src, (
+        "likes.js binds a listener per button again — applaud buttons on rows "
+        "the endless scroll appends after page load would be dead"
     )
     assert 'document.addEventListener("click"' in src
-    assert 'closest(".like-btn")' in src
+    assert 'closest(".applaud-btn")' in src
 
 
 def test_the_scroll_js_pushes_no_urls():

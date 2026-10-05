@@ -26,12 +26,12 @@
     account (R85).
     {% endcomment %}
     {% if user.is_authenticated %}
-      <button type="button" class="like-btn" data-url="{% url 'status-like' status.id %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}">
-        <span class="like-label">{% if liked_by_viewer %}Liked{% else %}Like{% endif %}</span>
-        <span class="like-count">{{ like_count }}</span>
-      </button>
+      <span class="applaud">
+        <button type="button" class="applaud-btn" data-url="{% url 'status-like' status.id %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}" aria-label="{% if liked_by_viewer %}Applauded — remove your applause{% else %}Applaud this post{% endif %}"></button>
+        <span class="applaud-count" aria-live="polite">{{ like_count }}</span>
+      </span>
     {% elif like_count %}
-      <span class="like-count muted">{{ like_count }} like{{ like_count|pluralize }}</span>
+      <span class="muted">Applauded {{ like_count }} time{{ like_count|pluralize }}</span>
     {% endif %}
   </div>
   {% if status.film %}

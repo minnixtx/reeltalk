@@ -43,9 +43,9 @@
           {% endif %}
           {% if note.kind == "like" %}
             {% if note.status and not note.status.deleted %}
-              liked <a href="{% url 'status' note.status.id %}">your post</a>
+              applauded <a href="{% url 'status' note.status.id %}">your post</a>
             {% else %}
-              liked a post that is no longer here
+              applauded a post that is no longer here
             {% endif %}
           {% elif note.kind == "reply" %}
             {% if note.status and not note.status.deleted %}
@@ -86,7 +86,7 @@
   </nav>
   {% endif %}
   {% else %}
-  <p class="muted">No notifications yet. When someone follows you, likes one of your posts, replies to you, or mentions you, it shows up here.</p>
+  <p class="muted">No notifications yet. When someone follows you, applauds one of your posts, replies to you, or mentions you, it shows up here.</p>
   {% endif %}
 </section>
 {% endblock %}

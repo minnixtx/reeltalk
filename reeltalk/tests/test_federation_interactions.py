@@ -745,7 +745,7 @@ def test_the_like_control_keeps_its_script_where_there_is_no_composer(alice, dun
         remote_url="https://remote.example/status/filmless2",
     )
     body = _login("alice").get(f"/status/{filmless.pk}/").content.decode()
-    assert "like-btn" in body
+    assert "applaud-btn" in body
     assert "js/likes.js" in body
     assert "reply-form" not in body
 
