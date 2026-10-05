@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-04
+**Last updated:** 2026-10-05
 
 ---
 
@@ -10,105 +10,76 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **`github.com/minnixtx/reeltalk` is a NEW repository as of 2026-10-04;
-  the old one is private as `reeltalk-old`.** It carries the same
-  262-commit `main` and was created to clear a contributor card that
-  GitHub's cached contributors graph kept serving from four **unreachable**
-  pre-rewrite objects — which is why blocking, force-pushing and
-  re-filtering never worked: every earlier fix touched *reachable*
-  history, which was never dirty. Proof is object-level, not vibes: those
-  four SHAs (`2ab2dfb83`, `7fed7aa41`, `411dad8d4`, `c496e83af`) return
-  **422** on the new repo and **200** on the old, so they were never
-  uploaded and the graph has nothing there to count. The rendered card
-  went from `Contributors (2)` to **`Contributors (1)`** — one avatar,
-  the owner's — and holds there across a push, which is exactly when the
-  graph recomputes. The switch cost nothing: 0 stars, 0 forks, 0 watchers,
-  0 issues/PRs, 0 releases, no wiki content. `origin`'s URL is unchanged
-  and `main` == `origin/main` — nothing local moved.
-- **Three ways this can come back, and what now stops each one.** (1) A
-  co-author trailer: blocked by `.githooks/commit-msg` on creation and by
-  `pre-push` + CI on the way out. All three now match the **whole trailer
-  family** — previously the two outbound layers matched only the literal
-  `co-authored-by` while `commit-msg` matched the family, so a variant
-  spelling that got past `--no-verify` also slipped past the layers meant to
-  catch it. (2) A commit **authored** by an address the owner does not
-  control — this adds that account to the contributor list with no trailer
-  involved at all, and nothing checked for it before; all three layers now
-  check author and committer addresses against an explicit allowlist.
-  (3) `refs/notes/*` being pushed: `pre-push` refuses it and CI fails if
-  any exist on the remote, because GitHub renders pushed notes on commit
-  pages and the local tooling writes `refs/notes/ai-attribution` carrying
-  generator metadata the README disclosure denies. **`attribution-guard`
-  is now a required status check on `main`**, so the one layer
-  `--no-verify` cannot skip actually blocks instead of warning. Guard
-  non-vacuity proven: 14/14, including the variant spelling the old
-  pattern missed. **The one thing no guard stops is a history rewrite** —
-  `filter-repo`/`filter-branch` plus a force-push strands unreachable
-  objects the same graph will pick up again. Published history here stays
-  as it is.
-- **§2J, the colour pass, is BUILT, PROVEN AND DEPLOYED on
-  `reeltalk.minnix.dev` (2026-10-04).** All six owner asks are live and
-  were confirmed in a real browser against the deployed site — 16 checks,
-  all passing — on the newly served stylesheet
-  `reeltalk.619add409518.css`. `DEPLOYING.md` §11 checks 1 and 2 were
-  re-run after the deploy and still hold (published actor id is
-  `https://reeltalk.minnix.dev/...` with no `:3030`; clean-LAN and
-  spoofed-LAN cookies carry no `Secure`, the public one does). No
-  migrations were needed. Read `git log -n 1 --oneline` and
-  `docker compose ps` for the actual state rather than trusting any
-  sentence here.
-- **The six asks, as built (R133).** (1) The page background's scrim went
-  from warm `rgba(9, 8, 7, 0.62)` to pure black `rgba(0, 0, 0, 0.8)`.
-  (2) Post dates are static text in a `.post-date` span, white, no anchor,
-  no underline — the feed row already opens through `.review-open`, so the
-  linked date was a second way to the same page. (3) Post prose
-  (`.review-body`) is `#ffffff`. (4) The hover underline on a row's prose
-  is deleted. (5) Header links are white at rest and `--red-bright` on
-  hover. (6) The films-page tabs moved from Oswald to the nav's Archivo at
-  the nav's weight and size.
-- **The finding that drove the background decision, because it is not
-  obvious from looking.** The plate's *mean* was never brown — it measures
-  luminance 7.4, already near-black. The brown lives in its bright
-  speckles: the raw tile's top 1% sits at lum ~69, RGB 70/69/66. **So
-  raising the scrim's alpha cannot fix brown — only changing its hue can.**
-  At `.80` the warm scrim moves top-decile warmth 2.4 → 2.2; the black
-  scrim at the same alpha moves it 2.4 → 0.6. Measured on painted pixels
-  after the change: warmth 1.15, brightest sampled pixel 99 → 24. `.88`
-  was prototyped and rejected — the grain flattens out of existence.
-  **How to apply:** if anyone re-warms this scrim the brown comes straight
-  back, and darkening further will not take it away again.
-- **Four owner decisions, all taken against rendered swatches rather than
-  descriptions (R133).** Black scrim at `.80`; pure `#ffffff`, not a
-  softened off-white (the halation objection was raised and declined);
-  scope **site-wide**, so a feed row and the post it opens agree; and nav
-  hover goes lit red — with white at rest, the old brighter-cream hover
-  would have been *no feedback at all*, which is arithmetic, not taste.
-- **What was deliberately NOT swept, so the boundary is on the record and
-  not an oversight.** Notification timestamps and moderation-console
-  timestamps are not posts and keep `--muted`. The feed's event line
-  (`.feed-film` — "watched *Film* (1990)") is not post prose and keeps
-  cream. The reply count keeps `--muted`. If those should go white too,
-  that is a new owner decision, not an extension by analogy.
+- **R134 — the stamped applaud control is BUILT, PROVEN AND DEPLOYED on
+  `reeltalk.minnix.dev` (2026-10-05).** The text like button is gone from
+  the home feed, the status detail page and the notifications copy,
+  replaced by the owner's four hand-stamped states. Confirmed in a real
+  browser against the deployed site as a signed-in member, in both the
+  unliked (white) and applauded (red) states. `DEPLOYING.md` §11 checks 1
+  and 2 were re-run after the deploy and still hold: the published actor id
+  is `https://reeltalk.minnix.dev/user/minnix/` with `endpoints.
+  sharedInbox = https://reeltalk.minnix.dev/inbox/` and no `:3030`; a
+  clean LAN request and a LAN request spoofing `X-Forwarded-Proto: https`
+  both set cookies with **no** `Secure`, and the public one does. No
+  migrations — this increment touches no models.
+- **Three constraints the artwork imposed, because none of them are
+  visible in the source.** (1) The four stamps were drawn at different
+  sizes and sat at different vertical centres — border rects 1338×371,
+  1381×394, 1297×378, 1366×391, with a 24px centre drift between hover
+  and applauded — so hovering or applauding visibly jumped the control.
+  All four are resampled onto one registered 730×208 border, which is why
+  the shipped PNGs are 758×236 and not the originals' 2172×724. (2) The
+  baked word fills the pill to 95% of its width, so the count **cannot**
+  live inside the art. (3) The art carries a transparent margin: the
+  visible outline is 208 of the 236 source height, so the button's
+  *visible* height is 2.2rem, not its 2.5rem box.
+- **How the count is attached, and why exactly 6px.** The count is a
+  sibling of the button, never inside it — a number must not toggle
+  anything when clicked. It is styled off the button's own `aria-pressed`
+  with the general-sibling combinator, so there is no second copy of the
+  state to keep in step. It overlaps the button's rounded right cap by
+  6px and stands 2.2rem tall, which puts the two outlines level and reads
+  as one shape with a divider. 6px is the ceiling: the baked word ends
+  ~6.7px from the button's right edge at this size, so anything deeper
+  clips the "d" in "Applaud". Its fill is the art's own interior
+  (`rgba(7,7,7,.99)` unliked, `rgba(11,1,1,.99)` applauded) so the join
+  shows no tonal step.
+- **There is no applauded-and-hovered art, and the fallback was wrong.**
+  Falling back to the plain hover state would flip the baked word back to
+  "Applaud" on a post you have already applauded — the word is baked in,
+  so this is not a colour choice. The hover lift is CSS
+  (`filter: brightness(1.22)`) on the applauded art instead, so the word
+  stays true and the control still answers the cursor.
+- **The base `button` rule is the reason the first deploy sat crooked.**
+  `button, .btn` carries `margin-top: 1rem`, and the new `.applaud-btn`
+  did not reset it, so the control hung ~16px below the avatar it is meant
+  to line up with. The old `.like-btn` had that reset and it was dropped in
+  the rewrite. **How to apply:** any control placed inside `.review-head`
+  must reset `margin-top` explicitly — the base rule is not opt-in.
+- **Internal naming is deliberately unchanged.** The model, the routes, the
+  ActivityPub wire and the notification enum all stay `like`. Only UI copy
+  moved to "applaud". `Notification.Kind.LIKE`'s human label is
+  model-internal — `get_kind_display` has no callers, so leaving it did not
+  leak the old word into the surface.
 - **Verification, stated exactly for what ran against what.** The full gate
-  ran **2174 passed + 5 skipped, `PYTEST_EXIT=0`**, on a build that
-  contained every CSS and template change plus three of the four new tests.
-  The fourth test (`test_the_date_style_is_white_not_the_muted_cream`) and a
-  ruff line-length fix landed after that build; both are verified on the
-  final tree — `ruff check` clean, `ruff format --check` clean across 149
-  files, and `test_feed_click_target.py` **22 passed** on the final
-  source. **A single full-suite run over the final tree has not been done.**
-  The delta is one added test in a file that passes plus a whitespace-only
-  format fix; say the word if you want the 30-minute clean gate anyway.
-  `makemigrations --check` reports no changes — this increment touches no
-  models.
-- **The removed affordance is pinned, not just removed.**
-  `test_nothing_underlines_the_prose_when_the_row_is_hovered` was proven
-  non-vacuous by mutation: re-adding the old rule makes it fail on
-  `.review-open:hover ~ .review-body`. It checks *any* hover/focus
-  selector that names the prose, so an underline reintroduced under a
-  different selector is caught as the same regression. R82's
-  "underline only, no colour shift" affordance is superseded, not
-  balanced — do not restore a middle ground.
+  ran **2180 passed + 5 skipped, `PYTEST_EXIT=0`** (baseline was 2174 + 5;
+  the four new PNGs add six tests through `test_clean_room.py`'s
+  parametrisation). That run covered every template, JS and copy change. The
+  final CSS-only correction — the `margin-top: 0` reset, `gap: 0`, and the
+  count box's 2.2rem height and white border — landed **after** that gate
+  and is verified by re-running the five test files that read the real
+  `reeltalk.css` plus the like tests: **116 passed** on the final tree.
+  **A single full-suite run over the final tree has not been done.** The
+  delta is CSS values only, in a file four tests already parse.
+- **The repo and attribution facts still stand.** `github.com/minnixtx/
+  reeltalk` is the new repository (2026-10-04); the old one is private as
+  `reeltalk-old`. No co-author trailer — blocked by `.githooks/commit-msg`
+  on creation and by `pre-push` + CI on the way out, all three matching the
+  whole trailer family and checking author and committer addresses against
+  an explicit allowlist. Never push `refs/notes/*`: `pre-push` refuses it
+  and CI fails if any exist on the remote. `attribution-guard` is a
+  required status check on `main`. **The one thing no guard stops is a
+  history rewrite** — published history here stays as it is.
 - **Standing constraints, unchanged and not up for re-litigation.** No
   user-made lists under any name (owner: "We won't do lists"). No third
   column on the home feed (R64). The genre subfeed keeps its numbered
@@ -129,7 +100,7 @@ is history.**
 | Product contract — domain model, watch state, TMDB, federation surface, deployment shape | `PLAN.md` §3 |
 | **D-series** — the original product decisions (D1–D17) | `PLAN.md` §2 |
 | License audit | `PLAN.md` §4 |
-| **R-series** — rewrite-era decisions (R1–R133) | `PROGRESS.md` §4 |
+| **R-series** — rewrite-era decisions (R1–R134) | `PROGRESS.md` §4 |
 | What was actually built, with commit hashes | `PROGRESS.md` §2 |
 | Host and deploy facts for this box | `PROGRESS.md` §3 |
 | What is live right now | the block above |
@@ -6466,3 +6437,5 @@ not an optimisation.
 - **R132 — §2I increments 2 and 3: page the already-computed feed list rather than aggregating in SQL, 20 rows per page, a 300-row DOM ceiling, no pushed URLs, home-only scope, and the two increments deployed back-to-back (owner decisions 2026-10-03, all seven taken in one pass after the eight were laid out in plain prose).** The owner's answer was a blanket agreement — *"I agree with all of your recommendations"* — so the reasoning below is the record of what was weighed, not an open question. **(1) Page the computed list.** `feed_entries` already returns a fully grouped, fully sorted Python list, so slicing it changes nothing about aggregation — a bulk group cannot split, double, or lose its `absorbed` rating-only statuses because the grouping pass never sees a partial input. **The accepted cost, named before agreeing:** we keep doing the full O(all shelf rows + all statuses) computation on *every* page request. Per-request latency is unchanged from today's home page, which already does exactly this; total work grows with feed size, so a 250-page scroll over a 5,000-row feed means 250 full assemblies. **Why not SQL:** window functions make paging cheap but do not retire the Python — `_group_has_written_review`, the review→watched fold and the `absorbed` skip all still need cross-referencing — so it buys complicated SQL *and* the surviving Python, and it is a rewrite of the feed core with every existing feed test needing re-validation. **Why not per-page aggregation:** the `absorbed` set becomes page-local, so a rating-only status of a film absorbed on page 1 resurfaces as a duplicate row on page 2 — a correctness break, not a cosmetic one — and the boundary can't even be expressed cleanly, because the page boundary is over *entries* while entries are what grouping produces. **How to apply:** query-level aggregation stays a genuinely isolated later optimisation. The seam is clean — swapping to it changes no template, no URL and nothing a user sees — so do not pay for it before the feed is actually slow. **(2) Cursor, never offset.** `?page=N` over a live feed re-shows the last row of page 1 every time anyone posts mid-session. Each entry carries a stable sort key independent of list position — `(date, kind_rank, source_id)`, `source_id` being the `ShelfFilm.id` for a shelf entry and the `Status.id` for a status entry — and the page cursor carries that. **Accepted side effect, agreed explicitly rather than discovered later:** adopting a composite tiebreaker can reorder rows that share an exact timestamp, because the existing sort is stable on `date` alone and ties currently keep insertion order. The concatenation test pins "no loss, no duplication" regardless of tie order; a second test pins ties to a *defined* order so they are not arbitrary. **(3) `FEED_PAGE_SIZE = 20`,** matching `GENRE_PAGE_SIZE` — invisible under endless scroll, so it is purely a first-paint knob. **(4) A 300-row DOM ceiling.** Rows are not recycled off-screen (no virtualisation), so auto-load stops at 300 and the observer disconnects, leaving the "Older" link as the only way forward. **The property that matters is that it never silently stops** — there is always a visible way to continue. **(5) No-JS gets a real paged feed:** the "Older" link is always rendered as a genuine `<a href="?c=…">` and JS hides it to auto-load instead. This costs nothing on top of the home-only footer, because `position: sticky` and the rail's `overflow-y` are CSS, not JS. **How to apply:** never let the no-JS path become a second rendering path for the feed — one template, one link, JS only changes how it is triggered. **(6) Scrolling pushes nothing.** No `pushState`, the URL stays `/`, the back button leaves normally, no mid-scroll deep links and no resume-where-you-were. **Why:** a URL per scrolled page fills the back button with dozens of entries to click through just to leave the site, and a scroll position has no natural deep-link form anyway — sharing a specific post already has `/status/<id>/`. **Accepted cost:** you cannot link someone to "row 300 of my feed". **(7) Strictly the home feed.** The genre subfeed keeps its 20-per-page numbered links — it is public and anonymous-facing, numbered pages are genuinely useful there, and it has no tall-column problem. Same shape as §2H's scope call, where the click-target overlay deliberately went to home only and not to the film page. **How to apply:** the site is deliberately inconsistent between home and genre; do not "fix" it by extending endless scroll to genre without the owner. **(8) Deploy 2 and 3 back-to-back** as two commits with two gate runs so a failure is attributable, but never let the intermediate sit live — increment 2 alone turns the home feed into "20 rows and a link", which reads as a step backwards even though it is the same pagination genre pages and notifications already use.
 
 - **R133 — §2J colour pass: black scrim on the grunge plate, white post prose and dates, no hover underline on a row, nav-white-with-lit-red-hover, and the films tabs moved onto the nav's face (owner decisions 2026-10-04, all four taken against rendered swatches rather than descriptions).** Six asks from the owner, four real decisions. **(1) The background scrim goes to pure black at `.80`, from the warm `rgba(9, 8, 7, 0.62)`.** The finding that settled it: the plate's *mean* was never the problem — it measures luminance 7.4, already near-black — its **bright speckles** are. The raw tile's top 1% sits at lum ~69 with RGB 70/69/66, and that warm cast is what reads as brown. **So raising the alpha alone cannot fix this**: at `.80` with the warm scrim the top-decile warmth only moves 2.4 → 2.2, while blackening it at the same alpha moves 2.4 → 0.6. Measured on real painted pixels after the change: top-decile warmth 1.15, brightest sampled pixel 99 → 24, p90 lum 4.1. **How to apply:** the lever on brown is the scrim's *hue*, not its alpha. If anyone re-warms this scrim, the brown comes straight back, and no amount of darkening will remove it again. `.88` was prototyped and rejected — darker, but the grain starts to flatten out of existence and the plate stops being a plate. **(2) White is `#ffffff`, not a softened off-white.** The halation objection (pure white at 0.88rem on near-black shimmers for some readers) was raised and declined; the owner wants white. A single `--white` token holds it so the palette stays the one place it is decided. **(3) Scope is site-wide, deliberately, not home-feed-only.** `.review-body` is white on every surface that draws one — feed, post page, replies, film-page reviews, genre pages — because a feed row and the post it opens must not disagree. **What was deliberately left alone, so this is a boundary and not an oversight:** notification timestamps and moderation-console timestamps are not posts and keep `--muted`; the feed's event line (`.feed-film`, "watched *Film* (1990)") is not post prose and keeps cream; the reply count keeps `--muted`. If the owner later wants those swept too, say so explicitly rather than extending by analogy. **(4) The hover underline on a row's prose is gone, and that removal is deliberate enough to be pinned.** `test_nothing_underlines_the_prose_when_the_row_is_hovered` fails against the pre-change stylesheet on `.review-open:hover ~ .review-body`, which is what makes it a real test rather than a tautology. It is written as an absence check over *any* hover/focus selector naming the prose, so re-introducing the underline under a different selector is caught as the same regression. The overlay keeps `cursor: pointer`, so the row still reads as clickable. **How to apply:** R82's "underline only, no colour shift" affordance is superseded, not balanced. Do not restore some middle ground. **(5) Nav goes white at rest with `--red-bright` on hover** — the site's existing "lit red means interactive" language, and the reason is arithmetic rather than taste: with white at rest, the old brighter-cream hover would have been *no feedback at all*. Applied to the whole header (`.site-nav a`, its borderless Log out control, `.header-user a`, and the signed-in handle). **(6) The films tabs move from Oswald to the nav's Archivo, at the nav's weight and size** (measured equal: `Archivo`, `600`, `14.08px`). They keep their own padding and active underline — only the voice changes. **How to apply:** `.tabs a` now lives in the header typography group, not the `--ui` group. If the nav's face changes, the tabs follow with it; that coupling is the point.
+
+- **R134 — The like button becomes the owner's stamped applaud control; the count is a sibling that overlaps the art's right cap, and the four stamps are resampled onto one registered border so the control stops jumping (owner decisions 2026-10-05, taken against rendered variants rather than descriptions).** Six things the artwork forced that are not visible in the source files. **(1) The four stamps were drawn at different sizes and at different vertical centres.** Border rects: default 1338×371, hover 1381×394, active 1297×378, applauded 1366×391 — a ~6% spread with a 24px centre drift between hover and applauded. Shipped as drawn, hovering or applauding visibly jumped the control. All four are resampled onto one registered 730×208 border centred in a 758×236 canvas, which is why the shipped PNGs are that size and not the originals' 2172×724. **How to apply:** any future state of this artwork must be registered to the same border before it ships, not dropped in at its own size. **(2) The baked word fills the pill to 95% of its width, so the count cannot live inside the art.** Measured, not assumed — an earlier reading of the alpha *ink* bbox landed outside the button and produced a wrong "there's plenty of room"; the interior is solid opaque. **How to apply:** do not try to move the count inside the pill. It needs the art redrawn with a shorter word. **(3) The count is a sibling of the button, never its child** — a number must not toggle anything when clicked. It is styled off the button's own `aria-pressed` with the general-sibling combinator (`~`), so there is no second copy of the state to keep in step. **(4) The overlap is exactly 6px and the height is exactly 2.2rem, both for measured reasons.** The count box covers the button's rounded right cap so the pair reads as one shape with a divider. 6px is the ceiling: the baked word ends ~6.7px from the button's right edge at this size, so deeper clips the "d" in "Applaud". The height is 2.2rem rather than the button's 2.5rem because the art carries a transparent margin — the visible outline is 208 of the 236 source height, so 2.2rem is the button's *visible* height and puts the two outlines level. Its fill is the art's own interior (`rgba(7,7,7,.99)` unliked, `rgba(11,1,1,.99)` applauded) so the join shows no tonal step. **How to apply:** if the button's rendered size changes, both numbers must be recomputed from the art's border rect, not scaled by eye. **(5) There is no applauded-and-hovered art, and the obvious fallback is wrong.** Falling back to the plain hover state would flip the baked word back to "Applaud" on a post you have already applauded — the word is baked in, so this is not a colour choice that CSS can fix. The hover lift is `filter: brightness(1.22)` on the applauded art instead, so the word stays true and the control still answers the cursor. **(6) The base `button` rule is a trap for anything placed in `.review-head`.** `button, .btn` carries `margin-top: 1rem`; the new `.applaud-btn` did not reset it and hung ~16px below the avatar it was meant to line up with. The old `.like-btn` had the reset and it was dropped in the rewrite. **How to apply:** any control added to that row must reset `margin-top` explicitly — the base rule is not opt-in. **Naming, deliberately unchanged:** the model, the routes, the ActivityPub wire and `Notification.Kind.LIKE` all stay `like`; only UI copy moved to "applaud". `get_kind_display` has no callers, so the enum's human label is model-internal and leaving it did not leak the old word. **Process decision that came out of this increment, and now governs design work:** deploy and get the owner's browser review **before** running the full gate, not after — the gate costs ~30 minutes and a design change routinely needs two or three visual rounds, so running it first burns a cycle every time the answer is "no".
