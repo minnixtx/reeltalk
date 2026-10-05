@@ -27,7 +27,7 @@
     {% endcomment %}
     {% if user.is_authenticated %}
       <span class="applaud">
-        <button type="button" class="applaud-btn" data-url="{% url 'status-like' status.id %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}" aria-label="{% if liked_by_viewer %}Applauded — remove your applause{% else %}Applaud this post{% endif %}"></button>
+        <button type="button" class="applaud-btn" data-url="{% url 'status-like' status.id %}" data-state="{% if liked_by_viewer %}mine{% elif like_count %}others{% else %}idle{% endif %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}" title="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
         <span class="applaud-count" aria-live="polite">{{ like_count }}</span>
       </span>
     {% elif like_count %}

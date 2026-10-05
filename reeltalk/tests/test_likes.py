@@ -404,10 +404,64 @@ def test_feed_row_shows_the_like_count(alice, bob, dune, admin):
     Like.objects.create(user=bob, status=status)
     bob.follows.add(alice)  # otherwise alice's review is not in bob's feed
     body = _home(_login("bob"))
-    # The word is baked into the artwork now, so the viewer's own state is
-    # carried by the button's accessible name, not by a visible text node.
-    assert "Applauded — remove your applause" in body  # bob's own state…
+    # The control carries no visible text at all, so the viewer's own state is
+    # carried by the button's accessible name and tooltip.
+    assert "Applauded — click to remove" in body  # bob's own state…
     assert 'aria-pressed="true"' in body
+
+
+@pytest.mark.django_db
+def test_feed_icon_state_is_idle_when_nothing_has_been_applauded(alice, bob, dune, admin):
+    _review(alice, dune)
+    bob.follows.add(alice)
+    body = _home(_login("bob"))
+    assert 'data-state="idle"' in body
+    assert 'data-state="others"' not in body
+    assert 'data-state="mine"' not in body
+
+
+@pytest.mark.django_db
+def test_feed_icon_state_is_others_when_only_someone_else_applauded(
+    alice, bob, dune, admin
+):
+    status = _review(alice, dune)
+    carol = member(localname="carol", password="s3cretpass")
+    carol.follows.add(alice)
+    Like.objects.create(user=carol, status=status)
+    bob.follows.add(alice)
+    body = _home(_login("bob"))
+    # Bob sees that the post IS applauded without having done it himself, so
+    # the icon is the red outline rather than the white one.
+    assert 'data-state="others"' in body
+    assert 'data-state="idle"' not in body
+    assert 'data-state="mine"' not in body
+
+
+@pytest.mark.django_db
+def test_feed_icon_state_is_mine_when_the_viewer_applauded(alice, bob, dune, admin):
+    status = _review(alice, dune)
+    bob.follows.add(alice)
+    Like.objects.create(user=bob, status=status)
+    body = _home(_login("bob"))
+    assert 'data-state="mine"' in body
+    assert 'data-state="others"' not in body
+    assert 'data-state="idle"' not in body
+
+
+@pytest.mark.django_db
+def test_mine_wins_over_others_when_both_applauded(alice, bob, dune, admin):
+    # The three states are exclusive by construction — the template picks
+    # "mine" first, so a post applauded by the viewer AND by others still
+    # reads as theirs rather than flipping to the shared outline.
+    status = _review(alice, dune)
+    carol = member(localname="carol", password="s3cretpass")
+    carol.follows.add(alice)
+    bob.follows.add(alice)
+    Like.objects.create(user=carol, status=status)
+    Like.objects.create(user=bob, status=status)
+    body = _home(_login("bob"))
+    assert 'data-state="mine"' in body
+    assert 'data-state="others"' not in body
 
 
 @pytest.mark.django_db
@@ -471,7 +525,7 @@ def test_post_page_shows_a_liked_state_for_a_user_who_liked_it(alice, dune):
     Like.objects.create(user=alice, status=status)
     body = _login("alice").get(f"/status/{status.pk}/").content.decode()
     assert 'aria-pressed="true"' in body
-    assert "Applauded — remove your applause" in body
+    assert "Applauded — click to remove" in body
 
 
 @pytest.mark.django_db

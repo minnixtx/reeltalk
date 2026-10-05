@@ -25,13 +25,17 @@
       shown.textContent = count;
     }
     btn.setAttribute("aria-pressed", liked ? "true" : "false");
-    // The visible word "Applaud"/"Applauded" is baked into the artwork, so
-    // nothing on screen would otherwise tell a screen reader that the state
-    // changed. The accessible name is maintained here for exactly that.
-    btn.setAttribute(
-      "aria-label",
-      liked ? "Applauded — remove your applause" : "Applaud this post"
-    );
+    // The resting icon reports WHO has applauded, which is two facts and not
+    // one: whether it is yours, and whether there is any applause at all.
+    // Both come from the server, so the icon cannot drift out of step with the
+    // tally the way a client-side increment would allow.
+    var others = !liked && typeof count === "number" && count > 0;
+    btn.setAttribute("data-state", liked ? "mine" : others ? "others" : "idle");
+    // The control carries no visible text, so the tooltip and the accessible
+    // name are the only thing that says what it is and what it will do.
+    var label = liked ? "Applauded — click to remove" : "Applaud";
+    btn.setAttribute("aria-label", label);
+    btn.setAttribute("title", label);
   }
 
   function toggle(btn) {

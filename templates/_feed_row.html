@@ -42,13 +42,14 @@ a second channel to say so.
     {# post (owner pass, 2026-10-04). #}
     <span class="post-date">{{ entry.date|date:"Y-m-d" }}</span>
     {# The control takes the *narrower* flag (R84): "may I put a control here", never "may I open this". Since increment 5 that set includes mirrors — an Applaud now reaches their home instance. #}
-    {# The button carries no text: "Applaud"/"Applauded" is baked into the #}
-    {# artwork, so the accessible name comes from aria-label and the state #}
-    {# from aria-pressed. The count is a SIBLING rather than a child of the #}
-    {# button — clicking a number must not toggle anything. #}
+    {# Icon-only, no text: the accessible name and the tooltip both come from #}
+    {# the label below. data-state carries WHO has applauded, which is two #}
+    {# facts, not one — liked_by_viewer picks mine-vs-not, like_count picks #}
+    {# others-vs-nobody. The count stays a SIBLING of the button: clicking #}
+    {# a number must not toggle anything. #}
     {% if entry.interactive %}
       <span class="applaud">
-        <button type="button" class="applaud-btn" data-url="{% url 'status-like' entry.status_id %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}" aria-label="{% if entry.liked_by_viewer %}Applauded — remove your applause{% else %}Applaud this post{% endif %}"></button>
+        <button type="button" class="applaud-btn" data-url="{% url 'status-like' entry.status_id %}" data-state="{% if entry.liked_by_viewer %}mine{% elif entry.like_count %}others{% else %}idle{% endif %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}" title="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
         <span class="applaud-count" aria-live="polite">{{ entry.like_count }}</span>
       </span>
     {% endif %}

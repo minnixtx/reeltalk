@@ -672,68 +672,78 @@ ul.errorlist {
   margin-left: auto;
 }
 
-/* Applaud control (owner pass, 2026-10-05 — the text Like button becomes the
-   clapperboard button). Three things the artwork forces on this CSS, none of
-   them visible from the mockup:
+/* Applaud control (owner pass, 2026-10-05 — icon-only, replacing the pill).
 
-   1. "Applaud"/"Applauded" is baked into the PNG. The label is not text, so
-      the state change is an image swap and the accessible name has to come
-      from aria-label rather than from a text node.
-   2. The base `button` rule paints a lit red mottle with a neon rim and a
-      four-stop bloom. Every bit of it has to be reset here — the first render
-      of this control showed that glow sitting around the art.
-   3. The four states are hand-stamped and were NOT the same drawing: border
-      rects measured 1338x371 (default), 1381x394 (hover), 1297x378 (active),
-      1366x391 (applauded) — ~6% spread, with the vertical centre drifting
-      24px. As-supplied the button jumps on hover and again on applause, so
-      the shipped assets are resampled onto one registered 730x208 border.
+   The resting icon reports THREE states, not two, because it is read as
+   reporting who has applauded:
 
-   The count is a SIBLING of the button, not inside it: a number should not
-   toggle anything when clicked. It is styled off the button's own
-   aria-pressed with the general-sibling combinator, so there is no second
-   copy of the state to keep in step. */
+     you applauded              -> solid red      data-state="mine"
+     others applauded, not you  -> red outline    data-state="others"
+     nobody applauded           -> white outline  data-state="idle"
+
+   Hover is a uniform scale(1.08) across all three states. The supplied
+   white-glow art is NOT used — the owner rejected the outside glow, and a
+   brightness lift cannot stand in for it on the idle icon because that art
+   is already at 253,253,253 and clamps at 255.
+
+   Both facts the state needs are already on the row (liked_by_viewer and
+   like_count), so this needed no model change. data-state is derived in the
+   template and recomputed by likes.js after each toggle.
+
+   The base `button` rule paints a lit red mottle with a neon rim and a
+   four-stop bloom, and carries margin-top: 1rem. Both are reset here — the
+   pill version's first render showed that glow sitting around the art, and
+   without the margin reset the control hangs 16px below the avatar.
+
+   The three shipped PNGs were NOT drawn the same size. At alpha>=200 the
+   clapperboard bodies measured 1059x973 (white outline), 1028x976 (red
+   outline) and 1023x989 (solid red). They are registered by core AREA,
+   centred on the core centre, so changing state never resizes the
+   clapperboard. Registering by ink bbox instead would have shifted it. */
 .applaud {
   display: inline-flex;
   align-items: center;
-  gap: 0;
+  gap: 6px;
   vertical-align: middle;
 }
 
 .applaud-btn {
-  height: 2.5rem;
-  /* Locks the art to its own aspect so a height change here cannot squash it. */
-  aspect-ratio: 758 / 236;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 0;
-  background: url("../images/applaud-default.png") center / 100% 100% no-repeat;
+  background: url("../images/applaud-icon-idle.png") center / contain no-repeat;
+  background-color: transparent;
   box-shadow: none;
   text-shadow: none;
-  cursor: pointer;
-  /* The bare `button` rule carries margin-top: 1rem. Without this reset the art
-     sits that far below the avatar it is meant to line up with. */
   margin-top: 0;
+  cursor: pointer;
 }
 
+.applaud-btn[data-state="others"] {
+  background-image: url("../images/applaud-icon-others.png");
+}
+
+.applaud-btn[data-state="mine"] {
+  background-image: url("../images/applaud-icon-mine.png");
+}
+
+/* Uniform scale, not a brightness lift. The idle art is already at
+   253,253,253, so brightness() clamps at 255 and is invisible on it — a
+   lift would have registered on the red states only, leaving the three
+   states feeling inconsistent. transform is paint-only, so the row never
+   reflows.
+
+   The box-shadow and filter resets here are load-bearing, not decoration.
+   `button:hover, .btn:hover` paints a five-stop red bloom and `button:hover`
+   adds filter: brightness(1.1); both are (0,1,1) and therefore OUTSPECIFY the
+   (0,1,0) `.applaud-btn` resets in the base rule. Without repeating them on
+   the hover selector the icon lights up with the site's button halo the moment
+   the cursor arrives. */
 .applaud-btn:hover {
-  background-image: url("../images/applaud-hover.png");
+  transform: scale(1.08);
   box-shadow: none;
-}
-
-.applaud-btn:active {
-  background-image: url("../images/applaud-active.png");
-  box-shadow: none;
-}
-
-.applaud-btn[aria-pressed="true"] {
-  background-image: url("../images/applaud-applauded.png");
-}
-
-/* There is no applauded-and-hovered artwork, and falling back to the plain
-   hover art would flip the baked word back to "Applaud" on a post you have
-   already applauded. The lift is CSS on the applauded art instead, so the
-   word stays true and the control still answers the cursor. */
-.applaud-btn[aria-pressed="true"]:hover {
-  filter: brightness(1.22);
+  filter: none;
 }
 
 .applaud-btn:disabled {
@@ -742,39 +752,15 @@ ul.errorlist {
   box-shadow: none;
 }
 
-/* Mono on purpose: the lettering baked into the art is a typewriter face, and
-   the digits are the one piece of this control that is real text.
-
-   Height is 2.2rem, not the button's 2.5rem: the art has a transparent margin,
-   so its visible outline is 208 of its 236 source height -- 2.2rem is that
-   fraction of 2.5rem, which puts the two outlines level. The -6px pull covers
-   the button's rounded right cap so the pair reads as one shape with a divider;
-   the baked word ends about 6.7px from the button's right edge at this size, so
-   6px is the most that can be covered without clipping it. */
+/* Mono on purpose: the digits are the one piece of this control that is real
+   text, and the site's lettering is a typewriter face. The number is always
+   white and never tracks the icon: the icon alone carries who applauded, so a
+   red number would be a second, redundant copy of that signal. */
 .applaud-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 2.4rem;
-  height: 2.2rem;
-  padding: 0 0.5rem;
-  margin-left: -6px;
-  position: relative;
-  z-index: 2;
   font-family: ui-monospace, "DejaVu Sans Mono", "Liberation Mono", monospace;
   font-weight: 700;
-  font-size: 1.05rem;
-  color: #fff;
-  /* Matches the art's own interior fill so the join shows no tonal step. */
-  background: rgba(7, 7, 7, 0.99);
-  border: 1px solid #fff;
-  border-radius: 7px;
-}
-
-.applaud-btn[aria-pressed="true"] ~ .applaud-count {
-  color: #ff4652;
-  border-color: #ff2a34;
-  background: rgba(11, 1, 1, 0.99);
+  font-size: 1rem;
+  color: var(--white);
 }
 
 /* Shelve/edit controls under the film header. */
