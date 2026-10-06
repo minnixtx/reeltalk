@@ -94,5 +94,15 @@
 
 <nav class="tabs">
   <a href="{% url 'user-films' profile_user.localname %}">Films</a>
+  {% comment %}
+  The Lists tab (L7). Hidden when the member has made no lists — R138
+  decision 3 — rather than shown with an empty state, because a tab that
+  leads nowhere is worse than one that appears when there is something
+  behind it. ``list_count`` is the whole decision and the view makes it;
+  the template never reaches for the database.
+  {% endcomment %}
+  {% if list_count %}
+  <a href="{% url 'user-lists' profile_user.localname %}">Lists</a>
+  {% endif %}
 </nav>
 {% endblock %}

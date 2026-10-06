@@ -11,8 +11,18 @@ client inserts what the server rendered instead of rebuilding it.
 resolved to display text by the view: "" for a direct reply to the post,
 "a hidden reply" or "a deleted reply" when naming the author would name
 something this viewer is not shown.
+
+The row wears ``reply-row``, **not** ``reply``. ``.reply`` is the reply
+*control's* class (``reeltalk.css`` — ``display: inline-flex``), and the
+row used to carry it too, which made every reply on every post page lay its
+head and its body side by side instead of one under the other. Measured on
+the live instance before the fix: head right edge 531, body left edge 537,
+on ``/status/1/``, ``/status/56/`` and ``/list/4/`` alike. Keeping the two
+names apart also stops ``comments.js``'s ``querySelector(".reply")`` from
+being able to reach a thread row at all — today it reaches the control only
+by document order, not by construction.
 {% endcomment %}
-<li class="review reply">
+<li class="review reply-row">
   <div class="review-head">
     {% if reply.user.avatar %}
       <img class="avatar avatar-row" src="{{ reply.user.avatar.url }}" alt="">

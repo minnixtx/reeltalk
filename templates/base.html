@@ -66,10 +66,21 @@
       <a href="{{ home_url }}"{% if request.path == home_url %} class="active"{% endif %}>Home</a>
       {% if user.is_authenticated %}
         {% url 'user-films' user.localname as films_url %}
+        {% url 'user-lists' user.localname as lists_url %}
         {% url 'find-user' as find_url %}
         {% url 'import-films' as import_url %}
         {% url 'export-films' as export_url %}
         <a href="{{ films_url }}"{% if request.path == films_url %} class="active"{% endif %}>My Films</a>
+        {# My Lists (L7). Always shown, unlike the profile's Lists tab, which #}
+        {# R138 hides when the member has made none: this is the way *in* to #}
+        {# the feature, not a report of what is behind it, and hiding it #}
+        {# would leave nothing pointing at lists at all. The active state is #}
+        {# plain equality for the same reason My Films uses it — R138 put the #}
+        {# URL at /user/<localname>/lists/, one page like films, so the #}
+        {# prefix-match worry §2K raised against a top-level /lists/ does not #}
+        {# arise. A list's own page (/list/<id>/) deliberately does not light #}
+        {# this item: it is not the lists page. #}
+        <a href="{{ lists_url }}"{% if request.path == lists_url %} class="active"{% endif %}>My Lists</a>
         <a href="{{ find_url }}"{% if request.path == find_url %} class="active"{% endif %}>Find People</a>
         <a href="{{ import_url }}"{% if request.path == import_url %} class="active"{% endif %}>Import</a>
         <a href="{{ export_url }}"{% if request.path == export_url %} class="active"{% endif %}>Export</a>

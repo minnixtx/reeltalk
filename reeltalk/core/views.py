@@ -24,6 +24,7 @@ from reeltalk.activitypub.broadcast import (
 )
 from reeltalk.activitypub.identity import accepts_activitypub
 from reeltalk.activitypub.objects import film_document, note_document
+from reeltalk.lists.models import FilmList
 from reeltalk.mentions.models import sync_status_mentions
 from reeltalk.mentions.notify import record_mentions
 from reeltalk.mentions.parser import mentions_from_text
@@ -229,6 +230,19 @@ def status_detail(request, status_id):
     )
     if status.user_id in blocked_ids:
         raise Http404
+    # A list's canonical page is /list/<id>/ (L10). Two placements matter
+    # here. It sits **below** the AP arm because the status URL is the list's
+    # wire identity: a peer that re-fetches the Note it already holds must
+    # still find a document there, not get bounced to an HTML page it cannot
+    # parse. And it sits **below** the block check so a viewer who has blocked
+    # the author gets the same 404 they get on every other surface, rather
+    # than a redirect that would lead them somewhere naming the person they
+    # blocked. The like and reply endpoints stay status-id-based and untouched
+    # -- that is the whole point of L10's split.
+    if status.status_type == Status.Type.LIST:
+        linked = FilmList.objects.filter(status_id=status.id, deleted=False).first()
+        if linked is not None:
+            return redirect("list-detail", list_id=linked.pk)
     # The thread: every live reply under this post, flat and in conversation
     # order. The depth policy is written out on ``conversation``; the short
     # form is that the data keeps its real nesting (so inReplyTo stays
@@ -316,6 +330,19 @@ def reply_to_status(request, status_id):
     # Without this a hidden post keeps quietly accepting replies.
     if parent.user.suspended_at is not None:
         raise Http404
+    # Which parents are replyable at all — named explicitly because L13
+    # removed the accident that used to enforce it. Before L13 every reply
+    # was typed ``comment``, so ``Status.save``'s anchoring rule refused a
+    # parent with no film and this route physically could not accept one.
+    # Making the type follow the film took that refusal away, which left the
+    # route accepting a film-less reply to a plain note: R85's bug with the
+    # signs reversed, a write the page never offers. The two legal parents
+    # are a post with a film and a list's face (L13), so both are named here
+    # rather than letting "no film" stand in for "not a list". A film-less
+    # mirrored ``Note`` stays exactly as unreplyable as the page already
+    # presents it, and a list face stays replyable off its own page.
+    if parent.film_id is None and parent.status_type != Status.Type.LIST:
+        return JsonResponse({"error": "This post cannot be replied to."}, status=400)
     raw_content = request.POST.get("content", "")
     if not raw_content.strip():
         return JsonResponse({"error": "A reply needs some text."}, status=400)
@@ -327,14 +354,13 @@ def reply_to_status(request, status_id):
             raw_content=raw_content,
         )
     except ValueError as exc:
-        # ``Status.save`` refuses a typed status with no film, which is what
-        # a reply to a film-less post would be. v0.1 cannot create such a
-        # *local* post, but a remote one arrives whenever a Mastodon note
-        # with no film reference is mirrored — so opening the gate is what
-        # made this path reachable, and the composer is withheld on exactly
-        # those pages (``detail.html`` gates on ``status.film``) to keep the
-        # offer and the refusal agreeing. A 400 rather than a stack trace
-        # either way.
+        # A boundary guard, not an expected path. Since L13 made the reply's
+        # type follow the film, ``Status.save``'s anchoring rule can no
+        # longer fire from here -- a film-less reply is written untyped rather
+        # than refused. This stays because the content arrives from an
+        # untrusted client and ``Status.save`` is allowed to raise for reasons
+        # this view cannot enumerate; a 400 with the reason beats a stack
+        # trace on an AJAX route either way.
         return JsonResponse({"error": str(exc)}, status=400)
     # The mention rows behind the outbound tag array and the reply's wider
     # delivery audience (mentions increment 3). Parsed from the raw markdown

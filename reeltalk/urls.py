@@ -10,6 +10,7 @@ from django.views.static import serve
 
 from reeltalk.activitypub.identity import PROFILE_LOCALNAME_RE
 from reeltalk.core import admin_views as core_admin_views
+from reeltalk.lists import views as lists_views
 from reeltalk.social import views as social_views
 from reeltalk.social.forms import AdminVerificationLoginForm, VerificationAwareLoginForm
 from reeltalk.social.password_reset import RESET_PATH
@@ -146,6 +147,24 @@ urlpatterns = [
         social_views.user_films,
         name="user-films",
     ),
+    # A member's lists page (L7, R138 decision 1). It deliberately reuses
+    # the films route's exact shape — same ``re_path``, same
+    # ``PROFILE_LOCALNAME_RE`` — rather than a plain ``path()``. That is not
+    # stylistic: the character class is what lets a mirror handle
+    # (``user@host``) match, so ``/user/alice@elsewhere.example/lists/``
+    # resolves for a remote member instead of 404-ing. A top-level
+    # ``/lists/`` was rejected outright — see R138 — because it would be a
+    # third URL shape for a per-user page and would duplicate the profile's
+    # own Lists tab.
+    re_path(
+        rf"^user/(?P<localname>{PROFILE_LOCALNAME_RE})/lists/",
+        lists_views.user_lists,
+        name="user-lists",
+    ),
+    # A list's canonical page (L10). ``/status/<id>/`` for a LIST status
+    # 302s here; the like and reply endpoints stay keyed on the status id,
+    # which is the half of L10 that keeps the social machinery unchanged.
+    path("list/<int:list_id>/", lists_views.list_detail, name="list-detail"),
     # Follow / unfollow a profile (M5 increment 2): POST-only routes sharing
     # the extended pattern so mirror handles (<user>@<netloc>) match too.
     re_path(

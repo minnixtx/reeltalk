@@ -417,7 +417,7 @@ def test_reply_endpoint_returns_the_row_rendered_by_the_pages_own_partial(
         .post(f"/status/{parent.pk}/reply/", {"content": "Agreed."})
         .content.decode()
     )
-    assert "review reply" in data["html"]
+    assert "review reply-row" in data["html"]
     assert "Agreed." in data["html"]
     page = _login("bob").get(f"/status/{parent.pk}/").content.decode()
     assert data["html"].strip() in page

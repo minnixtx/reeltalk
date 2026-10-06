@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ film_list.title }} — ReelTalk{% endblock %}
+
+{% block content %}
+{# The list page (§2K increment 2, L8/L9/L10). Read-only: no create, no #}
+{# edit, no reorder, no save. It borrows the post page's control row, its #}
+{# thread partial and its scripts rather than inventing a second set, so a #}
+{# list's applause and replies are the same objects — and look the same — #}
+{# as a review's. #}
+<article class="list-page">
+  <header class="list-page-head">
+    <h1 class="list-name">{{ film_list.title }}</h1>
+    {# .review-head is the post page's control row, reused rather than #}
+    {# restyled: it already lays out avatar / author / date / controls and #}
+    {# carries the z-index rules the controls need. #}
+    <div class="review-head">
+      {% if film_list.user.avatar %}
+        <img class="avatar avatar-row" src="{{ film_list.user.avatar.url }}" alt="">
+      {% else %}
+        <span class="avatar avatar-row avatar-placeholder" aria-hidden="true"></span>
+      {% endif %}
+      <a class="review-author" href="{% url 'user-profile' film_list.user.localname %}">{{ film_list.user.localname }}</a>
+      <span class="post-date">{{ film_list.created_date|date:"Y-m-d" }}</span>
+      <span class="list-length muted">{{ items|length }} film{{ items|length|pluralize }}</span>
+      {% comment %}
+      The like control names the STATUS, not the list (L9/L10). What gets
+      applauded is the list's post face, so the existing /status/<id>/like/
+      endpoint serves a list unchanged — same toggle, same Like row, same
+      notification, and increment 6's wire needs nothing new here.
+      {% endcomment %}
+      {% if user.is_authenticated %}
+      <span class="applaud">
+        <button type="button" class="applaud-btn" data-url="{% url 'status-like' film_list.status.id %}" data-state="{% if liked_by_viewer %}mine{% elif like_count %}others{% else %}idle{% endif %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}" title="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
+        <span class="applaud-count" aria-live="polite">{{ like_count }}</span>
+      </span>
+      {% elif like_count %}
+      <span class="muted">Applauded {{ like_count }} time{{ like_count|pluralize }}</span>
+      {% endif %}
+      {% comment %}
+      The reply control, with the post page's two-state ink. Unlike the
+      post page this is NOT gated on a film: a list's face has no film and
+      L13 made a reply to it legal by leaving it untyped, so the offer and
+      the write agree here for a different reason than they do there.
+      {% endcomment %}
+      {% if user.is_authenticated %}
+      <span class="reply">
+        <a class="reply-btn" href="?reply=1" data-state="{% if replies|length %}others{% else %}idle{% endif %}" title="{% if replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply to this list{% else %}Reply to this list{% endif %}"></a>
+        <span class="reply-count" aria-live="polite">{{ replies|length }}</span>
+      </span>
+      {% endif %}
+    </div>
+  </header>
+
+  {% if film_list.description %}
+  <div class="review-body">{{ film_list.description|safe }}</div>
+  {% endif %}
+
+  {% comment %}
+  The ranked rows: poster + title + year and nothing more (L8). The number
+  is ``forloop.counter``, never ``item.rank`` — ``remove_film`` leaves the
+  gap it makes, so ranks can read 1, 2, 4 while the list holds three films.
+  The counter is what the member sees; the rank is only what orders them.
+  {% endcomment %}
+  <ol class="rank-list">
+    {% for item in items %}
+    <li class="rank-row">
+      <span class="rank-num">{{ forloop.counter }}</span>
+      {% if item.film.poster %}
+        <img class="thumb" src="{{ item.film.poster.url }}" alt="">
+      {% else %}
+        <span class="thumb thumb-placeholder" aria-hidden="true"></span>
+      {% endif %}
+      <a class="rank-film" href="{% url 'film' item.film.id %}">{{ item.film.title }}{% if item.film.year %} <span class="muted">({{ item.film.year }})</span>{% endif %}</a>
+    </li>
+    {% empty %}
+    <li class="rank-empty muted">Nothing in this list yet.</li>
+    {% endfor %}
+  </ol>
+</article>
+
+<section class="status-replies">
+  {% comment %}
+  The thread on the list's post face, rendered by the post page's own
+  partial over the post page's own ``_thread_rows`` output — so a reply
+  under a list is the same markup as a reply under a review, and the
+  reply route's JSON answer (which renders that same partial) appends
+  cleanly here. The heading id and the ``.no-replies`` class are what
+  comments.js looks for; both are kept.
+  {% endcomment %}
+  <h2 id="reply-count">Replies ({{ replies|length }})</h2>
+  <ul class="review-list thread-list">
+    {% for reply, reply_to in replies %}
+      {% include "core/status/_reply.html" %}
+    {% endfor %}
+  </ul>
+  {% if not replies %}
+  <p class="muted no-replies">No replies yet.</p>
+  {% endif %}
+</section>
+
+{% if user.is_authenticated and reply_open %}
+  {# The composer opens off ?reply=1, the same single flag the reply icon #}
+  {# carries on the post page — server-rendered, so it works with #}
+  {# JavaScript switched off. #}
+  <form class="reply-form" method="post" action="{% url 'status-reply' film_list.status.id %}">
+    {% csrf_token %}
+    <label for="id_reply_content">Reply to “{{ film_list.title }}”</label>
+    <textarea name="content" id="id_reply_content" rows="3" placeholder="Say something about this list…" autofocus></textarea>
+    <button type="submit">Reply</button>
+  </form>
+{% endif %}
+{% if user.is_authenticated %}
+  {# Both scripts, on the same condition: the like button and the reply #}
+  {# composer are gated alike here, and neither should ever render inert. #}
+  <script src="{% static 'js/likes.js' %}" defer></script>
+  <script src="{% static 'js/comments.js' %}" defer></script>
+{% endif %}
+{% endblock %}

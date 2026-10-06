@@ -10,54 +10,99 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **Lists increment 1 — the object and the write path — BUILT and
-  gate-verified (2026-10-06). Not deployed, not pushed.** `reeltalk/lists`
-  now exists: `FilmList` / `ListItem` / `ListSave`, six service functions
-  (`create_list`, `add_films`, `remove_film`, `move`, `rename`,
-  `soft_delete_list`), `Status.Type.LIST`, the film rule narrowed to exempt
-  it, and `ListItem` registered in `Film._repoint_related`. Two migrations:
-  `lists/0001_initial` and `core/0009_alter_status_status_type`. Full gate
-  **2237 passed + 5 skipped in 30:10, `PYTEST_EXIT=0`** (baseline 2189;
-  **+48 = 40 new tests + 8 clean-room params**, skips unchanged), with
-  `ruff check` / `ruff format --check` / `makemigrations --check` all
-  clean. Full record: **"Executed — lists increment 1"** at the end of §2K.
-- **Nothing about it is visible, and that is the point.** No view, no URL,
-  no template, no wire. `Status.feed_for` has never filtered on
-  `status_type`, so a LIST row is *already* a feed row the moment it
-  exists — which is why the increments must not be reordered and why this
-  one shipped with no UI. A test pins that fact rather than leaving it to
-  the plan.
-- **The film rule now has exactly one exemption, and it kept its teeth.**
-  `Status.save` refuses a typed status with no film *except* `LIST`. A
-  film-less `comment`, `review` or `review_rating` still raises — proven by
-  switching the rule off entirely and watching all three go red, not by a
-  passing test that would have passed just as well with the rule gone.
+- **Lists increment 2 — the read-only surface — BUILT, gate-verified,
+  DEPLOYED, and reviewed by the owner in a real browser (2026-10-06). Not
+  pushed.** `GET /list/<id>/`, `GET /user/<localname>/lists/`, the profile
+  "Lists" tab, the header "My Lists" item, and `/status/<id>/` → 302 →
+  `/list/<id>/` for a LIST face. New: `reeltalk/lists/views.py` (two
+  views), `lists/detail.html`, `lists/user_lists.html`,
+  `reeltalk/tests/test_lists_views.py`. `lists/0001` and `core/0009` are
+  applied to the live test database. Full gate **2283 passed + 5 skipped in
+  30:57, `PYTEST_EXIT=0`** (baseline 2237; **+46 = 42 new tests + 4
+  clean-room params**, skips unchanged), with `ruff check` / `ruff format
+  --check` / `makemigrations --check` all clean. Full record: **"Executed —
+  lists increment 2"** at the end of §2K.
+- **Lists are readable by anyone now, and every social part of them is
+  borrowed rather than rebuilt.** The list page renders the head (name,
+  byline, length, applause and reply counts), the ranked rows as
+  poster + title + year and nothing else (L8 — no stars, no excerpt), the
+  description, and the thread on the face through the *same*
+  `_thread_rows` helper and the *same* `_reply.html` partial the post page
+  uses, so a reply row cannot look different in the two places. The like
+  control posts to the existing `/status/<id>/like/` because what is liked
+  is the face, not the list row. `/list/<id>/` deliberately does **not**
+  light the "My Lists" nav item — it is not that page.
+- **Two tabs, and only on your own page — the owner reversed their own
+  first answer here.** The first browser round shipped *Films | Lists* with
+  Lists active, which was the option I recommended. On seeing it the owner
+  changed it to **My Lists | Saved Lists**: "it doesn't make sense to see a
+  Films tab when you clicked on My Lists." On somebody else's page the tab
+  row is **absent entirely** and `?tab=saved` is ignored rather than
+  honoured, because a `ListSave` row records one member's curation and
+  nothing in R137 or L4 made that public. The profile keeps *Films |
+  Lists*. The Saved half renders today with a real read path and an empty
+  state — **its write side is still increment 5.** There is no save button
+  and no save route.
+- **L13 landed, as a general rule rather than a list special case — and the
+  gate caught the seam it opened, which is what the gate is for.**
+  `add_reply` now sets `status_type = COMMENT if parent.film_id else None`
+  — the type follows the film, matching the convention already in
+  `activitypub/statuses.py`. A reply to a film-less list face writes
+  `None`; a reply to an ordinary film comment still writes `COMMENT` with
+  the parent's film, pinned by its own test so the list case cannot pass
+  while the film case quietly breaks. **The seam:** before L13, every reply
+  was typed `comment`, so `Status.save`'s anchoring rule refused a
+  film-less parent and the reply route *physically could not* accept one.
+  Making the type follow the film removed that accident and left the route
+  happily writing a film-less reply to a plain mirrored `Note` — R85's bug
+  with the signs reversed, a write no page ever offers.
+  `test_a_post_with_no_film_offers_no_composer_and_the_route_refuses_one`
+  went red on the first full gate and said so. **Fixed, not waived:**
+  `reply_to_status` now names the two legal parents outright — a post with a
+  film, or a list's face — instead of letting "no film" stand in for "not a
+  list". Both arms are load-bearing and both are proven: dropping the whole
+  gate turns the federation test red (observed, not simulated), and dropping
+  only its LIST arm turns six list tests red.
+- **A pre-existing layout bug, found by measuring, fixed on every page —
+  not a lists bug.** The thread row wore `class="review reply"`, and
+  `.reply` is the reply **control's** class (`display: inline-flex`), so
+  every reply on every post page laid its head and its body side by side:
+  head right edge 531 against body left edge 537, measured on `/status/1/`,
+  `/status/56/` and `/list/4/` alike. The row is `reply-row` now, which is
+  why the owner's "the text of the reply is right next to the date" landed
+  as a fix to the ordinary post page too. The rename also makes
+  `comments.js`'s `querySelector(".reply")` structurally unable to reach a
+  thread row, instead of reaching it only by document-order luck.
 - **Four invariants a later increment has to honour.** (a) `rank` is an
   ordering key, not the number a page prints: `remove_film` leaves the gap
   it makes (1, 2, 4) instead of renumbering, so a position must come from
-  the order and not from `rank`. (b) The post face carries **no text of its
+  the order and not from `rank` — increment 2 prints `forloop.counter` for
+  exactly this reason. (b) The post face carries **no text of its
   own** — title and description live on `FilmList` alone, so the federated
   `Note` body is composed at broadcast time rather than mirrored into
   `content`. (c) `FilmList.delete()` is soft, so it *hides* a list instead
-  of cascading saves away: the "lists you saved" reader (increment 5) must
-  filter on `film_list__deleted=False`, because a `ListSave` row does not
-  by itself mean a saveable list. (d) `create_list` renders the markdown
-  and owns both halves of the pair, so increment 3's form must pass raw
-  markdown *into* the service instead of rendering in `clean_description`
-  the way `FilmForm` does, or the description renders twice.
-- **One known gap between what R137 promises and what runs today.** A reply
-  to a list still cannot be written: `add_reply` types its row `comment`
-  and copies `film_id` off the parent, so replying to a film-less face
-  raises *"A comment status must be anchored to a film"*. L13's
-  untyped-reply change lands with increment 2, the first surface that
-  renders a thread. `set_description` is likewise still owed to
-  increment 3 — §2K names only `rename`.
-- **The lint baseline in the previous record is wrong.**
-  `reeltalk/tests/test_comments.py:515` and `reeltalk/tests/test_likes.py:429`
-  were already over the 88-char limit at `HEAD`, checked against a pristine
-  worktree rather than inferred from my own diff, against R136's *"All
-  checks passed!"*. Both fixed here, formatting only. Do not read the older
-  gate records as a lint baseline.
+  of cascading saves away: **every** read path filters `deleted=False`, and
+  increment 5's save button must not undo that by pointing a new save at a
+  hidden list. (d) `create_list` renders the markdown and owns both halves
+  of the pair, so increment 3's form must pass raw markdown *into* the
+  service instead of rendering in `clean_description` the way `FilmForm`
+  does, or the description renders twice.
+- **Four things this increment deliberately does not do, each with its
+  owner.** (1) The **feed reply-gate widening** is not done: `entry.interactive`
+  and `entry.film` and the post page's control gate are untouched, so a
+  list's feed row is still not replyable — increment 4's, and the brief
+  said record it rather than do it early. (2) The **`.list-strip` feed
+  row**: the empty rows the owner noticed in the feed *are* the list faces,
+  expected and correct until increment 4 gives them a shape. (3)
+  **`set_description`** is still owed to increment 3 — §2K names only
+  `rename`. (4) **No save button, no save route** (increment 5), **no
+  report control** (not in §2K at all), **no admin registration**.
+- **One edge to close in increment 3, not widen.** `delete_review` can
+  soft-delete a LIST face on its own if handed a crafted POST, orphaning a
+  live `FilmList` that is still `deleted=False`. No UI path reaches it
+  today — nothing links a list's face into that route's form — but once
+  increment 3 puts list controls on screen it should route the face's
+  delete through the list's own soft delete.
 - **Process rules for the visual half of this feature.** Deploy and get the
   owner's browser review **before** running the full gate on anything
   visual — the gate costs ~30 minutes and a design change routinely needs
@@ -80,21 +125,19 @@ is history.**
     no live updates on the home feed.
   - TMDB search is the primary add-film flow; manual create is the
     fallback.
-- **NEXT UP — increment 2: the list page and the lists page, read-only, with
-  its URL and nav shape now settled by R138.** `GET /list/<id>/` (title,
-  byline, description, ranked rows, applause and reply counts, the comment
-  thread, and a like control posting to the existing
-  `/status/<id>/like/`); **`GET /user/<localname>/lists/`** mirroring
-  `user/<localname>/films/` — **not** `/lists/`, and the nav "My Lists"
-  item points at your own, so the nav item and the profile "Lists" tab are
-  **one page with two entry points**; the tab joins
-  `social/profile.html`'s `.tabs` and is **hidden when the member has no
-  lists**; and `/status/<id>/` 302-ing to `/list/<id>/` for a LIST status.
-  **No pagination on the list page** — a 200-film long page is accepted.
-  Lists exist only from fixtures; there is no create UI until increment 3.
-  Make L13's untyped-reply change here, because this is the first surface
-  that renders a thread. **This increment is visual: deploy and get the
-  owner's browser review before running the full gate.**
+- **NEXT UP — increment 3: authoring.** `/lists/new/` and
+  `/list/<id>/edit/` — title, description, add films via TMDB search,
+  remove, reorder up/down. Every write goes through increment 1's service
+  functions; the list's `Status` gets `edited_date`; owner-only, a
+  non-owner refused. Three things to carry in, all already true:
+  **`create_list` owns the markdown/HTML pair**, so the form passes raw
+  markdown in rather than rendering in `clean_description` the way
+  `FilmForm` does; **`set_description` does not exist yet** — §2K names
+  only `rename`, so the edit form needs that other half written; and
+  `move(item, "up"/"down")` returns a bool at the ends rather than
+  raising, so "up" on the first row is a normal outcome. **This increment
+  is visual: build → deploy → hand the owner the live URL → browser review
+  → only then the full gate.**
 - **One gate to widen, and it moves four things at once (R138).** The reply
   control's gate is `entry.interactive and entry.film`; a list row is
   interactive by `status_id` but has no film, so as written the icon would
@@ -102,8 +145,9 @@ is history.**
   replyable with no button. The owner chose to **widen it** to
   "interactive and (film or list face)", and per R85 the four halves move
   together: this gate, the like lookup, `FeedEntry.interactive`, and the
-  post page's control gate. The bite lands in increment 4, but it shapes
-  L13 now, so it is decided rather than discovered.
+  post page's control gate. **Still owed — increment 4.** Increment 2 left
+  `entry.interactive` and `entry.film` alone on purpose and gave the list
+  page its own reply control instead, so nothing is half-widened.
 - **What the feature is built on.** `Status`, `Like`, `reply_parent`,
   `FeedEntry`, `broadcast_*` and the inbox `HANDLERS` — not any inherited
   list scaffolding. There was none: the brief's claim that `List`/`ListItem`
@@ -6326,15 +6370,40 @@ comment still raises); a film merge re-points list items. No views, no
 templates, no wire.
 
 **Increment 2 — the list page, My Lists, and the nav item (read-only).**
+✅ **DONE 2026-10-06** — gate-verified, deployed, and owner-reviewed in the
+browser (two rounds). Full record at the end of this section. Built as
+written **except** where R138 and the owner's browser review overrode the
+bullets below; the overrides are noted inline rather than silently applied.
 
 - `GET /list/<id>/` — title, byline, description, ranked rows, applause
   count, reply count, the comment thread, and the like control posting to the
-  existing `/status/<id>/like/`.
-- `GET /lists/` — "Made by you" only. The Saved section is increment 5.
-- `templates/base.html` — "My Lists" after "My Films", with the prefix-match
-  active state.
+  existing `/status/<id>/like/`. ✅
+- ~~`GET /lists/`~~ → **`GET /user/<localname>/lists/`** (R138 1),
+  mirroring `user/<localname>/films/`, registered with `re_path` +
+  `PROFILE_LOCALNAME_RE` so remote mirror handles (`user@host`) match.
+  **"Made by you" is the default tab.** The Saved half was **built early**
+  as a read side so the shape under review was the real page; its write side
+  is still increment 5.
+- ~~with the prefix-match active state~~ → **plain equality.** R138 made the
+  URL one page like films rather than a tree, so `request.path == lists_url`
+  is sufficient and a prefix match would light the item on pages that are
+  not it. `/list/<id>/` deliberately does not light it.
 - `social/profile.html` — the "Lists" tab joins the existing `.tabs` nav.
-- `/status/<id>/` for a LIST status redirects to `/list/<id>/`.
+  ✅ Hidden when the member has made no lists (R138 3).
+- `/status/<id>/` for a LIST status redirects to `/list/<id>/`. ✅ Placed
+  **below** the AP content-negotiation arm — `/status/<id>/` is the list's
+  wire identity, so a peer re-fetching its `Note` must not be bounced to
+  HTML — and **below** the block check, so a blocked author 404s rather than
+  redirecting somewhere that names them.
+- **Changed in browser review (owner, 2026-10-06):** the tabs are
+  **My Lists | Saved Lists**, not *Films | Lists*. The first round shipped
+  the latter on my recommendation; the owner rejected it on seeing it.
+  **Tabs exist only on your own page** — on another member's page the row is
+  absent and `?tab=saved` is ignored rather than honoured, because a
+  `ListSave` row is one member's curation and nothing in R137 or L4 made it
+  public. The profile keeps *Films | Lists*.
+- **L13 landed here,** as described above: `add_reply`'s type follows the
+  film, so a reply to a film-less face writes `None`.
 
 *Proves by:* rendering as a member over a fixture list — ranked order correct,
 the like control's `data-url` names the **status** not the list, the redirect
@@ -6438,9 +6507,11 @@ it, and the like lands back here.
    `/user/<localname>/lists/`**, mirroring `user/<localname>/films/`, so
    the nav item and the profile "Lists" tab are one page with two entry
    points. *(R138)*
-4. **Empty states** — no lists made, nothing saved. *(Partly settled by Q6:
-   the profile tab hides when empty. The Saved section's empty state is
-   increment 5's.)*
+4. **Empty states** — no lists made, nothing saved. *(Settled: the profile
+   tab hides when empty (Q6/R138 3); the Made tab reads "No lists yet."; the
+   Saved tab's empty state was **built in increment 2** at the owner's
+   request, so the shape under review was the real page rather than a stub.
+   Increment 5 only has to make it fillable.)*
 5. **A saved list the creator deletes** — CASCADE means it silently vanishes
    from your Saved. That is what L2 implies; confirm it is acceptable rather
    than wanting a "this list is gone" row. *(increment 5)*
@@ -6455,10 +6526,15 @@ it, and the like lands back here.
 
 ### Gate
 
-Baseline **2189 passed + 5 skipped**. `docker compose run --rm web pytest`;
+**Read the current baseline from the NOW block, not from here** — it moves
+every increment and a number written into the plan goes stale the moment the
+next one lands. (For reference: 2189 going into increment 1, 2237 going into
+increment 2.) `docker compose run --rm web pytest`;
 `ruff check . && ruff format --check .`; `makemigrations --check` clean.
 Every new file takes a clean-room param test, and non-vacuity is proven by
-explicit mutation and stated in the record. Per the standing rule: on anything
+explicit mutation and stated in the record. **Read the `PYTEST_EXIT` marker
+inside the log, never the wrapper's exit code** — a wrapper ending in an
+`echo` reports 0 even on failures. Per the standing rule: on anything
 visual, **deploy and get the owner's browser review before running the full
 gate.**
 
@@ -6589,6 +6665,176 @@ image, so `lists/0001` and `core/0009` are not applied to the live database.
 Nothing in this increment is user-visible, so that is a safe state rather
 than a lag; applying them is a deploy decision for the owner, along with the
 push.
+
+### Executed — lists increment 2 is DONE, gate-verified, deployed and browser-reviewed (2026-10-06)
+
+**What landed.** `reeltalk/lists/views.py` (`list_detail`, `user_lists`),
+`reeltalk/lists/templates/lists/detail.html`,
+`reeltalk/lists/templates/lists/user_lists.html`, and
+`reeltalk/tests/test_lists_views.py` (42 tests). Touched: `reeltalk/urls.py`
+(two routes), `templates/base.html` (the "My Lists" nav item),
+`reeltalk/social/views.py` + `social/profile.html` (the tab and its count),
+`reeltalk/core/views.py` (the LIST redirect and a comment rewrite),
+`reeltalk/core/models.py` (L13), `reeltalk/core/templates/core/status/_reply.html`
+(the class rename), `reeltalk/tests/test_comments.py` (one assertion for that
+rename), and ~136 lines of `.list-*` / `.rank-*` CSS in `reeltalk.css`.
+
+**The URL is a `re_path` with the shared charset, and that is the whole
+point.** `rf"^user/(?P<localname>{PROFILE_LOCALNAME_RE})/lists/"` — the
+character class `[a-zA-Z0-9._@:-]+` from `activitypub/identity.py` is what
+admits `@` and `:` for remote mirror handles. A plain `path()` here would
+have rendered every remote member's lists page as a 404 while working
+perfectly for local accounts, which is the worst possible failure mode for
+this particular line. A test reverses the URL *and* resolves a
+`carol@remote.example` localname through the real router, so the charset
+cannot be dropped without going red.
+
+**Everything social on these pages is borrowed, deliberately.** The thread
+comes from `core.views._thread_rows` and the row from the post page's
+`_reply.html`; the like control posts to the existing `status-like` route
+because the thing liked is the face (L9), not the list row. Two
+cross-app private imports (`_thread_rows`, `_resolve_profile_user`) follow
+the precedent `moderation/views.py` already sets. The alternative — a
+second thread renderer — is how a list's replies would start looking
+different from a review's.
+
+**L13, the seam it opened, and the gate that caught it.** `add_reply` now
+computes `status_type=Status.Type.COMMENT if parent.film_id else None`, the
+same expression `activitypub/statuses.py` already uses, so the rule is "the
+type follows the film" rather than "lists are exempted again." Both halves
+are tested: a reply to a film-less list face writes `None`/`film_id=None`,
+and a reply to an ordinary film comment still writes `COMMENT` carrying the
+parent's film.
+
+But the old behaviour had an *accidental* guard hiding inside it. Every
+reply used to be typed `comment`, so `Status.save`'s anchoring rule refused
+any film-less parent and `POST /status/<id>/reply/` physically could not
+write one. L13 removed that accident, and the route started accepting a
+film-less reply to a plain mirrored `Note` — which is R85's bug with the
+signs reversed: a write the page never offers. My first pass recorded this
+as a harmless seam on the theory that no production query reads the
+`comment` value. **The full gate disagreed and was right.**
+`test_a_post_with_no_film_offers_no_composer_and_the_route_refuses_one` —
+written in the federation arc precisely to hold "the page withholds the
+composer *and* the route refuses one" — failed. That test is the reason the
+seam could not be quietly waved through, and the honest reading is that the
+"it's harmless because nothing reads the value" argument was the wrong kind
+of comfort.
+
+**Fixed by naming both arms instead of widening one.** `reply_to_status` now
+refuses anything whose parent is neither anchored to a film nor a list face:
+
+```python
+if parent.film_id is None and parent.status_type != Status.Type.LIST:
+    return JsonResponse({"error": "This post cannot be replied to."}, status=400)
+```
+
+The rule is stated as what *is* replyable rather than as what *isn't*, so a
+future third parent kind has to be added here on purpose rather than falling
+into the open. Both arms are load-bearing and each was proven by mutation,
+not by assertion: removing the whole guard turns the federation test red
+(observed on the first gate run, not simulated), and removing only the
+`!= Status.Type.LIST` arm — leaving "no film means refuse" — turns six list
+tests red, including `test_replying_to_a_list_writes_an_untyped_reply`.
+The `except ValueError` below it stays as a boundary guard rather than an
+expected path.
+
+**A pre-existing bug found by measuring, not by reasoning.** The owner
+reported "the text of the reply is right next to the date." `curl` showed
+the markup was structurally correct, so the answer had to come from
+`getComputedStyle`: `li.review.reply` resolved to `display: inline-flex`
+with the head's right edge at 531 and the body's left edge at 537, on
+`/status/1/`, `/status/56/` and `/list/4/` identically — i.e. it was never
+a lists bug. `.reply` is the reply **control's** class and the thread row
+wore it too. Renaming the row to `reply-row` put body left = head left = 346
+and `bodyBesideHead: false` on all three pages, so the ordinary post page
+got fixed by the same change. It also makes `comments.js`'s
+`querySelector(".reply")` structurally incapable of reaching a thread row —
+until now it reached the control only by document-order luck, not by
+construction.
+
+**Two tabs, and the owner reversing their own answer.** Asked in the
+abstract, the owner first chose *Films | Lists, Lists active* — the option I
+recommended. After seeing it rendered they changed it to **My Lists | Saved
+Lists**: "it doesn't make sense to see a Films tab when you clicked on My
+Lists on the nav bar." Worth recording as a process fact: the recommendation
+was wrong and only the rendered page caught it. The second half of the
+decision is the load-bearing one — **tabs exist only on your own page**, and
+on another member's page `?tab=saved` is ignored rather than honoured,
+because a `ListSave` row is one member's own curation and neither R137 nor
+L4 made it public. Falling back to the made-lists view instead of 404-ing
+matches how `user_films` treats an unrecognised tab. The profile keeps
+*Films | Lists* unchanged.
+
+**The Saved tab is a real read path built one increment early.** The owner
+asked for the empty state now rather than a stub, so the shape under review
+is the actual page. It annotates `item_count` off the saved list and names
+the **maker**, never the saver, per L2. The write side — the save button,
+`POST /list/<id>/save/`, the toggle's idempotency — is still increment 5.
+
+**Hide rules copied rather than re-derived.** `list_detail` mirrors
+`status_detail` exactly: soft-deleted 404, suspended author 404 (R102),
+blocked author 404 rather than a lesser view. `user_lists` mirrors
+`user_films`' three account answers in the same order: unknown 404, banned
+410, suspended 302 to the profile. A per-user tab that answered differently
+from its sibling would be two answers where one would do. Every one of those
+filters carries `deleted=False` because `FilmList.delete()` is soft —
+including the profile's `list_count`, which is what hides the tab.
+
+**Non-vacuity — ten mutations, all killed.** M1 `add_reply` always
+`COMMENT` → red (the list reply case). M2 always `None` → red (the film
+control case, which is the one that matters). M3/M4/M5 drop `deleted=False`
+from `list_detail` / `user_lists` / the profile `list_count` → each red.
+M6 move the LIST redirect above the AP arm → red (the peer's
+`application/activity+json` fetch breaks). M7 point the like control at the
+list instead of the face → red. M8 print `item.rank` instead of
+`forloop.counter` → red on the gapped-ranks fixture. M9 make the profile tab
+always show → red. M10 register the route with a plain charset instead of
+`PROFILE_LOCALNAME_RE` → red on the mirror-handle test. Tree verified
+restored afterwards by diffstat and by re-reading the three mutated files.
+
+**Deployed and observed, not assumed.** All three images rebuilt per
+DEPLOYING.md §7; the entrypoint log shows `Applying core.0009_alter_status_status_type... OK`
+and `Applying lists.0001_initial... OK` on the live test database.
+`/status/65/` returns 302 → `https://reeltalk.minnix.dev/list/1/` over real
+HTTPS. The owner reviewed the pages in a browser across two rounds and signed
+off on the second, including the phone-width nav ("2 rows, 3 tabs on top and
+4 on bottom, all fit nicely and are center justified").
+
+**Deliberately not done.** The feed reply-gate widening (`entry.interactive`,
+`entry.film`, the like lookup, the post page's control gate) — increment 4,
+and the brief said record it rather than do it early; the list page has its
+own reply control so nothing is half-widened. The `.list-strip` feed row:
+the empty feed rows the owner noticed **are** the list faces, expected and
+correct until increment 4 gives them a shape. `set_description` (increment
+3), the save button and route (increment 5), a report control (not in §2K at
+all), and admin registration. **One edge to close later:** `delete_review`
+could soft-delete a LIST face independently if handed a crafted POST,
+orphaning a live `FilmList`; no UI path reaches it today, but increment 3
+should route a face's delete through the list's own soft delete rather than
+leave it reachable.
+
+**Gate — two runs, and the first one was not clean.** Run 1:
+`RUFF_CHECK_EXIT=0`, `RUFF_FORMAT_EXIT=0`, `MIGRATIONS_EXIT=0`,
+**`PYTEST_EXIT=1`** — 1 failed, 2282 passed, 5 skipped, the single failure
+being `test_a_post_with_no_film_offers_no_composer_and_the_route_refuses_one`
+from the L13 seam described above. Run 2, after the reply-route gate:
+`RUFF_CHECK_EXIT=0`, `RUFF_FORMAT_EXIT=0`, `MIGRATIONS_EXIT=0`,
+**`PYTEST_EXIT=0` — 2283 passed + 5 skipped in 1857.55s (30:57)**, run in
+the container against the working tree via bind mounts, markers read from
+inside the log rather than from the wrapper's exit code (the wrapper ends in
+an `echo` and reports 0 regardless). Delta reconciles exactly:
+**+46 collected = 42 new tests in `test_lists_views.py` + 4 clean-room
+params** (one each for `lists/views.py`, `lists/templates/lists/detail.html`,
+`lists/templates/lists/user_lists.html` and `tests/test_lists_views.py`);
+skips unchanged at 5. The single failure in run 1 was not a flake, a
+fixture ordering effect, or a coverage artifact — it was a real behaviour
+change with a real test holding the line, and the gate did its job.
+
+**Deployed and browser-reviewed before the gate, per the standing rule.**
+Both the tab rename and the reply-row fix went to the live box and were
+reviewed in the owner's browser first, so no gate minutes were spent on a
+design that had not been seen.
 
 ## 3. Host facts (this box)
 

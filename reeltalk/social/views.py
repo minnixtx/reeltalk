@@ -61,6 +61,7 @@ from reeltalk.core.models import (
     trending_films,
 )
 from reeltalk.core.utils import render_markdown
+from reeltalk.lists.models import FilmList
 from reeltalk.moderation.decorators import can_act_on
 from reeltalk.moderation.models import report_state
 from reeltalk.notifications.models import Notification, notify
@@ -769,6 +770,13 @@ def user_profile(request, localname):
         user.refresh_from_db()
     is_self = request.user.is_authenticated and request.user.pk == user.pk
     data = {"profile_user": user, "is_self": is_self}
+    # The "Lists" tab is hidden when the member has made none (R138
+    # decision 3): a tab that leads to nothing is worse than one that
+    # appears when there is something behind it. The count is the whole
+    # decision, so it is made here rather than in the template — and it
+    # counts the live lists only, because FilmList.delete() is soft and a
+    # deleted list is still a row in the table.
+    data["list_count"] = FilmList.objects.filter(user=user, deleted=False).count()
     if is_self:
         # The invite box only lives on one's own profile (R82).
         data.update(_invite_context(request, user))

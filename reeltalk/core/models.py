@@ -688,14 +688,24 @@ def add_reply(user, parent: Status, *, content: str, raw_content: str) -> Status
     with no film and drop out of every film-anchored surface — the film's
     own page set, its author's "all films" tab, the export — while looking
     perfectly fine on its own post page. Inheriting is what keeps a
-    conversation about a film attached to that film. It also means the
-    reply inherits the parent's anchoring obligation: ``Status.save``
-    refuses a typed status with no film, so replying to something with
-    nothing to inherit raises there instead of writing an unanchored row.
+    conversation about a film attached to that film.
+
+    The type follows the film (L13): ``COMMENT`` when there is a film to
+    inherit, ``None`` when there is not. A reply to a film-less face — a
+    list's post row — has nothing to inherit, and ``Status.save`` refuses a
+    typed status with no film, so the alternative to leaving it unlabelled
+    is refusing the reply outright. Unlabelled is the house convention
+    rather than something invented for lists: ``activitypub/statuses.py``
+    does exactly this on the inbound mirror path
+    (``COMMENT if film is not None else None``), and no production query
+    reads the ``comment`` value — every type filter asks for
+    ``REVIEW_TYPES``. What a film-less reply does lose is exactly what it
+    should: it drops out of every film-anchored surface, so a conversation
+    about a list does not turn up on the page for one of its films.
 
     Replying on a film the user has already reviewed cannot trip D5's
     ``unique_review_per_user_per_film``: that partial index covers only
-    ``review``/``review_rating`` rows, and a reply is a ``comment``.
+    ``review``/``review_rating`` rows, and a reply is never either of them.
 
     The reply mints its own ``origin_id`` because it is a local status —
     ``Status.save`` does it — so increment 5's threaded ``Create(Note)``
@@ -704,7 +714,7 @@ def add_reply(user, parent: Status, *, content: str, raw_content: str) -> Status
     return Status.objects.create(
         user=user,
         film_id=parent.film_id,
-        status_type=Status.Type.COMMENT,
+        status_type=Status.Type.COMMENT if parent.film_id else None,
         content=content,
         raw_content=raw_content,
         reply_parent=parent,

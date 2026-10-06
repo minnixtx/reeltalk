@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}{{ profile_user.localname }}'s lists — ReelTalk{% endblock %}
+
+{% block content %}
+{# A member's lists (§2K increment 2, L7 / R138 decision 1) at #}
+{# /user/<localname>/lists/ — the same page the header's "My Lists" item #}
+{# and the profile's "Lists" tab both point at. #}
+<header class="profile-head">
+  {% if profile_user.avatar %}
+    <img class="avatar" src="{{ profile_user.avatar.url }}" alt="">
+  {% else %}
+    <span class="avatar avatar-placeholder"></span>
+  {% endif %}
+  <h1>{{ profile_user.get_full_name }}</h1>
+</header>
+
+{% comment %}
+Two tabs, and only on your own page (owner decision, 2026-10-06). The tab
+row is absent when you are looking at somebody else's lists rather than
+showing "My Lists" over theirs: the Saved half is one member's own curation
+and is not a public surface, so on another member's page there is exactly
+one thing to show and a one-item tab bar would be decoration. The films
+page keeps its own three tabs untouched.
+{% endcomment %}
+{% if is_self %}
+<nav class="tabs">
+  <a href="{% url 'user-lists' profile_user.localname %}"{% if tab == "made" %} class="active"{% endif %}>My Lists</a>
+  <a href="?tab=saved"{% if tab == "saved" %} class="active"{% endif %}>Saved Lists</a>
+</nav>
+{% endif %}
+
+{% if tab == "saved" %}
+  {% if saves %}
+  <ul class="list-mosaic">
+    {% for save in saves %}
+    <li class="list-card">
+      <a class="list-card-name" href="{% url 'list-detail' save.film_list_id %}">{{ save.film_list.title }}</a>
+      {# The card names the maker, never the saver (L2: a live pointer at #}
+      {# somebody else's list, labelled with who it belongs to). #}
+      <span class="list-card-meta">saved from {{ save.film_list.user.localname }} · {{ save.item_count }} film{{ save.item_count|pluralize }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  {# The save button and its write path are increment 5; the tab and this #}
+  {# empty state are here so the shape under review is the real page. #}
+  <p class="muted">You haven't saved any lists yet.</p>
+  {% endif %}
+{% else %}
+  {% if made %}
+  <ul class="list-mosaic">
+    {% for made_list in made %}
+    <li class="list-card">
+      <a class="list-card-name" href="{% url 'list-detail' made_list.id %}">{{ made_list.title }}</a>
+      <span class="list-card-meta">{{ made_list.item_count }} film{{ made_list.item_count|pluralize }} · {{ made_list.created_date|date:"Y-m-d" }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No lists yet.</p>
+  {% endif %}
+{% endif %}
+{% endblock %}
