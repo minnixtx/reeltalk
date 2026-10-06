@@ -107,6 +107,12 @@ INSTALLED_APPS = [
     # wire, the domain block), so none of those three is the natural owner --
     # the same span that justified the two apps above.
     "reeltalk.moderation",
+    # Lists (§2K, R137): user-made ranked lists of films. Its own app for the
+    # same reason again -- a list borrows the post machinery from core, the
+    # member from social, and a wire shape from activitypub, so none of those
+    # three owns it. Increment 1 is the object and the write path only: no
+    # views, no templates, no federation.
+    "reeltalk.lists",
     # Task queue (M2, R4): Django-Q2's ORM cluster tables. The worker service
     # runs `qcluster` from the same image; its cluster lives in Postgres.
     "django_q",

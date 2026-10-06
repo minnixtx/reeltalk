@@ -426,7 +426,9 @@ def _applaud_states(body) -> list[str]:
 
 
 @pytest.mark.django_db
-def test_feed_icon_state_is_idle_when_nothing_has_been_applauded(alice, bob, dune, admin):
+def test_feed_icon_state_is_idle_when_nothing_has_been_applauded(
+    alice, bob, dune, admin
+):
     _review(alice, dune)
     bob.follows.add(alice)
     assert _applaud_states(_home(_login("bob"))) == ["idle"]

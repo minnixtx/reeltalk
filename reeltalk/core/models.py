@@ -194,10 +194,15 @@ class Film(models.Model):
     def _repoint_related(self, canonical: "Film") -> None:
         """Re-point every row that references this film at the canonical one.
 
-        One block per related model (R16).
+        One block per related model (R16). A model added here is a model that
+        would otherwise be silently orphaned — nothing errors when a merge
+        leaves a reference at a deleted row, so forgetting one is a quiet data
+        bug rather than a loud one. ``ListItem`` joined in §2K increment 1 for
+        exactly that reason.
         """
         self._repoint_shelf_films(canonical)
         self._repoint_statuses(canonical)
+        self._repoint_list_items(canonical)
         self._repoint_blocked_films(canonical)
 
     def _repoint_shelf_films(self, canonical: "Film") -> None:
@@ -234,6 +239,34 @@ class Film(models.Model):
     def _repoint_statuses(self, canonical: "Film") -> None:
         """Carry comments/reviews/ratings over to the canonical film."""
         Status.objects.filter(film=self).update(film=canonical)
+
+    def _repoint_list_items(self, canonical: "Film") -> None:
+        """Carry list membership over to the canonical film, keeping each rank.
+
+        Without this block a merge deletes the absorbed film and every
+        ``ListItem`` pointing at it with it, so a list quietly loses entries —
+        no error, no log, just a shorter list (§2K finding 1).
+
+        A list that already held the canonical film drops the absorbed row
+        rather than violating ``one_row_per_film_per_list``, the same dedup
+        ``_repoint_shelf_films`` does. The rank of a dropped row is not
+        reused; gaps are already normal after a removal (see ``ListItem``).
+        """
+        # Local import: reeltalk.lists imports this module, so a module-level
+        # import would cycle. Same shape as the User import above.
+        from reeltalk.lists.models import ListItem
+
+        already_listed = set(
+            ListItem.objects.filter(film=canonical).values_list(
+                "film_list_id", flat=True
+            )
+        )
+        for row in ListItem.objects.filter(film=self):
+            if row.film_list_id in already_listed:
+                row.delete()
+            else:
+                row.film = canonical
+                row.save(update_fields=["film"])
 
 
 class MergedFilm(models.Model):
@@ -373,6 +406,9 @@ class Status(models.Model):
         COMMENT = "comment", "Comment"
         REVIEW = "review", "Review"
         REVIEW_RATING = "review_rating", "Rating-only review"
+        # The post face of a user-made list (L9, §2K). The only type that is
+        # not anchored to a film — see the exemption in ``save``.
+        LIST = "list", "List"
 
     # The types that count as the user's review of a film for D5.
     REVIEW_TYPES = (Type.REVIEW, Type.REVIEW_RATING)
@@ -457,7 +493,19 @@ class Status(models.Model):
         creating = self.pk is None
         if self.status_type == Status.Type.REVIEW_RATING and not self.rating:
             raise ValueError("A rating-only entry must carry a star rating")
-        if self.status_type and not self.film_id:
+        # A typed status must be anchored to a film, with exactly one
+        # exemption: a list's post face (L9) is not about one film, so it has
+        # nothing to anchor to and never will. The exemption is written as a
+        # named-type check rather than a blanket "film_id optional" so that a
+        # film-less comment, review or rating still fails here exactly as it
+        # always did (L13) — loosening this rule any wider would let a reply
+        # silently drop out of every film-anchored surface, which is the
+        # failure ``add_reply``'s docstring warns about.
+        if (
+            self.status_type
+            and self.status_type != Status.Type.LIST
+            and not self.film_id
+        ):
             kind = self.get_status_type_display().lower()
             raise ValueError(f"A {kind} status must be anchored to a film")
         super().save(*args, **kwargs)

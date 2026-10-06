@@ -512,7 +512,9 @@ def test_the_post_page_offers_a_composer_to_a_member_on_a_local_post(alice, dune
 
 
 @pytest.mark.django_db
-def test_the_post_page_arrives_with_no_composer_until_the_reply_icon_is_used(alice, dune):
+def test_the_post_page_arrives_with_no_composer_until_the_reply_icon_is_used(
+    alice, dune
+):
     # The other half of the collapsed-composer decision, and the half that
     # actually pins it: the same page, same member, same post, without the
     # param, carries no composer at all. Without this test a change that
@@ -709,9 +711,10 @@ def test_a_film_less_post_offers_no_reply_control(alice, dune, admin):
     assert "A note with no film." in row  # the row renders…
     assert 'class="reply-btn"' not in row  # …with no reply offer
     # And its page agrees: no composer even when asked for one.
-    assert "reply-form" not in _login("alice").get(
-        f"/status/{note.pk}/?reply=1"
-    ).content.decode()
+    assert (
+        "reply-form"
+        not in _login("alice").get(f"/status/{note.pk}/?reply=1").content.decode()
+    )
 
 
 @pytest.mark.django_db

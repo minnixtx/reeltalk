@@ -10,89 +10,68 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **R136 — the reply control and the link red, BUILT, PROVEN AND DEPLOYED
-  on `reeltalk.minnix.dev` (2026-10-06).** A reply icon sits immediately
-  after the applaud icon on every feed row and on the post page. Clicking
-  the post body no longer opens a reply box — reading and answering are
-  separate acts now, and the icon is the only way into the composer. Full
-  gate **2189 passed + 5 skipped, `PYTEST_EXIT=0`** (29:28). No
-  migrations — this increment touches no models.
-- **The composer is opened by the URL, not by a script.** `?reply=1` is
-  what the icon's href carries and what `status_detail` reads; the form is
-  rendered into the HTML when it is present and omitted when it is not.
-  That is the whole reason it is done server-side: a member with JavaScript
-  disabled still gets a reachable, working composer, and "arriving from a
-  feed row opens it automatically" falls out of the URL instead of needing
-  a second signal to keep in step.
-- **Two states, not three, and the reason is reversibility.** The owner
-  rejected the third state because it would have had to mean "you replied",
-  and nothing this control does can take a reply back — an icon claiming
-  authorship of something it cannot undo is a claim it cannot act on. Red
-  outline when the thread has replies, white outline when it does not. The
-  solid-red artwork was consequently never shipped: shipping an unused PNG
-  costs a hashed copy of it on every deploy.
-- **The control is an `<a>`, not a `<button>`, and that has two CSS
-  consequences.** It navigates, so it must be a real link for middle-click,
-  open-in-new-tab and Tab order. `transform` does not apply to a
-  non-replaced inline element, so it needs `display: inline-block`; and the
-  base `a { color: var(--link) }` rule had to be kept off the icon so its
-  own ink stays the only colour on it.
-- **The control's gate is the composer's gate: `entry.interactive and
-  entry.film`.** A post with no film behind it can never be replied to at
-  all — `Status.save` refuses a typed status with no film, and a reply is a
-  typed status — so a reply icon on such a row would be the
-  offer-with-no-route bug R85 exists to prevent. Verified against the live
-  database rather than inferred from the model: two film-less statuses
-  exist and zero replies hang off them. **How to apply:** whenever a new
-  control opens an existing write, gate it on the write's own precondition
-  and check that precondition against real data, not just the code path.
-- **Link text is now `--link: #fc0a13`, the core of the solid-red
-  clapperboard**, split out of `--accent` so anchor text could move without
-  moving anything else. Resting and hovered are deliberately the *same*
-  value: the old hover went brighter than resting, and once resting moved up
-  to `#fc0a13` a hover back down to `--accent` would have read as
-  de-emphasis on hover. Focus rings, form-field borders, the watchlist
-  button and the active-tab underline keep `#e0554a` — the owner scoped
-  this to anchor text only. The nav's Log out is a `<button>` styled as nav
-  text and moved with the anchors rather than sitting beside them in a
-  different red.
-- **Register artwork body-to-body, never by ink bbox.** The first pass at
-  the reply icon scaled by its full ink bounding box, which is padded by
-  the pointer at the bubble's bottom-left — the bubble itself came out
-  ~14% narrower than the clapperboard beside it (927px against 1057px on
-  the shared 1254 canvas). The owner caught it by eye. The body is found by
-  its **rails**: a rail is a column with a long unbroken run of ink, so the
-  clapper's diagonal arm, which smears across many short columns, and the
-  tail, which is short on both axes, cannot be mistaken for one. Both
-  reply states now render a 100px body on the 120px canvas, matching the
-  applaud's full-size body and centred on the same point. **How to apply:**
-  when two icons sit side by side, measure the visible body of each, not the
-  bounding box of the artwork. Also: never trust a rail measurement taken at
-  the rendered 26px size — the rails are sub-pixel and the resample smears
-  them into nonsense. Measure on the source canvas.
-- **Still true from R135, and still load-bearing.** The applaud control's
-  three resting states report *who* applauded; `data-state` is recomputed
-  by `likes.js` from the server's answer, never from a client-side
-  increment. Hover is a uniform `scale(1.08)` and the `box-shadow: none` /
-  `filter: none` resets must be repeated **on the hover selector** —
-  `button:hover, .btn:hover` is specificity (0,1,1) and outspecifies the
-  (0,1,0) class resets in the base rule, so omitting them lights the icon
-  up with the site's button halo. Counts are always white; the icon alone
-  carries the state.
-- **Process rules that govern all design work here.** Deploy and get the
-  owner's browser review **before** running the full gate — the gate costs
-  ~30 minutes and a design change routinely needs two or three visual
-  rounds. Render it and show it; do not describe a visual change in prose.
-  Ask about design decisions rather than guessing. Verify hover and
-  pseudo-class claims by reading `getComputedStyle` in a real browser, not
-  by reasoning about the cascade.
+- **Lists increment 1 — the object and the write path — BUILT and
+  gate-verified (2026-10-06). Not deployed, not pushed.** `reeltalk/lists`
+  now exists: `FilmList` / `ListItem` / `ListSave`, six service functions
+  (`create_list`, `add_films`, `remove_film`, `move`, `rename`,
+  `soft_delete_list`), `Status.Type.LIST`, the film rule narrowed to exempt
+  it, and `ListItem` registered in `Film._repoint_related`. Two migrations:
+  `lists/0001_initial` and `core/0009_alter_status_status_type`. Full gate
+  **2237 passed + 5 skipped in 30:10, `PYTEST_EXIT=0`** (baseline 2189;
+  **+48 = 40 new tests + 8 clean-room params**, skips unchanged), with
+  `ruff check` / `ruff format --check` / `makemigrations --check` all
+  clean. Full record: **"Executed — lists increment 1"** at the end of §2K.
+- **Nothing about it is visible, and that is the point.** No view, no URL,
+  no template, no wire. `Status.feed_for` has never filtered on
+  `status_type`, so a LIST row is *already* a feed row the moment it
+  exists — which is why the increments must not be reordered and why this
+  one shipped with no UI. A test pins that fact rather than leaving it to
+  the plan.
+- **The film rule now has exactly one exemption, and it kept its teeth.**
+  `Status.save` refuses a typed status with no film *except* `LIST`. A
+  film-less `comment`, `review` or `review_rating` still raises — proven by
+  switching the rule off entirely and watching all three go red, not by a
+  passing test that would have passed just as well with the rule gone.
+- **Four invariants a later increment has to honour.** (a) `rank` is an
+  ordering key, not the number a page prints: `remove_film` leaves the gap
+  it makes (1, 2, 4) instead of renumbering, so a position must come from
+  the order and not from `rank`. (b) The post face carries **no text of its
+  own** — title and description live on `FilmList` alone, so the federated
+  `Note` body is composed at broadcast time rather than mirrored into
+  `content`. (c) `FilmList.delete()` is soft, so it *hides* a list instead
+  of cascading saves away: the "lists you saved" reader (increment 5) must
+  filter on `film_list__deleted=False`, because a `ListSave` row does not
+  by itself mean a saveable list. (d) `create_list` renders the markdown
+  and owns both halves of the pair, so increment 3's form must pass raw
+  markdown *into* the service instead of rendering in `clean_description`
+  the way `FilmForm` does, or the description renders twice.
+- **One known gap between what R137 promises and what runs today.** A reply
+  to a list still cannot be written: `add_reply` types its row `comment`
+  and copies `film_id` off the parent, so replying to a film-less face
+  raises *"A comment status must be anchored to a film"*. L13's
+  untyped-reply change lands with increment 2, the first surface that
+  renders a thread. `set_description` is likewise still owed to
+  increment 3 — §2K names only `rename`.
+- **The lint baseline in the previous record is wrong.**
+  `reeltalk/tests/test_comments.py:515` and `reeltalk/tests/test_likes.py:429`
+  were already over the 88-char limit at `HEAD`, checked against a pristine
+  worktree rather than inferred from my own diff, against R136's *"All
+  checks passed!"*. Both fixed here, formatting only. Do not read the older
+  gate records as a lint baseline.
+- **Process rules for the visual half of this feature.** Deploy and get the
+  owner's browser review **before** running the full gate on anything
+  visual — the gate costs ~30 minutes and a design change routinely needs
+  two or three visual rounds. Render it and show it; never describe a
+  visual change in prose. Ask about design decisions rather than guessing,
+  and verify hover and pseudo-class claims with `getComputedStyle` in a real
+  browser rather than by reasoning about the cascade.
 - **STANDING CONSTRAINTS — one of them has been reversed. Read this
   carefully.**
-  - **User-made lists are now IN SCOPE, as of 2026-10-06.** The owner has
-    reversed the 2026-10-02 decision ("We won't do lists"). Do not cite
-    the old refusal; it no longer holds. The feature is described in the
-    **Next up** bullet below and the next session is a **planning** session
-    for it.
+  - **User-made lists are IN SCOPE.** The owner reversed the 2026-10-02
+    decision ("We won't do lists") on 2026-10-06. Do not cite the old
+    refusal; it no longer holds. The shape is locked as **L1–L13 = R137**
+    in §2K — read §2K before asking any design question about lists,
+    because all thirteen are already answered.
   - No third column on the home feed (R64).
   - The genre subfeed keeps its numbered 20-per-page links, and its
     inconsistency with the endless home feed is deliberate (R132 7) — do
@@ -101,23 +80,25 @@ is history.**
     no live updates on the home feed.
   - TMDB search is the primary add-film flow; manual create is the
     fallback.
-- **NEXT UP — build the lists feature, from §2K. The plan is DONE; nothing
-  of it is built.** The planning session the owner asked for ran 2026-10-06
-  and produced **§2K — Forward plan: user-made lists of films**, which
-  carries the brief, the thirteen locked shape decisions (**L1–L13 = R137**),
-  the seven increments, and the eight open questions to settle as each
-  increment reaches them. Start at increment 1 and stop at the end of each
-  one. **Read §2K before asking any design question about lists — all
-  thirteen are answered.**
-- **The brief's premise about existing list scaffolding was wrong, and §2K
-  corrects it.** There is **no `List` and no `ListItem` anywhere in this
-  repo** — no model, view, URL, template, migration or AP type. The earlier
-  claim in this block that they "already exist as BookWyrm inheritance" was
-  false; only `PLAN.md:55`'s *description* survived, and `PLAN.md:293-295`
-  already admits "none of them exist — there is no lists app." This is
-  greenfield. What the feature *is* built on is the existing post machinery:
-  `Status`, `Like`, `reply_parent`, `FeedEntry`, `broadcast_*`, the inbox
-  `HANDLERS`.
+- **NEXT UP — increment 2: the list page, My Lists, and the nav item
+  (read-only).** `GET /list/<id>/` (title, byline, description, ranked
+  rows, applause and reply counts, the comment thread, and a like control
+  posting to the existing `/status/<id>/like/`); `GET /lists/` showing
+  "Made by you" only — the Saved section is increment 5; the "My Lists" nav
+  entry after "My Films", which needs a **prefix match** because every
+  existing entry is a single `request.path` segment; the "Lists" tab joining
+  `social/profile.html`'s `.tabs`; and `/status/<id>/` 302-ing to
+  `/list/<id>/` for a LIST status. Lists exist only from fixtures — there
+  is no create UI until increment 3. Settle open questions 3 (`/lists/` or
+  `/my-lists/`), 4 (empty states) and 6 (the profile tab when empty) as you
+  reach them, and make L13's untyped-reply change here, because this is the
+  first surface that renders a thread. **This increment is visual: deploy
+  and get the owner's browser review before running the full gate.**
+- **What the feature is built on.** `Status`, `Like`, `reply_parent`,
+  `FeedEntry`, `broadcast_*` and the inbox `HANDLERS` — not any inherited
+  list scaffolding. There was none: the brief's claim that `List`/`ListItem`
+  already existed as BookWyrm inheritance was false, and §2K opens with that
+  correction. Increment 1 is the first code of the feature to exist.
 - **The repo and attribution facts still stand.** `github.com/minnixtx/
   reeltalk` is the repository (2026-10-04); the old one is private as
   `reeltalk-old`. No co-author trailer — blocked by `.githooks/commit-msg`
@@ -6308,7 +6289,9 @@ entry is a single segment — so "My Lists" lights on `/lists/` and goes dark on
 
 Each one ends green and committed, with the NOW block rewritten.
 
-**Increment 1 — the object and the write path. No UI.**
+**Increment 1 — the object and the write path. No UI.** ✅ **DONE
+2026-10-06** — full record at the end of this section. Built as written; not
+yet deployed and not yet pushed (the owner's call on both).
 
 New app `reeltalk/lists`, the way `notifications` and `mentions` each got
 their own. Migration `lists/0001_initial`; `core` gets `0009_*` for the new
@@ -6468,6 +6451,122 @@ introduced — `.list-strip`, `.list-strip-title`, `.list-strip-count`,
 `.list-strip-posters`, `.list-card`, `.list-mosaic`, `.list-card-name`,
 `.list-card-meta`, `.list-page-head`, `.rank-row`, `.rank-num` — are the
 starting point, not a settled design.
+
+### Executed — lists increment 1 is DONE, gate-verified (2026-10-06)
+
+**What landed.** The new app `reeltalk/lists` (`__init__.py`, `apps.py`,
+`models.py`, `services.py`, `migrations/__init__.py`,
+`migrations/0001_initial.py`), `core/migrations/0009_alter_status_status_type.py`,
+and `reeltalk/tests/test_lists.py`. **No view, no URL, no template, no wire**
+— the increment's stated scope, held to.
+
+**The three `core` changes.** `Status.Type.LIST` added to the `TextChoices`
+(which is what generates `0009`, a choices-only `AlterField`); the anchoring
+rule in `Status.save` narrowed to exempt `LIST` by name; and
+`_repoint_list_items` registered in `Film._repoint_related`, between the
+statuses and blocked-films blocks. Every production query that filters by
+type asks for `REVIEW_TYPES`, so `LIST` does not leak into a review count, a
+film page, an export or a D5 constraint — checked by grepping every non-test
+reference to `status_type` before choosing where to put the exemption.
+
+**Both §2K findings handled, and both are proven by a mutation rather than by
+a passing test.** `ListItem` in `_repoint_related` is the difference between
+a merge that re-points list rows and one that silently shortens every list
+that held the absorbed film; deleting that one line turns four tests red. The
+film rule's teeth are the other half: switching the exemption off entirely
+turns the three "must still raise" tests red, which is the only thing that
+proves they were not written to pass on the new type.
+
+**Six decisions §2K left implicit, taken here rather than silently.**
+
+1. **`rank` is an ordering key, not the displayed ordinal.** `remove_film`
+   leaves the gap it makes (1, 2, 4) instead of renumbering everything below.
+   Anything rendering a position must number rows by their order, not print
+   `rank`. Pinned by a test so a later "tidy the gaps" change reads as the
+   regression it would be.
+2. **No unique constraint on `(film_list, rank)`.** §2K's model bullets list
+   exactly one constraint — `UniqueConstraint(list, film)` — so "rank
+   uniqueness" in *Proves by* is read as the one-film-per-list rule. A
+   unique rank would turn every adjacent swap into a two-phase update (or
+   need a deferrable constraint) to buy an invariant nothing reads.
+3. **The post face carries no text of its own.** `content`/`raw_content`
+   stay empty; the title and description live on `FilmList` alone. L1 makes
+   every field editable forever, so a stored copy of the body would be a
+   second source of truth that each edit has to keep in step. The federated
+   `Note` body is composed at broadcast time (increment 6) and the feed row
+   reads the title off the list (increment 4).
+4. **`FilmList.delete()` is overridden to soft-delete**, matching
+   `Status.delete()` (R17), rather than leaving `soft_delete_list` as the
+   only soft path. A stray `.delete()` anywhere in the codebase cannot then
+   wipe a list and every save pointing at it. Consequence carried forward:
+   the soft path **hides** rather than cascades, so increment 5's "lists you
+   saved" must filter on `film_list__deleted=False` — a `ListSave` row does
+   not by itself mean a saveable list. The CASCADE on `ListSave.film_list` is
+   the hard-delete half of L2 and is tested as such.
+5. **`create_list` owns the markdown/HTML pair**, rendering the description
+   itself. Increment 3's form must therefore pass raw markdown *into* the
+   service rather than rendering in a `clean_description` the way
+   `FilmForm` does, or the description gets rendered twice.
+6. **`move(item, direction)`** takes a `ListItem` and `"up"`/`"down"`
+   (module constants `MOVE_UP`/`MOVE_DOWN`), returns a bool at the ends
+   rather than raising, and raises on an unrecognised direction — pressing
+   "up" on the first row is a normal outcome; a typo in the direction is not.
+
+**Three things this increment deliberately does not include.**
+
+- **`set_description`.** L1 makes the description editable forever, but
+  §2K's six named service functions cover only `rename`. Increment 3's edit
+  form will need the other one. Flagged rather than invented here.
+- **A reply to a list still cannot be written.** `add_reply` sets
+  `status_type=COMMENT` and copies `film_id` off the parent, so a reply to a
+  list's face — which has no film — raises *"A comment status must be
+  anchored to a film"*. L13 says the reply must be untyped; that change
+  belongs with increment 2, the first surface that renders a comment thread.
+  Until it lands, the exemption covers the list itself and not its replies.
+  This is the one known gap between what R137 promises and what runs today.
+- **No admin registration** for the three new models; §2K does not ask for
+  one.
+
+**Non-vacuity — eight mutations, each turning the suite red.** M1 drop
+`self._repoint_list_items(canonical)` → 4 failed (every merge test). M2
+remove the `LIST` exemption, restoring the old blanket rule → 3 failed. M3
+switch the anchoring rule off entirely → 4 failed (the three film-less-typed
+cases plus the sweep). M4 drop `film_list_id` from `move`'s down-neighbour
+query → 1 failed, 1 passed (the cross-list trap bites exactly as designed).
+M5 save only the mover, not the neighbour → 2 failed. M6 stop `add_films`
+deduping → 1 failed on the DB constraint. M7 leave the post face live in
+`soft_delete_list` → 1 failed. M8 turn `FilmList.delete()` into a hard
+delete → 2 failed. M4's asymmetry is the useful one: the cross-list tests
+were built with the *other* member's rows placed at ranks 2 and 3 while ours
+sits alone at rank 1, so a dropped filter has to find them; a test that had
+used ordinary consecutive ranks would have stayed green under the same bug.
+
+**Two lint errors were already in `HEAD` before this increment touched
+anything.** `reeltalk/tests/test_comments.py:515` and
+`reeltalk/tests/test_likes.py:429` both exceed the 88-char limit, verified
+against a pristine `HEAD` worktree rather than inferred from my own diff.
+That contradicts the R136 gate record's "ruff check *All checks passed!*",
+so whatever that run scoped, it was not `.`. Both are formatting-only
+(line-wrapped test signatures, no semantic change) and were fixed here because
+the alternative is a permanently red gate. Worth knowing before the next gate:
+the previous record cannot be trusted as the lint baseline.
+
+**Gate.** `BUILD_EXIT=0`, `RUFF_CHECK_EXIT=0`, `RUFF_FORMAT_EXIT=0`,
+`MIGRATIONS_EXIT=0`, `PYTEST_EXIT=0` — **2237 passed + 5 skipped in
+1810.06s (30:10)**, run fresh in the container against the rebuilt image,
+markers read from inside `/tmp/gate.log` rather than from the wrapper's exit
+code. Delta reconciles exactly:
+**+48 collected = 40 new tests in `test_lists.py` + 8 clean-room params**
+(one each for `lists/{__init__,apps,models,services}.py`,
+`lists/migrations/{__init__,0001_initial}.py`,
+`core/migrations/0009_alter_status_status_type.py` and
+`tests/test_lists.py`); skips unchanged at 5.
+
+**Not deployed, not pushed.** The live container still runs the pre-increment
+image, so `lists/0001` and `core/0009` are not applied to the live database.
+Nothing in this increment is user-visible, so that is a safe state rather
+than a lag; applying them is a deploy decision for the owner, along with the
+push.
 
 ## 3. Host facts (this box)
 
