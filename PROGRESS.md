@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-05
+**Last updated:** 2026-10-06
 
 ---
 
@@ -10,69 +10,110 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **R135 — the applaud control is a bare clapperboard icon, BUILT, PROVEN
-  AND DEPLOYED on `reeltalk.minnix.dev` (2026-10-05).** It replaces the
-  pill button from R134, which the owner rejected on sight. 26px icon,
-  plain monospace count, no border and no baked word. Confirmed in a real
-  browser against the deployed site as a signed-in member across all three
-  resting states. Full gate **2183 passed + 5 skipped, `PYTEST_EXIT=0`**
-  (28:10). No migrations — this increment touches no models.
-- **The resting icon reports WHO applauded, which is two facts, not one.**
-  Solid red when it is yours; red outline when others applauded and you did
-  not; white outline when nobody has. Both facts were already on the feed
-  row (`liked_by_viewer` and `like_count`), so no model change was needed.
-  `data-state` is derived in the template and recomputed by `likes.js` from
-  the **server's** answer after each toggle — never from a client-side
-  increment, which is the difference between the icon and the tally being
-  allowed to drift and not being allowed to.
-- **Hover is a uniform `scale(1.08)`, and the resets on that selector are
-  load-bearing.** `button:hover, .btn:hover` paints a five-stop red bloom
-  and `button:hover` adds `filter: brightness(1.1)`; both are specificity
-  (0,1,1) and therefore **outspecify** the (0,1,0) `.applaud-btn` resets in
-  the base rule. `.applaud-btn:hover` must repeat `box-shadow: none` and
-  `filter: none` or the icon lights up with the site's button halo the
-  moment the cursor arrives. **How to apply:** any control that opts out of
-  the base button chrome must repeat those resets on the hover selector, not
-  just on the base one. This is the second time the base `button` rule has
-  bitten this control — the first was `margin-top: 1rem`.
-- **Why brightness could not be the hover.** The idle art is already at
-  253,253,253, so `brightness()` clamps at 255 and is invisible on it. A
-  lift would have registered on the red states only, making the three states
-  feel inconsistent. `transform` is paint-only, so the row never reflows.
-- **The three shipped PNGs are registered by core area, not by ink bbox.**
-  At alpha≥200 the clapperboard bodies measured 1059×973 (white outline),
-  1028×976 (red outline) and 1023×989 (solid red) — the source art is not
-  the same size. Registering by ink bbox shifts the clapperboard between
-  states. The generation recipe and the measured numbers are in the
-  `.applaud` comment block in `reeltalk.css`; any future state of this
-  artwork must be registered the same way before it ships.
-- **The count is always white and never tracks the icon.** The icon alone
-  carries who applauded, so a red number was a second, redundant copy of
-  the same signal.
-- **Dead assets are removed, not left behind.** The four pill PNGs from R134
-  and the supplied white-glow PNG are all gone. `ManifestStaticFilesStorage`
-  hashes and ships every file in the static tree whether or not a rule points
-  at it, so an unused asset is ~250KB of dead weight per file. The whole
-  control is now three PNGs totalling ~43KB against the pill's ~1MB.
-- **Process rule that now governs all design work here.** Deploy and get the
-  owner's browser review **before** running the full gate, not after. The
-  gate costs ~30 minutes and a design change routinely needs two or three
-  visual rounds, so running it first burns a cycle every time the answer is
-  "no". Targeted tests needed to deploy safely are fine earlier; the long
-  full-suite run waits.
-- **Verify a hover with a browser, not with the cascade.** The glow the owner
-  reported was real and my first two explanations of it were wrong.
-  `playwright-core` from the browser-use runtime drives system Chromium
-  headlessly; hovering the element and reading `getComputedStyle` settled it
-  in one run. **How to apply:** for any claim about what a control does under
-  a pseudo-class, read the computed style in a real browser.
-- **Standing constraints, unchanged and not up for re-litigation.** No
-  user-made lists under any name (owner: "We won't do lists"). No third
-  column on the home feed (R64). The genre subfeed keeps its numbered
-  20-per-page links, and its inconsistency with the endless home feed is
-  deliberate (R132 7) — do not "fix" it. No virtualisation, no mid-scroll
-  deep links, no resume-where-you-were, no live updates on the home feed.
-  TMDB search is the primary add-film flow; manual create is the fallback.
+- **R136 — the reply control and the link red, BUILT, PROVEN AND DEPLOYED
+  on `reeltalk.minnix.dev` (2026-10-06).** A reply icon sits immediately
+  after the applaud icon on every feed row and on the post page. Clicking
+  the post body no longer opens a reply box — reading and answering are
+  separate acts now, and the icon is the only way into the composer. Full
+  gate **2189 passed + 5 skipped, `PYTEST_EXIT=0`** (29:28). No
+  migrations — this increment touches no models.
+- **The composer is opened by the URL, not by a script.** `?reply=1` is
+  what the icon's href carries and what `status_detail` reads; the form is
+  rendered into the HTML when it is present and omitted when it is not.
+  That is the whole reason it is done server-side: a member with JavaScript
+  disabled still gets a reachable, working composer, and "arriving from a
+  feed row opens it automatically" falls out of the URL instead of needing
+  a second signal to keep in step.
+- **Two states, not three, and the reason is reversibility.** The owner
+  rejected the third state because it would have had to mean "you replied",
+  and nothing this control does can take a reply back — an icon claiming
+  authorship of something it cannot undo is a claim it cannot act on. Red
+  outline when the thread has replies, white outline when it does not. The
+  solid-red artwork was consequently never shipped: shipping an unused PNG
+  costs a hashed copy of it on every deploy.
+- **The control is an `<a>`, not a `<button>`, and that has two CSS
+  consequences.** It navigates, so it must be a real link for middle-click,
+  open-in-new-tab and Tab order. `transform` does not apply to a
+  non-replaced inline element, so it needs `display: inline-block`; and the
+  base `a { color: var(--link) }` rule had to be kept off the icon so its
+  own ink stays the only colour on it.
+- **The control's gate is the composer's gate: `entry.interactive and
+  entry.film`.** A post with no film behind it can never be replied to at
+  all — `Status.save` refuses a typed status with no film, and a reply is a
+  typed status — so a reply icon on such a row would be the
+  offer-with-no-route bug R85 exists to prevent. Verified against the live
+  database rather than inferred from the model: two film-less statuses
+  exist and zero replies hang off them. **How to apply:** whenever a new
+  control opens an existing write, gate it on the write's own precondition
+  and check that precondition against real data, not just the code path.
+- **Link text is now `--link: #fc0a13`, the core of the solid-red
+  clapperboard**, split out of `--accent` so anchor text could move without
+  moving anything else. Resting and hovered are deliberately the *same*
+  value: the old hover went brighter than resting, and once resting moved up
+  to `#fc0a13` a hover back down to `--accent` would have read as
+  de-emphasis on hover. Focus rings, form-field borders, the watchlist
+  button and the active-tab underline keep `#e0554a` — the owner scoped
+  this to anchor text only. The nav's Log out is a `<button>` styled as nav
+  text and moved with the anchors rather than sitting beside them in a
+  different red.
+- **Register artwork body-to-body, never by ink bbox.** The first pass at
+  the reply icon scaled by its full ink bounding box, which is padded by
+  the pointer at the bubble's bottom-left — the bubble itself came out
+  ~14% narrower than the clapperboard beside it (927px against 1057px on
+  the shared 1254 canvas). The owner caught it by eye. The body is found by
+  its **rails**: a rail is a column with a long unbroken run of ink, so the
+  clapper's diagonal arm, which smears across many short columns, and the
+  tail, which is short on both axes, cannot be mistaken for one. Both
+  reply states now render a 100px body on the 120px canvas, matching the
+  applaud's full-size body and centred on the same point. **How to apply:**
+  when two icons sit side by side, measure the visible body of each, not the
+  bounding box of the artwork. Also: never trust a rail measurement taken at
+  the rendered 26px size — the rails are sub-pixel and the resample smears
+  them into nonsense. Measure on the source canvas.
+- **Still true from R135, and still load-bearing.** The applaud control's
+  three resting states report *who* applauded; `data-state` is recomputed
+  by `likes.js` from the server's answer, never from a client-side
+  increment. Hover is a uniform `scale(1.08)` and the `box-shadow: none` /
+  `filter: none` resets must be repeated **on the hover selector** —
+  `button:hover, .btn:hover` is specificity (0,1,1) and outspecifies the
+  (0,1,0) class resets in the base rule, so omitting them lights the icon
+  up with the site's button halo. Counts are always white; the icon alone
+  carries the state.
+- **Process rules that govern all design work here.** Deploy and get the
+  owner's browser review **before** running the full gate — the gate costs
+  ~30 minutes and a design change routinely needs two or three visual
+  rounds. Render it and show it; do not describe a visual change in prose.
+  Ask about design decisions rather than guessing. Verify hover and
+  pseudo-class claims by reading `getComputedStyle` in a real browser, not
+  by reasoning about the cascade.
+- **STANDING CONSTRAINTS — one of them has been reversed. Read this
+  carefully.**
+  - **User-made lists are now IN SCOPE, as of 2026-10-06.** The owner has
+    reversed the 2026-10-02 decision ("We won't do lists"). Do not cite
+    the old refusal; it no longer holds. The feature is described in the
+    **Next up** bullet below and the next session is a **planning** session
+    for it.
+  - No third column on the home feed (R64).
+  - The genre subfeed keeps its numbered 20-per-page links, and its
+    inconsistency with the endless home feed is deliberate (R132 7) — do
+    not "fix" it.
+  - No virtualisation, no mid-scroll deep links, no resume-where-you-were,
+    no live updates on the home feed.
+  - TMDB search is the primary add-film flow; manual create is the
+    fallback.
+- **NEXT UP — plan the lists feature (planning only, do not build).** The
+  owner's brief: users create named lists of films — "Best Sci-Fi Films of
+  the 50s", "Horror Films You Must See", "Jack Palance's Top 5 Films". A
+  new nav item **My Lists** shows the user's own lists plus other users'
+  lists they have saved. Creating a list puts it in the feed of users who
+  follow the creator. A list is subject to the same rules as a review: it
+  gets a post page, and users can applaud and comment on it. The special
+  part is **saving** — any user can save someone else's list and it appears
+  on their own My Lists page. The owner expects this to be broken into
+  increments and has asked that the next session produce the plan rather
+  than the feature. Note that `List` / `ListItem` objects already exist in
+  the domain model as BookWyrm inheritance — read them, but do not assume
+  they are the right shape for this.
 - **The repo and attribution facts still stand.** `github.com/minnixtx/
   reeltalk` is the repository (2026-10-04); the old one is private as
   `reeltalk-old`. No co-author trailer — blocked by `.githooks/commit-msg`
