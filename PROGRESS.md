@@ -101,19 +101,23 @@ is history.**
     no live updates on the home feed.
   - TMDB search is the primary add-film flow; manual create is the
     fallback.
-- **NEXT UP — plan the lists feature (planning only, do not build).** The
-  owner's brief: users create named lists of films — "Best Sci-Fi Films of
-  the 50s", "Horror Films You Must See", "Jack Palance's Top 5 Films". A
-  new nav item **My Lists** shows the user's own lists plus other users'
-  lists they have saved. Creating a list puts it in the feed of users who
-  follow the creator. A list is subject to the same rules as a review: it
-  gets a post page, and users can applaud and comment on it. The special
-  part is **saving** — any user can save someone else's list and it appears
-  on their own My Lists page. The owner expects this to be broken into
-  increments and has asked that the next session produce the plan rather
-  than the feature. Note that `List` / `ListItem` objects already exist in
-  the domain model as BookWyrm inheritance — read them, but do not assume
-  they are the right shape for this.
+- **NEXT UP — build the lists feature, from §2K. The plan is DONE; nothing
+  of it is built.** The planning session the owner asked for ran 2026-10-06
+  and produced **§2K — Forward plan: user-made lists of films**, which
+  carries the brief, the thirteen locked shape decisions (**L1–L13 = R137**),
+  the seven increments, and the eight open questions to settle as each
+  increment reaches them. Start at increment 1 and stop at the end of each
+  one. **Read §2K before asking any design question about lists — all
+  thirteen are answered.**
+- **The brief's premise about existing list scaffolding was wrong, and §2K
+  corrects it.** There is **no `List` and no `ListItem` anywhere in this
+  repo** — no model, view, URL, template, migration or AP type. The earlier
+  claim in this block that they "already exist as BookWyrm inheritance" was
+  false; only `PLAN.md:55`'s *description* survived, and `PLAN.md:293-295`
+  already admits "none of them exist — there is no lists app." This is
+  greenfield. What the feature *is* built on is the existing post machinery:
+  `Status`, `Like`, `reply_parent`, `FeedEntry`, `broadcast_*`, the inbox
+  `HANDLERS`.
 - **The repo and attribution facts still stand.** `github.com/minnixtx/
   reeltalk` is the repository (2026-10-04); the old one is private as
   `reeltalk-old`. No co-author trailer — blocked by `.githooks/commit-msg`
@@ -136,7 +140,8 @@ is history.**
 | Product contract — domain model, watch state, TMDB, federation surface, deployment shape | `PLAN.md` §3 |
 | **D-series** — the original product decisions (D1–D17) | `PLAN.md` §2 |
 | License audit | `PLAN.md` §4 |
-| **R-series** — rewrite-era decisions (R1–R135) | `PROGRESS.md` §4 |
+| **R-series** — rewrite-era decisions (R1–R137) | `PROGRESS.md` §4 |
+| **The lists feature — the plan, the locked shape, the increments** | `PROGRESS.md` §2K |
 | What was actually built, with commit hashes | `PROGRESS.md` §2 |
 | Host and deploy facts for this box | `PROGRESS.md` §3 |
 | What is live right now | the block above |
@@ -6161,6 +6166,309 @@ assert `Log out` is in the render before trusting any member-path
 measurement. Every measurement in this section was taken that way, and every
 minted session was deleted by exact key afterwards.
 
+## 2K. Forward plan — user-made lists of films: the object, the page, the feed, and saving
+
+**Written 2026-10-06. NOTHING IN THIS SECTION IS BUILT.** The owner asked for
+the plan and approved its shape; the next session executes it. Do not read any
+of it as shipped. Re-verify every `file:line` below against the current tree
+before acting on it.
+
+### The brief, in the owner's words
+
+Users create named lists of films — "Best Sci-Fi Films of the 50s", "Horror
+Films You Must See", "Jack Palance's Top 5 Films". A new nav item **My
+Lists** shows the lists this user created **and** other users' lists this user
+has saved. Creating a list puts it in the feed of users who follow the
+creator. A list is subject to the same rules as a review: it gets its own post
+page, and users can applaud and comment on it exactly as they do on a review.
+The special mechanic is **saving** — any user can save someone else's list,
+and saved lists appear on their own My Lists page.
+
+### First, the correction the brief itself needs
+
+The brief's note that "`List` / `ListItem` objects already exist in the domain
+model as inherited BookWyrm scaffolding" is **false for this repo**. A full
+sweep of every `.py`, template and migration returns zero hits for `List`,
+`ListItem`, `Listitem`, `list_item`, or any `List`/`Collection` AP type. What
+exists is `PLAN.md:55`'s *description* of the object, and `PLAN.md:293-295`'s
+own admission: "Lists and group curation … were all written under M5 and
+**none of them exist** — there is no lists app." **This is greenfield** —
+nothing to inherit, nothing to confirm against, nothing to delete.
+
+What *is* there, and what the whole feature is built on, is the post
+machinery: `Status` (one table, `status_type` discriminator), `Like` (one row
+per `(user, status)`), `reply_parent` threading, `FeedEntry`, the
+`broadcast_*` family, and the inbox `HANDLERS`. Every design choice below
+follows from reusing those rather than duplicating them.
+
+### The locked shape — R137. Do not re-open.
+
+| | Decision | What it commits us to |
+|---|---|---|
+| **L1** | **Freely editable forever** — rename, add, remove, reorder at any time | The page always shows the current version; every edit re-broadcasts |
+| **L2** | **Save = a live pointer**, labelled "saved from @user" | One row per save; the creator's delete cascades the save away |
+| **L3** | **Ranked 1..N, with up/down reorder controls** | No drag-and-drop layer exists here; up/down *is* the reorder UI |
+| **L4** | **Public only** — no per-list privacy | No privacy rule on any read path, and none on the wire |
+| **L5** | **Films are added only from the list page**, via TMDB search | One add-door, not four. Satisfies D6 without touching the film page, the Watched tabs, or the composer |
+| **L6** | **Saving is silent** — no notification, nothing on the ledger | No new `Notification.Kind`, ever |
+| **L7** | **A "Lists" tab on user profiles**, showing that user's lists | `social/profile.html` has a one-link `.tabs` nav today; this joins it |
+| **L8** | **A film row inside a list = poster + title + year, only** | No maker rating, no per-film note. Cheapest possible row at any list length |
+| **L9** | **A list gets a post face** — a `Status` row stands for it socially | Applause, replies, notifications and their federation become the *existing* code paths |
+| **L10** | **Canonical URL `/list/<id>/`**; `/status/<id>/` for a list 302s there | The like and reply endpoints stay status-id-based and unchanged |
+| **L11** | **Federates as a `Note` + a ReelTalk-namespaced extension** | A Mastodon follower sees a real post today and can applaud/reply with no change on their side |
+| **L12** | **You can save any visible list**, including a remote mirror | The save points at the mirror row we already hold |
+| **L13** | **A reply to a list carries no `status_type`** | The one that was genuinely hard — see below |
+
+### L13 — the decision that needed real thought
+
+`Status.save` carries this rule:
+
+```python
+if self.status_type and not self.film_id:
+    kind = self.get_status_type_display().lower()
+    raise ValueError(f"A {kind} status must be anchored to a film")
+```
+
+`add_reply()` writes `status_type=Status.Type.COMMENT` and copies `film_id`
+off the parent. A list's post row has no film — a list is not about one film —
+so a reply to a list arrives typed with nothing to inherit, and **this rule
+rejects it**. The owner's "comment on a list exactly as on a review" fails on
+that line unless something gives.
+
+**Chosen: leave the reply unlabelled** (`status_type=None`). Three reasons, all
+verified against the code rather than reasoned from it:
+
+1. **It is already the house convention.** `activitypub/statuses.py:422` does
+   exactly this on the inbound federation path:
+   `status_type = Status.Type.COMMENT if film is not None else None`. A
+   film-less, type-less status is a live, federating, tested shape *today*
+   (`test_activitypub_status.py:310` "standalone note";
+   `test_activitypub_collections.py:160` "typed statuses must be
+   film-anchored").
+2. **Nothing in production reads the `comment` value.** Every non-test
+   reference to it is the enum definition or one of the two lines that *write*
+   it. Every production query that filters by type asks for `REVIEW_TYPES`.
+   Leaving a reply unlabelled changes no count, no page, no export, and no
+   moderation rule.
+3. **The rule stays one sentence with one exemption** (the list itself) instead
+   of two, so anyone changing it later has one thing to hold, not two.
+
+**What is NOT lost by choosing it** — the owner asked directly, and each answer
+was checked against the code:
+
+- **Commenting works.** The thread is built from `reply_parent`, never from
+  `status_type`. `reply_counts` filters on `reply_parent_id`, `deleted` and
+  `suspended_at` — no type in the query. Same for `conversation()`, the reply
+  partial, and `comments.js`.
+- **Notifying works.** The reply producer keys on the author of the thing
+  replied to; the notifications app never consults `status_type`.
+- **The feed is unchanged, and was never going to show comments.**
+  `Status.feed_for` excludes every reply unconditionally
+  (`reply_parent__isnull=True`). Comments live on the post page. A follower
+  sees the list row, with its reply count ticking up.
+- **One drop-out that is wanted, not a loss.** `add_reply`'s own docstring
+  warns that a film-less reply "drops out of every film-anchored surface." For
+  a reply about a *list* that is exactly right: a conversation about "Best
+  Sci-Fi Films of the 50s" must not turn up on the page for *The Day the
+  Earth Stood Still*.
+
+### The five things the code map changed
+
+1. **Film merges will orphan list items unless told otherwise.**
+   `Film._repoint_related` (`core/models.py:196-205`) repoints only shelf
+   films, statuses and blocked films. `PLAN.md:49` claims lists get re-pointed;
+   nothing does. `ListItem` must be added there in increment 1, with a test
+   matching the three that exist for the other relations.
+2. **The reply icon would silently not render on a list's feed row.**
+   `FeedEntry.interactive` is `status_id is not None`, so a list row is
+   interactive automatically — but the reply control's gate in
+   `templates/_feed_row.html` is `entry.interactive and entry.film`, and a
+   list row has `film=None`. It must become
+   `entry.interactive and (entry.film or entry.list)`, and all four halves of
+   that gate move together or it is the offer-with-no-route bug again.
+3. **Notifications need no change at all.** Because the list has a post face,
+   like and reply land on the existing `Notification.status` FK. L6 means no
+   new `Kind` is ever added. This surface is free.
+4. **Inbound federation is smaller than it looks.** A list arrives as a
+   `Note`, so it stays on the existing `Create`/`Update` handlers — **no new
+   entry in `inbox.py`'s `HANDLERS`**. The work is inside `_mirror_status`:
+   recognise our extension and additionally materialise `FilmList` +
+   `ListItem`s.
+5. **There is no OrderedCollection plumbing to reuse.** `PLAN.md:50` and
+   `:90` both say shelves federate as OrderedCollections. **They do not** —
+   `collections.py:3-5` says "and shelves *when their wire type lands*". Only
+   outbox, followers and following exist. One more reason L11 is the cheap
+   choice.
+
+Also: the nav's active state is `request.path` equality, and every existing
+entry is a single segment — so "My Lists" lights on `/lists/` and goes dark on
+`/list/3/`. Needs a prefix match, not equality.
+
+### The increments
+
+Each one ends green and committed, with the NOW block rewritten.
+
+**Increment 1 — the object and the write path. No UI.**
+
+New app `reeltalk/lists`, the way `notifications` and `mentions` each got
+their own. Migration `lists/0001_initial`; `core` gets `0009_*` for the new
+`Status.Type`.
+
+- **`FilmList`** — `user` (PROTECT), `title`, `description` (markdown→HTML,
+  same shape as `Film.description`), `created`/`updated`, the soft-delete
+  pair, AP identity (`local`/`origin_id`/`remote_id`/`remote_url`), and
+  `status` (OneToOne → the post face).
+- **`ListItem`** — `film_list` (CASCADE), `film` (PROTECT), `rank`,
+  `UniqueConstraint(list, film)`, ordered by rank.
+- **`ListSave`** — `user` (CASCADE), `film_list` (CASCADE), `created`,
+  `UniqueConstraint(user, film_list)`.
+- **In `core`** — `Status.Type.LIST`, plus the narrowed film rule (L13), plus
+  `ListItem` registered in `Film._repoint_related`.
+- **Service functions** — `create_list`, `add_films`, `remove_film`, `move`
+  (adjacent rank swap), `rename`, `soft_delete_list`.
+
+*Proves by:* rank uniqueness; reorder swaps correctly; delete cascade; the
+carve-out **not** loosening `comment`/`review`/`review_rating` (a film-less
+comment still raises); a film merge re-points list items. No views, no
+templates, no wire.
+
+**Increment 2 — the list page, My Lists, and the nav item (read-only).**
+
+- `GET /list/<id>/` — title, byline, description, ranked rows, applause
+  count, reply count, the comment thread, and the like control posting to the
+  existing `/status/<id>/like/`.
+- `GET /lists/` — "Made by you" only. The Saved section is increment 5.
+- `templates/base.html` — "My Lists" after "My Films", with the prefix-match
+  active state.
+- `social/profile.html` — the "Lists" tab joins the existing `.tabs` nav.
+- `/status/<id>/` for a LIST status redirects to `/list/<id>/`.
+
+*Proves by:* rendering as a member over a fixture list — ranked order correct,
+the like control's `data-url` names the **status** not the list, the redirect
+fires. **Lists exist only from fixtures here; there is no create UI until
+increment 3.**
+
+**Increment 3 — authoring: create, edit, reorder.**
+
+- `/lists/new/` and `/list/<id>/edit/` — title, description, add films via
+  TMDB search, remove, reorder up/down.
+- Every write goes through increment 1's service functions; the list's `Status`
+  gets `edited_date`.
+- Owner-only; a non-owner is refused.
+
+*Proves by:* creating through the real POST route, editing, reordering and
+re-rendering to see the new order, and a non-owner turned away. Then the owner
+drives it in a browser on the deployed box.
+
+**Increment 4 — the feed row.**
+
+**The risk here is inverted and worth naming.** `Status.feed_for` filters on
+user, `deleted` and `reply_parent` — never on `status_type`. The moment
+increment 1 lands, LIST statuses are *already* in every follower's timeline,
+rendering as a film-less row. The design has to arrive before that is visible,
+which is why this is its own increment and why increment 1 ships with no UI.
+
+- `FeedEntry` gains a list shape (title, poster strip, film count) and a
+  `KIND_RANK_*` for the tiebreak, with `source_id` keyed on the list's own row
+  so the cursor pages off the right thing.
+- `templates/_feed_row.html` gains the `.list-strip` branch. Because
+  `/feed/page/` includes this same partial, both routes change in the same
+  commit — that is the whole reason the partial exists.
+- The reply-control gate moves (see finding 2 above).
+- Standing constraints checked, not assumed: no third column, no
+  virtualisation, no mid-scroll deep link, no live updates. The row is an
+  ordinary `<li>` in the existing `.review-list`.
+
+*Proves by:* a followed user's list appearing in the follower's feed, and the
+fragment route rendering byte-identical HTML to the full page for the same row.
+
+**Increment 5 — saving.**
+
+- `POST /list/<id>/save/` and `POST /list/<id>/unsave/` — login-required,
+  CSRF, **idempotent**: a double save is one row, the same discipline as the
+  like toggle.
+- Save / Saved state on the list page; the "Saved" section on `/lists/`, each
+  card labelled "saved from @user".
+- Silent per L6: no producer, no ledger row.
+- A pointer per L2: the card and the page always read the live list; the
+  creator's delete cascades yours away.
+
+*Proves by:* save → appears → unsave → gone; double-save is one row; the card
+names the **creator**, not the saver; and the notification ledger row count is
+**unchanged** by a save — which is what proves silence rather than merely
+failing to display it.
+
+**Increment 6 — federation outbound.**
+
+- Out as a `Note`: content is the title, the description, and the films
+  written out in rank order, so a Mastodon follower reads a real post today
+  and can applaud and reply with no change on their side.
+- A ReelTalk-namespaced extension carries the structured ranked items
+  (tmdb/imdb ids + rank + the list's own id) so ReelTalk↔ReelTalk rebuilds
+  the ranking instead of parsing prose.
+- `Update` re-broadcasts on every edit — rename, add, remove, reorder —
+  because L1 makes the list live and L11 says the wire must follow.
+- Delivery through the existing `_status_targets` helper; `Delete` tombstone on
+  soft-delete.
+
+*Proves by:* the outgoing document asserted in tests, then live against the
+Mastodon 4.7.2 peer — the owner follows, sees the list as a post, favourites
+it, and the like lands back here.
+
+**Increment 7 — federation inbound, and saving a remote list.**
+
+- The inbox recognises our extension on a `Note` and mirrors it as a remote
+  `FilmList` + `ListItem`s, keyed on remote URL the way status mirrors are.
+- A remote list renders on `/list/<id>/` with a "mirrored from" byline.
+- Saving a remote list works (L12) — the save points at the mirror row.
+- Remote applause and replies land on the mirrored `Status` through the
+  existing `Like`/`Create` handlers; the work is proving they route, not
+  writing new ones.
+- A remote edit arrives as `Update` and rewrites the mirror's items with the
+  diff-not-append discipline the mentions arc established.
+
+*Proves by:* unit tests plus the live round-trip the owner drives from
+`upallnight.minnix.dev`.
+
+### Open questions, to settle as each increment reaches them
+
+1. **Feed strip length** — a rendered mock showed all 7 posters and the row
+   measured 111px tall. Cap it (8? 10?) with a `+N`, or let a 40-film list
+   make a very tall feed row?
+2. **List page length** — a 200-film list is a long page. Paginate or not?
+   (Distinct from the genre subfeed's numbered links, which stay exactly as
+   they are.)
+3. **`/lists/` or `/my-lists/`?**
+4. **Empty states** — no lists made, nothing saved.
+5. **A saved list the creator deletes** — CASCADE means it silently vanishes
+   from your Saved. That is what L2 implies; confirm it is acceptable rather
+   than wanting a "this list is gone" row.
+6. **The profile "Lists" tab when empty** — shown or hidden?
+7. **The "Save list" button weight** — `.btn` is the lit crimson control.
+   Right weight for a save, or too loud next to a primary action?
+8. **Duplicate list titles per user** — allowed, presumably.
+
+### Gate
+
+Baseline **2189 passed + 5 skipped**. `docker compose run --rm web pytest`;
+`ruff check . && ruff format --check .`; `makemigrations --check` clean.
+Every new file takes a clean-room param test, and non-vacuity is proven by
+explicit mutation and stated in the record. Per the standing rule: on anything
+visual, **deploy and get the owner's browser review before running the full
+gate.**
+
+### Rendered reference
+
+A static mockup of the three screens (feed row, My Lists, the list page) was
+built against the real `reeltalk.css`, the real vendored fonts, and real
+posters copied out of the running container, and reviewed by the owner in a
+browser on 2026-10-06. The staging directory was
+`.qwen/tmp/lists-mock/` (throwaway, not committed). The new CSS classes it
+introduced — `.list-strip`, `.list-strip-title`, `.list-strip-count`,
+`.list-strip-posters`, `.list-card`, `.list-mosaic`, `.list-card-name`,
+`.list-card-meta`, `.list-page-head`, `.rank-row`, `.rank-num` — are the
+starting point, not a settled design.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -6477,3 +6785,5 @@ not an optimisation.
 - **R134 — The like button becomes the owner's stamped applaud control; the count is a sibling that overlaps the art's right cap, and the four stamps are resampled onto one registered border so the control stops jumping (owner decisions 2026-10-05, taken against rendered variants rather than descriptions).** Six things the artwork forced that are not visible in the source files. **(1) The four stamps were drawn at different sizes and at different vertical centres.** Border rects: default 1338×371, hover 1381×394, active 1297×378, applauded 1366×391 — a ~6% spread with a 24px centre drift between hover and applauded. Shipped as drawn, hovering or applauding visibly jumped the control. All four are resampled onto one registered 730×208 border centred in a 758×236 canvas, which is why the shipped PNGs are that size and not the originals' 2172×724. **How to apply:** any future state of this artwork must be registered to the same border before it ships, not dropped in at its own size. **(2) The baked word fills the pill to 95% of its width, so the count cannot live inside the art.** Measured, not assumed — an earlier reading of the alpha *ink* bbox landed outside the button and produced a wrong "there's plenty of room"; the interior is solid opaque. **How to apply:** do not try to move the count inside the pill. It needs the art redrawn with a shorter word. **(3) The count is a sibling of the button, never its child** — a number must not toggle anything when clicked. It is styled off the button's own `aria-pressed` with the general-sibling combinator (`~`), so there is no second copy of the state to keep in step. **(4) The overlap is exactly 6px and the height is exactly 2.2rem, both for measured reasons.** The count box covers the button's rounded right cap so the pair reads as one shape with a divider. 6px is the ceiling: the baked word ends ~6.7px from the button's right edge at this size, so deeper clips the "d" in "Applaud". The height is 2.2rem rather than the button's 2.5rem because the art carries a transparent margin — the visible outline is 208 of the 236 source height, so 2.2rem is the button's *visible* height and puts the two outlines level. Its fill is the art's own interior (`rgba(7,7,7,.99)` unliked, `rgba(11,1,1,.99)` applauded) so the join shows no tonal step. **How to apply:** if the button's rendered size changes, both numbers must be recomputed from the art's border rect, not scaled by eye. **(5) There is no applauded-and-hovered art, and the obvious fallback is wrong.** Falling back to the plain hover state would flip the baked word back to "Applaud" on a post you have already applauded — the word is baked in, so this is not a colour choice that CSS can fix. The hover lift is `filter: brightness(1.22)` on the applauded art instead, so the word stays true and the control still answers the cursor. **(6) The base `button` rule is a trap for anything placed in `.review-head`.** `button, .btn` carries `margin-top: 1rem`; the new `.applaud-btn` did not reset it and hung ~16px below the avatar it was meant to line up with. The old `.like-btn` had the reset and it was dropped in the rewrite. **How to apply:** any control added to that row must reset `margin-top` explicitly — the base rule is not opt-in. **Naming, deliberately unchanged:** the model, the routes, the ActivityPub wire and `Notification.Kind.LIKE` all stay `like`; only UI copy moved to "applaud". `get_kind_display` has no callers, so the enum's human label is model-internal and leaving it did not leak the old word. **Process decision that came out of this increment, and now governs design work:** deploy and get the owner's browser review **before** running the full gate, not after — the gate costs ~30 minutes and a design change routinely needs two or three visual rounds, so running it first burns a cycle every time the answer is "no".
 
 - **R135 — The applaud control becomes a bare 26px clapperboard icon whose resting state reports WHO applauded; the supplied glow art is dropped and hover is a uniform scale (owner decisions 2026-10-05, taken against rendered variants).** Six things worth keeping. **(1) The resting icon carries three states, not two.** Solid red when the applause is yours, red outline when others applauded and you did not, white outline when nobody has. **How to apply:** this is a three-way state, not a boolean — any new surface that shows applause must derive all three, and must derive them from the server's answer rather than incrementing client-side, or the icon and the tally are permitted to drift. **(2) Both facts were already on the row.** `liked_by_viewer` picks mine-vs-not and `like_count` picks others-vs-nobody, so the richer state cost no model change and no extra query. Worth checking for that before proposing schema work. **(3) Hover must repeat the base-rule resets on the hover selector.** `button:hover, .btn:hover` paints a five-stop red bloom and `button:hover` adds `filter: brightness(1.1)`; both are (0,1,1) and outspecify the (0,1,0) `.applaud-btn` resets, so the class-level `box-shadow: none` loses exactly when the cursor arrives. `.applaud-btn:hover` therefore carries `box-shadow: none; filter: none` alongside its transform. **How to apply:** any control opting out of the base button chrome must repeat those resets on the hover selector too — the base-rule reset alone does not cover hover. This is the second bite from the same rule; the first was `margin-top: 1rem`. **(4) Brightness cannot serve as a hover lift on near-white art.** The idle icon sits at 253,253,253, so `brightness()` clamps at 255 and produces nothing visible there, while the same lift is clearly visible on the red art — which would have made the three states feel inconsistent rather than uniform. `scale(1.08)` registers on all three and is paint-only, so nothing reflows. **How to apply:** before choosing a brightness-based affordance, check the lightest value in the artwork; if it is near 255 the affordance is a no-op there. **(5) The supplied white-glow hover art is deliberately unused, and the dead assets are deleted.** The owner rejected the outside glow. The four pill PNGs from R134 and the glow PNG are all removed, because `ManifestStaticFilesStorage` hashes and ships every file in the static tree whether or not a rule points at it — an orphan asset is ~250KB of dead weight per file, forever. The whole control is now three PNGs totalling ~43KB against the pill's ~1MB. **How to apply:** after replacing an asset, grep for references and delete the orphans rather than leaving them "in case". **(6) The three shipped PNGs were drawn at different sizes and are registered by core area.** At alpha≥200 the clapperboard bodies measured 1059×973 (white outline), 1028×976 (red outline) and 1023×989 (solid red). They are scaled to a common geometric mean and pasted so the core centre lands on the canvas centre, which keeps the clapperboard still across state changes; registering by ink bbox shifts it. The recipe and the numbers live in the `.applaud` comment in `reeltalk.css`. **How to apply:** any future state of this artwork must be registered the same way before it ships. **Also settled this increment: verify a hover with a browser, not with the cascade.** The glow the owner reported was real and my first two explanations of it were wrong; hovering the element in headless Chromium via `playwright-core` and reading `getComputedStyle` settled it in one run. **Process rule now governing all design work:** deploy and get the owner's browser review **before** running the full gate, not after.
+
+- **R137 — User-made lists of films: the thirteen shape decisions that settle the feature before a line of it is written (owner decisions 2026-10-06, taken in a planning session that built nothing).** Full plan in **§2K**; the numbered list L1–L13 lives there. The decisions, in brief: **L1** freely editable forever; **L2** save is a live pointer labelled "saved from @user", cascading away with the creator's delete; **L3** ranked 1..N with up/down reorder; **L4** public only; **L5** films are added only from the list page, via TMDB search — one door, not four; **L6** saving is silent, so no new `Notification.Kind` is ever added; **L7** a "Lists" tab on profiles; **L8** a list's film row is poster + title + year and nothing more; **L9** a list gets a **post face** — a `Status` row stands for it socially; **L10** canonical `/list/<id>/`, with `/status/<id>/` redirecting to it; **L11** federates as a `Note` plus a ReelTalk-namespaced extension; **L12** any visible list is savable, remote mirrors included; **L13** a reply to a list carries **no `status_type`**. **L13 is the load-bearing one and the reason is a rule, not a preference:** `Status.save` raises on a typed status with no film, and `add_reply` labels its row `comment` while copying `film_id` off the parent — so a reply to a film-less list is rejected outright. Leaving the reply untyped was chosen because `activitypub/statuses.py:422` already does exactly that on the inbound path (`Status.Type.COMMENT if film is not None else None`), because **no production query reads the `comment` value at all** — every type filter asks for `REVIEW_TYPES` — and because it keeps the film rule one sentence with one exemption instead of two. **Verified before choosing, because the owner asked directly whether commenting would still work:** the thread is built from `reply_parent` and never from `status_type` (`reply_counts` filters on `reply_parent_id`, `deleted`, `suspended_at`), the reply producer keys on the parent's author and the notifications app never consults the type, and comments were never feed rows anyway since `Status.feed_for` excludes every reply unconditionally. **Two findings that change the build, both recorded in §2K and worth restating here:** `Film._repoint_related` repoints only shelf films, statuses and blocked films, so **`ListItem` must be added there or a film merge silently orphans it**; and the feed row's reply-control gate `entry.interactive and entry.film` would hide the reply icon on a list row without failing anything, since a list row is interactive by `status_id` but has no film. **And the correction the brief arrived with:** `List` and `ListItem` do **not** exist in this repo — no model, view, URL, template, migration or AP type. The prior claim in the NOW block that they survived as BookWyrm inheritance was false; `PLAN.md:293-295` already said "there is no lists app." The feature is greenfield on top of the existing post machinery, which is the only reason seven increments covers it.
