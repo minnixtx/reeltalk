@@ -701,7 +701,9 @@ def test_the_reply_endpoint_now_accepts_a_remote_post(alice, dune):
 def test_a_mirror_post_page_now_offers_the_composer(alice, dune):
     carol = _carol()
     mirror = _mirror_review(dune, carol)
-    body = _login("alice").get(f"/status/{mirror.pk}/").content.decode()
+    # ?reply=1 since the 2026-10-05 pass: the composer is collapsed until
+    # the reply icon asks for it, and that param is the asking.
+    body = _login("alice").get(f"/status/{mirror.pk}/?reply=1").content.decode()
     assert f'action="/status/{mirror.pk}/reply/"' in body
 
 
@@ -724,6 +726,13 @@ def test_a_post_with_no_film_offers_no_composer_and_the_route_refuses_one(alice,
     body = _login("alice").get(f"/status/{filmless.pk}/").content.decode()
     assert "A note about nothing in particular." in body  # the page rendered…
     assert "reply-form" not in body  # …with no composer
+    # …and no reply control either, since the 2026-10-05 pass: the icon is
+    # the door to the composer, so a page that cannot host one must not show
+    # the door. Asked for directly, still nothing.
+    assert 'class="reply-btn"' not in body
+    asked = _login("alice").get(f"/status/{filmless.pk}/?reply=1").content.decode()
+    assert "reply-form" not in asked
+    assert 'class="reply-btn"' not in asked
 
     response = _login("alice").post(f"/status/{filmless.pk}/reply/", {"content": "hi"})
     assert response.status_code == 400

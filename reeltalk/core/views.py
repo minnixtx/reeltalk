@@ -269,6 +269,14 @@ def status_detail(request, status_id):
             # the profile cannot drift on who may report what.
             "can_report": can_report,
             "already_reported": already_reported,
+            # Whether the reply composer renders (owner pass, 2026-10-05).
+            # Read off the query string rather than held in any server- or
+            # client-side state: the reply icon's href *is* ``?reply=1``, so
+            # the flag that opens the composer is the same thing the control
+            # already carries and there is nothing second to keep in step.
+            # Anything other than exactly "1" leaves it closed, which is
+            # what a bare ``/status/<id>/`` arrives as.
+            "reply_open": request.GET.get("reply") == "1",
         },
     )
 

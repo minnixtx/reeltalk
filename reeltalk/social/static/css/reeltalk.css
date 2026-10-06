@@ -56,7 +56,16 @@
   --bg: var(--black);
   --fg: var(--cream);
   --muted: var(--cream-muted);
-  --accent: #e0554a;   /* theatrical red for links/interactive (not full neon) */
+  --accent: #e0554a;   /* theatrical red for focus rings, field borders, watchlist */
+  /* Anchor text, resting and hovered (owner pass, 2026-10-05). Split out of
+     --accent on purpose: the focus ring and the field borders keep the old
+     muted #e0554a, while link text moves to the core of the solid-red
+     clapperboard so the two read as the same red. Measured off
+     applaud-solid-red.png at alpha>=200, where the mode is fc0a13.
+     Hover deliberately equals resting: the old hover went brighter than the
+     resting colour, and once resting moved to #fc0a13 a hover back down to
+     --accent would have read as de-emphasis. */
+  --link: #fc0a13;
   --border: var(--line);
   --error: #ff5a3c;
   --surface: var(--panel);
@@ -130,7 +139,7 @@ body {
 }
 
 a {
-  color: var(--accent);
+  color: var(--link);
 }
 
 .container {
@@ -209,7 +218,7 @@ a {
 }
 
 .header-user a:hover {
-  color: var(--red-bright);
+  color: var(--link);
 }
 
 /* The signed-in handle is the only item on this side — kept lit like a
@@ -223,7 +232,7 @@ a {
 }
 
 .header-user .user-name:hover {
-  color: var(--red-bright);
+  color: var(--link);
 }
 
 /* Nav row under the marquee, centered under the search box; the active page
@@ -252,7 +261,7 @@ a {
    (owner decision, 2026-10-04). With the resting colour now white, the old
    brighter-cream hover would have been no feedback at all. */
 .site-nav a:hover {
-  color: var(--red-bright);
+  color: var(--link);
 }
 
 .site-nav a.active {
@@ -295,8 +304,11 @@ a {
   letter-spacing: 0.02em;
 }
 
+/* Log out is a <button> styled as nav text, so it takes the anchor hover red
+   too — the owner's call on 2026-10-05: two different reds side by side in
+   one nav row reads as a mistake, not as two kinds of thing. */
 .site-nav form.inline button:hover {
-  color: var(--red-bright);
+  color: var(--link);
 }
 
 /* Narrow screens: the search box drops to its own full-width line so the
@@ -620,8 +632,8 @@ ul.errorlist {
 
 .feed-older:hover,
 .feed-older:focus-visible {
-  color: var(--red-bright);
-  border-bottom-color: var(--red-bright);
+  color: var(--link);
+  border-bottom-color: var(--link);
 }
 
 /* The end of the feed (§2I increment 3, R132 decision 7). It lives inside the
@@ -757,6 +769,71 @@ ul.errorlist {
    white and never tracks the icon: the icon alone carries who applauded, so a
    red number would be a second, redundant copy of that signal. */
 .applaud-count {
+  font-family: ui-monospace, "DejaVu Sans Mono", "Liberation Mono", monospace;
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--white);
+}
+
+/* Reply control (owner pass, 2026-10-05). Sits immediately after the applaud
+   control and follows the same visual contract — 26px icon, plain monospace
+   count, no border, uniform scale(1.08) on hover with the same load-bearing
+   box-shadow/filter resets against the base `button:hover` bloom.
+
+   TWO states, not three. The owner chose these over the applaud's three on the
+   grounds that the third state would have had to mean "you replied", and a
+   reply is not reversible the way a like is — nothing this control does can
+   take one back, so an icon claiming authorship of a reply would be a claim
+   the control cannot act on.
+
+     post has replies  -> red outline  data-state="others"
+     no replies yet    -> white outline data-state="idle"
+
+   The solid-red artwork was therefore NOT shipped: ManifestStaticFilesStorage
+   hashes and serves every file in the static tree whether or not a rule
+   points at it, so an unused PNG is dead weight on every deploy.
+
+   Unlike the applaud this is an <a>, not a <button> — it navigates rather
+   than toggling, so it must be a real link for middle-click, open-in-new-tab
+   and Tab order. Two consequences handled here rather than in the template:
+   `transform` does not apply to a non-replaced inline element, hence
+   display: inline-block; and the base `a` rule gives it --link, which must
+   be overridden to keep the icon's own ink as the only colour on it. */
+.reply {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+}
+
+.reply-btn {
+  display: inline-block;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: url("../images/reply-icon-idle.png") center / contain no-repeat;
+  background-color: transparent;
+  box-shadow: none;
+  text-shadow: none;
+  margin-top: 0;
+  cursor: pointer;
+}
+
+.reply-btn[data-state="others"] {
+  background-image: url("../images/reply-icon-others.png");
+}
+
+.reply-btn:hover,
+.reply-btn:focus-visible {
+  transform: scale(1.08);
+  box-shadow: none;
+  filter: none;
+}
+
+/* Same mono treatment and the same always-white rule as .applaud-count: the
+   number is a count, not a status, and the icon carries the status. */
+.reply-count {
   font-family: ui-monospace, "DejaVu Sans Mono", "Liberation Mono", monospace;
   font-weight: 700;
   font-size: 1rem;
@@ -969,7 +1046,7 @@ ul.errorlist {
 }
 
 .tabs a:hover {
-  color: var(--accent);
+  color: var(--link);
 }
 
 .tabs a.active {
@@ -1012,7 +1089,7 @@ ul.errorlist {
 }
 
 .film-row a:hover {
-  color: var(--accent);
+  color: var(--link);
 }
 
 /* --- Home feed (M1 increment 6) -------------------------------------------- */
@@ -1654,7 +1731,7 @@ button:disabled {
    and :hover matches spans too — an unscoped rule would make the dead text
    light up as if it were clickable. */
 a.trending-film:hover {
-  color: var(--red-bright);
+  color: var(--link);
   text-decoration: underline;
 }
 

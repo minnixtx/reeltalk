@@ -410,14 +410,26 @@ def test_feed_row_shows_the_like_count(alice, bob, dune, admin):
     assert 'aria-pressed="true"' in body
 
 
+def _applaud_states(body) -> list[str]:
+    """The ``data-state`` of every applaud button on the page, in order.
+
+    Scoped to the applaud control rather than read off the whole body. The
+    reply control added on the 2026-10-05 pass carries its own
+    ``data-state="idle"`` on any post with no replies, so a page-wide
+    ``'data-state="idle"' not in body`` stopped meaning anything the moment
+    both controls shared the attribute name — it would fail on a page whose
+    applaud icons were all perfectly correct. Reading the attribute off the
+    element that owns it is the only version of this assertion that still
+    asserts something.
+    """
+    return re.findall(r'class="applaud-btn"[^>]*?data-state="([a-z]+)"', body)
+
+
 @pytest.mark.django_db
 def test_feed_icon_state_is_idle_when_nothing_has_been_applauded(alice, bob, dune, admin):
     _review(alice, dune)
     bob.follows.add(alice)
-    body = _home(_login("bob"))
-    assert 'data-state="idle"' in body
-    assert 'data-state="others"' not in body
-    assert 'data-state="mine"' not in body
+    assert _applaud_states(_home(_login("bob"))) == ["idle"]
 
 
 @pytest.mark.django_db
@@ -429,12 +441,9 @@ def test_feed_icon_state_is_others_when_only_someone_else_applauded(
     carol.follows.add(alice)
     Like.objects.create(user=carol, status=status)
     bob.follows.add(alice)
-    body = _home(_login("bob"))
     # Bob sees that the post IS applauded without having done it himself, so
     # the icon is the red outline rather than the white one.
-    assert 'data-state="others"' in body
-    assert 'data-state="idle"' not in body
-    assert 'data-state="mine"' not in body
+    assert _applaud_states(_home(_login("bob"))) == ["others"]
 
 
 @pytest.mark.django_db
@@ -442,10 +451,7 @@ def test_feed_icon_state_is_mine_when_the_viewer_applauded(alice, bob, dune, adm
     status = _review(alice, dune)
     bob.follows.add(alice)
     Like.objects.create(user=bob, status=status)
-    body = _home(_login("bob"))
-    assert 'data-state="mine"' in body
-    assert 'data-state="others"' not in body
-    assert 'data-state="idle"' not in body
+    assert _applaud_states(_home(_login("bob"))) == ["mine"]
 
 
 @pytest.mark.django_db
@@ -459,9 +465,7 @@ def test_mine_wins_over_others_when_both_applauded(alice, bob, dune, admin):
     bob.follows.add(alice)
     Like.objects.create(user=carol, status=status)
     Like.objects.create(user=bob, status=status)
-    body = _home(_login("bob"))
-    assert 'data-state="mine"' in body
-    assert 'data-state="others"' not in body
+    assert _applaud_states(_home(_login("bob"))) == ["mine"]
 
 
 @pytest.mark.django_db

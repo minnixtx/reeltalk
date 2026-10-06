@@ -33,6 +33,27 @@
     {% elif like_count %}
       <span class="muted">Applauded {{ like_count }} time{{ like_count|pluralize }}</span>
     {% endif %}
+    {% comment %}
+    The reply control, beside the applaud one (owner pass, 2026-10-05).
+    Same two-state ink as the feed row: red outline when the thread has
+    replies, white outline when it does not.
+
+    The count here is ``replies|length`` — the block-filtered thread count
+    the heading already shows — not the viewer-independent feed tally.
+    That is the pre-existing R85 split between the two numbers, kept rather
+    than silently unified: this page hides the blocked rows, so it must
+    count what it renders.
+
+    Gated on ``status.film`` for the same reason the composer is: a post
+    with no film behind it cannot be replied to at all, so the offer is
+    withheld rather than offered and refused.
+    {% endcomment %}
+    {% if user.is_authenticated and status.film %}
+      <span class="reply">
+        <a class="reply-btn" href="?reply=1" data-state="{% if replies|length %}others{% else %}idle{% endif %}" title="{% if replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply to this post{% else %}Reply to this post{% endif %}"></a>
+        <span class="reply-count" aria-live="polite">{{ replies|length }}</span>
+      </span>
+    {% endif %}
   </div>
   {% if status.film %}
     <div class="feed-item">
@@ -97,13 +118,24 @@
     <p class="muted no-replies">No replies yet.</p>
   {% endif %}
 </section>
-{% if user.is_authenticated and status.film %}
+{% if user.is_authenticated and status.film and reply_open %}
   {% comment %}
   The composer (increment 4). It answers the post you are reading, so a
   composed reply is a direct reply to this status — answering one specific
   turn in the thread is not part of v0.1's surface. A mirror gets one now:
   increment 5 delivers the threaded Create, and note_reference makes its
   inReplyTo the parent's home URL rather than a copy of it minted here.
+
+  ``reply_open`` is new (owner pass, 2026-10-05): the composer is no longer
+  on the page the moment you arrive. It renders only when the URL carries
+  ``?reply=1``, which is exactly what the reply icon puts there. Doing this
+  server-side rather than by hiding the form with CSS and revealing it on
+  click is the whole point — a member with JavaScript disabled still gets a
+  reachable, working composer, because the server put it in the HTML rather
+  than a script deciding whether to show it. It also means arriving by
+  clicking the post body (no param) reads the post without a reply box,
+  which is the behaviour the owner asked for, and arriving from a feed
+  row's reply icon opens it automatically, from the same one flag.
 
   The gate is status.film, not locality, because a reply inherits the film
   it is talking about and Status.save refuses a typed status with none. A
@@ -113,10 +145,14 @@
   (R85: the route refuses what the page withholds, and only what it
   withholds).
   {% endcomment %}
+  {# autofocus rides on the textarea because the only way this form renders #}
+  {# is a deliberate click on the reply icon — the browser's own focus-and- #}
+  {# scroll does the work a script would otherwise have to do, and does it #}
+  {# before first paint rather than after it. #}
   <form class="reply-form" method="post" action="{% url 'status-reply' status.id %}">
     {% csrf_token %}
     <label for="id_reply_content">Reply to {{ status.user.localname }}</label>
-    <textarea name="content" id="id_reply_content" rows="3" placeholder="Say something about this post…"></textarea>
+    <textarea name="content" id="id_reply_content" rows="3" placeholder="Say something about this post…" autofocus></textarea>
     <button type="submit">Reply</button>
   </form>
 {% endif %}

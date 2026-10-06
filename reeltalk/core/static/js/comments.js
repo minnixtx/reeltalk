@@ -30,6 +30,37 @@
         empty.remove();
       }
     }
+    paintReplyControl(count);
+  }
+
+  // The reply control in the post head (owner pass, 2026-10-05) carries the
+  // same number and the same two-state ink the template rendered, so a reply
+  // landing through here has to repaint both from the server's answer — the
+  // same rule likes.js follows for the applaud control, and for the same
+  // reason: a count the client had to guess is a count that can drift.
+  function paintReplyControl(count) {
+    var holder = document.querySelector(".reply");
+    if (!holder) {
+      return;
+    }
+    var shown = holder.querySelector(".reply-count");
+    if (shown) {
+      shown.textContent = count;
+    }
+    var btn = holder.querySelector(".reply-btn");
+    if (!btn) {
+      return;
+    }
+    btn.setAttribute("data-state", count > 0 ? "others" : "idle");
+    // Rebuilt to match the template's two strings exactly rather than
+    // invented fresh here, so the label on a control the server rendered and
+    // the label on the same control after a reply are not two dialects.
+    var label =
+      count > 0
+        ? count + " " + (count === 1 ? "reply" : "replies") + " — reply"
+        : "Reply";
+    btn.setAttribute("title", label);
+    btn.setAttribute("aria-label", label + " to this post");
   }
 
   function init() {

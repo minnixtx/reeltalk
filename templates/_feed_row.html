@@ -54,16 +54,30 @@ a second channel to say so.
       </span>
     {% endif %}
     {% comment %}
-    The reply count, on every row that has a post behind it —
-    mirrors included. The number is a fact about the post; the
-    offer is the composer, which lives on the post page this
-    row's timestamp already opens (R85). There is deliberately
-    no reply control on a feed row. The two-form pluralize is
-    not decoration: bare `pluralize` appends an "s" and would
-    render "2 replys".
+    The reply control (owner pass, 2026-10-05), immediately after the
+    applaud control. It replaces the plain "N replies" text, and it is the
+    ONLY way to start a reply now: clicking the row itself opens the post
+    page to read, and the reply icon opens it to answer.
+
+    Gated on `entry.film` as well as `entry.interactive`, because that is
+    exactly the composer's own gate on the post page. A post with no film
+    behind it can never be replied to at all — `Status.save` refuses a
+    typed status with no film, and a reply is a typed status — so offering
+    a reply icon on such a row would be the offer-with-no-route bug R85
+    exists to prevent. Verified against the live DB rather than inferred
+    from the model: zero live replies hang off a film-less status.
+
+    The icon is an <a> carrying ?reply=1, not a JS toggle: the same URL
+    renders the composer open server-side, so the control works with
+    JavaScript disabled and keeps middle-click and open-in-new-tab.
+
+    The count always renders, zero included, matching the applaud count.
     {% endcomment %}
-    {% if entry.status_id is not None and entry.reply_count %}
-      <span class="reply-count muted">{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:"y,ies" }}</span>
+    {% if entry.interactive and entry.film %}
+      <span class="reply">
+        <a class="reply-btn" href="{% url 'status' entry.status_id %}?reply=1" data-state="{% if entry.reply_count %}others{% else %}idle{% endif %}" title="{% if entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply to this post{% else %}Reply to this post{% endif %}"></a>
+        <span class="reply-count" aria-live="polite">{{ entry.reply_count }}</span>
+      </span>
     {% endif %}
   </div>
   {% if entry.film %}

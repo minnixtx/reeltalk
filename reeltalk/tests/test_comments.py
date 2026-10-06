@@ -502,7 +502,9 @@ def test_reply_endpoint_is_post_only(alice, dune):
 @pytest.mark.django_db
 def test_the_post_page_offers_a_composer_to_a_member_on_a_local_post(alice, dune):
     parent = _review(alice, dune)
-    body = _login("alice").get(f"/status/{parent.pk}/").content.decode()
+    # ?reply=1 is what the reply icon puts in the href, and it is the only
+    # way the composer renders now (owner pass, 2026-10-05).
+    body = _login("alice").get(f"/status/{parent.pk}/?reply=1").content.decode()
     assert (
         f'class="reply-form" method="post" action="/status/{parent.pk}/reply/"' in body
     )
@@ -510,11 +512,36 @@ def test_the_post_page_offers_a_composer_to_a_member_on_a_local_post(alice, dune
 
 
 @pytest.mark.django_db
-def test_the_post_page_offers_an_anonymous_reader_no_composer(alice, dune):
+def test_the_post_page_arrives_with_no_composer_until_the_reply_icon_is_used(alice, dune):
+    # The other half of the collapsed-composer decision, and the half that
+    # actually pins it: the same page, same member, same post, without the
+    # param, carries no composer at all. Without this test a change that
+    # always rendered the form would still satisfy every test above.
     parent = _review(alice, dune)
-    body = Client().get(f"/status/{parent.pk}/").content.decode()
-    assert "Spice must be reviewed." in body  # the page rendered…
-    assert "reply-form" not in body  # …with no composer
+    body = _login("alice").get(f"/status/{parent.pk}/").content.decode()
+    assert "Spice must be reviewed." in body  # the post rendered…
+    assert "reply-form" not in body  # …and no reply box came with it
+
+
+@pytest.mark.django_db
+def test_only_reply_1_opens_the_composer_and_other_values_do_not(alice, dune):
+    # The flag is read as exactly "1", so a stray ?reply=0 or ?reply= must
+    # not open it. Pinned because a truthiness read would have opened it for
+    # every one of these, and a bare ?reply is a plausible thing to link to.
+    parent = _review(alice, dune)
+    client = _login("alice")
+    for query in ("?reply=0", "?reply=", "?reply=yes", "?reply"):
+        body = client.get(f"/status/{parent.pk}/{query}").content.decode()
+        assert "reply-form" not in body, query
+
+
+@pytest.mark.django_db
+def test_an_anonymous_reader_gets_no_composer_with_or_without_the_param(alice, dune):
+    parent = _review(alice, dune)
+    for url in (f"/status/{parent.pk}/", f"/status/{parent.pk}/?reply=1"):
+        body = Client().get(url).content.decode()
+        assert "Spice must be reviewed." in body  # the page rendered…
+        assert "reply-form" not in body  # …with no composer, either way
 
 
 @pytest.mark.django_db
@@ -523,7 +550,7 @@ def test_the_post_page_offers_the_composer_on_a_mirror(alice, dune):
     # page offers the composer and the route accepts it (R85's two halves
     # still agree — they just agree on "yes" now).
     carol, mirror = _mirror(dune)
-    body = _login("alice").get(f"/status/{mirror.pk}/").content.decode()
+    body = _login("alice").get(f"/status/{mirror.pk}/?reply=1").content.decode()
     assert "Their review of Dune." in body
     assert f'action="/status/{mirror.pk}/reply/"' in body
 
@@ -611,22 +638,84 @@ def test_a_local_post_without_a_deleted_parent_shows_no_orphan_line(alice, dune)
     assert "has been deleted" not in body
 
 
-# --- The feed row's reply count ----------------------------------------------
+# --- The feed row's reply control -------------------------------------------
+#
+# Reworked on the owner's pass of 2026-10-05 from a text count that appeared
+# only above zero into an icon control that is always there. The icon is a
+# link to the post page carrying ?reply=1, so it opens the composer rather
+# than merely naming the thread, and the two-state ink reports whether the
+# post has replies at all.
 
 
 @pytest.mark.django_db
-def test_a_feed_row_shows_its_reply_count(alice, bob, dune, admin):
+def test_a_feed_row_shows_its_reply_control_and_count(alice, bob, dune, admin):
     alice.follows.add(bob)
     parent = _review(bob, dune)
     _reply(alice, parent)
     _reply(alice, parent)
-    body = _home(_login("alice"))
-    row = _row(body, parent.pk)
-    assert "2 replies" in row
+    row = _row(_home(_login("alice")), parent.pk)
+    assert 'class="reply-btn"' in row
+    assert f'href="/status/{parent.pk}/?reply=1"' in row
+    # Replies exist, so the ink is the red-outline state.
+    assert 'data-state="others"' in row
+    assert '<span class="reply-count" aria-live="polite">2</span>' in row
 
 
 @pytest.mark.django_db
-def test_a_mirror_row_shows_its_reply_count_and_now_its_controls(alice, dune, admin):
+def test_a_row_with_no_replies_still_shows_the_control_at_zero(alice, bob, dune, admin):
+    # The owner chose "always show, zero included" to match the applaud
+    # count, which means the old "no replies, no count" behaviour is gone.
+    # The control is present and reads 0 in the white-outline state.
+    alice.follows.add(bob)
+    parent = _review(bob, dune)
+    row = _row(_home(_login("alice")), parent.pk)
+    assert "Spice must be reviewed." in row  # the row rendered…
+    assert 'class="reply-btn"' in row
+    assert 'data-state="idle"' in row
+    assert '<span class="reply-count" aria-live="polite">0</span>' in row
+
+
+@pytest.mark.django_db
+def test_the_reply_control_is_a_link_not_a_button(alice, bob, dune, admin):
+    # It navigates, so it has to be a real anchor: a <button> would lose
+    # middle-click-open-in-new-tab and would not be a destination. The
+    # applaud control beside it is a <button> precisely because it toggles
+    # and goes nowhere — the two controls differ in element type on purpose.
+    alice.follows.add(bob)
+    parent = _review(bob, dune)
+    row = _row(_home(_login("alice")), parent.pk)
+    assert '<a class="reply-btn"' in row
+    assert '<button type="button" class="reply-btn"' not in row
+
+
+@pytest.mark.django_db
+def test_a_film_less_post_offers_no_reply_control(alice, dune, admin):
+    # A post with no film behind it can never be replied to — Status.save
+    # refuses a typed status with no film, and a reply is a typed status —
+    # so the composer is withheld on its page and the control that would
+    # open that composer is withheld here. Offering it would be the
+    # offer-with-no-route bug R85 exists to prevent.
+    note = Status.objects.create(
+        user=alice,
+        content="<p>A note with no film.</p>",
+        raw_content="A note with no film.",
+        local=False,
+        remote_url="https://remote.example/notes/filmless-1",
+    )
+    alice.follows.add(alice)
+    body = _home(_login("alice"))
+    assert f'<a class="reply-btn" href="/status={note.pk}' not in body
+    row = _row(body, note.pk)
+    assert "A note with no film." in row  # the row renders…
+    assert 'class="reply-btn"' not in row  # …with no reply offer
+    # And its page agrees: no composer even when asked for one.
+    assert "reply-form" not in _login("alice").get(
+        f"/status/{note.pk}/?reply=1"
+    ).content.decode()
+
+
+@pytest.mark.django_db
+def test_a_mirror_row_shows_its_reply_control_and_now_its_controls(alice, dune, admin):
     # Flipped by increment 5. The count was always shown on a mirror — R85
     # says a count is a fact about the post and only the *offer* was gated
     # on locality. The offer is open now, so a mirror row looks like every
@@ -638,7 +727,8 @@ def test_a_mirror_row_shows_its_reply_count_and_now_its_controls(alice, dune, ad
     own = _review(alice, Film.objects.create(title="Alice film", year=1999))
     body = _home(_login("alice"))
     mirror_row = _row(body, mirror.pk)
-    assert "1 reply" in mirror_row
+    assert 'class="reply-btn"' in mirror_row
+    assert '<span class="reply-count" aria-live="polite">1</span>' in mirror_row
     assert f'data-url="/status/{mirror.pk}/like/"' in mirror_row
     # The composer still lives only on the post page, never on a feed row
     # (R86 decision 3) — that part of the absence is not a locality gate.
@@ -647,19 +737,19 @@ def test_a_mirror_row_shows_its_reply_count_and_now_its_controls(alice, dune, ad
 
 
 @pytest.mark.django_db
-def test_a_row_with_no_replies_shows_no_count(alice, bob, dune, admin):
+def test_the_reply_control_sits_after_the_applaud_control(alice, bob, dune, admin):
+    # The owner picked applaud-then-reply. Pinned by index rather than by
+    # eyeballing a screenshot, so a reorder in the partial fails here.
     alice.follows.add(bob)
     parent = _review(bob, dune)
-    body = _home(_login("alice"))
-    row = _row(body, parent.pk)
-    assert "Spice must be reviewed." in row  # the row rendered…
-    assert "reply" not in row  # …and carries no reply count
+    row = _row(_home(_login("alice")), parent.pk)
+    assert row.index('class="applaud-btn"') < row.index('class="reply-btn"')
 
 
 @pytest.mark.django_db
-def test_a_bare_shelf_row_carries_no_reply_count(alice, dune, admin):
+def test_a_bare_shelf_row_carries_no_reply_control(alice, dune, admin):
     shelve_to_watchlist(alice, dune)
     body = _home(_login("alice"))
     row = _row(body, "none")
     assert "to their Watchlist" in row  # the row rendered…
-    assert "reply" not in row  # …and carries no reply count
+    assert "reply" not in row  # …and carries no reply control at all
