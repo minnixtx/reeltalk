@@ -48,6 +48,15 @@ page keeps its own three tabs untouched.
   <p class="muted">You haven't saved any lists yet.</p>
   {% endif %}
 {% else %}
+  {# The way in to making a list. On the made tab only — the Saved tab is #}
+  {# somebody else's lists, and a "New list" button there would be #}
+  {# offering the wrong thing. Above the empty state on purpose, so the #}
+  {# first thing a member with no lists sees is how to change that. #}
+  {% if is_self %}
+  <p class="list-toolbar">
+    <a class="btn" href="{% url 'list-create' %}">New list</a>
+  </p>
+  {% endif %}
   {% if made %}
   <ul class="list-mosaic">
     {% for made_list in made %}

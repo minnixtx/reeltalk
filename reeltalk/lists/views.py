@@ -1,23 +1,59 @@
-"""The read-only list surface (§2K increment 2, R137/R138).
+"""The list surface: the read-only pages (increment 2) and authoring (3).
 
-Two pages and nothing else: one list, and one member's lists. No create, no
-edit, no reorder, no save, no feed row, no wire — each of those is a later
-increment and the ordering is load-bearing (§2K), so lists exist only from
-fixtures here.
+Read: one list, and one member's lists. Write: create, edit, add a film,
+remove one, reorder, delete. No save button, no feed row, no wire — each of
+those is a later increment and the ordering is load-bearing (§2K).
 
-Everything social on these pages is borrowed rather than rebuilt. The like
+Everything social on the read pages is borrowed rather than rebuilt. The like
 control posts to the existing ``/status/<id>/like/`` because the thing being
 liked is the list's post face (L9), not the list row; the thread is rendered
 by the same ``_thread_rows`` helper and the same ``_reply.html`` partial the
 post page uses, so a reply row cannot look different in the two places.
+
+Every write below goes through ``reeltalk/lists/services.py`` and no line here
+touches ``FilmList`` or ``ListItem`` directly. That is the whole point of the
+service layer, and the reason the authoring form is not a ``ModelForm``.
 """
 
-from django.db.models import Count
-from django.http import Http404, HttpResponseGone
-from django.shortcuts import get_object_or_404, redirect, render
+from urllib.parse import urlencode
 
-from reeltalk.core.views import _thread_rows
-from reeltalk.lists.models import FilmList, ListSave
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.db.models import Count
+from django.http import (
+    Http404,
+    HttpResponseBadRequest,
+    HttpResponseGone,
+    JsonResponse,
+)
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.views.decorators.http import require_POST
+
+from reeltalk.core.catalog import create_or_match_film, search_local
+from reeltalk.core.models import Film
+from reeltalk.core.tmdb import TmdbError, is_configured, search_films
+from reeltalk.core.views import (
+    SUGGEST_LIMIT,
+    _blocked_tmdb_ids,
+    _local_film_ids,
+    _local_rows,
+    _thread_rows,
+    _tmdb_rows,
+)
+from reeltalk.lists.forms import ListForm
+from reeltalk.lists.models import FilmList, ListItem, ListSave
+from reeltalk.lists.services import (
+    MOVE_DOWN,
+    MOVE_UP,
+    add_films,
+    create_list,
+    move,
+    remove_film,
+    rename,
+    set_description,
+    soft_delete_list,
+)
 from reeltalk.social.views import _resolve_profile_user
 
 
@@ -82,6 +118,13 @@ def list_detail(request, list_id):
             # the reply icon carries on the post page — no second state to
             # keep in step, and it works with JavaScript switched off.
             "reply_open": request.GET.get("reply") == "1",
+            # Whose list this is, decided once here rather than re-derived in
+            # the template: the edit link is the only owner-only thing on
+            # this page, and the routes it leads to do this same check again
+            # for themselves. The comparison is on the id rather than the
+            # object so an anonymous SimpleUser cannot match by accident.
+            "is_owner": request.user.is_authenticated
+            and request.user.pk == film_list.user_id,
         },
     )
 
@@ -147,3 +190,400 @@ def user_lists(request, localname):
             "saves": saves,
         },
     )
+
+
+# --- authoring (§2K increment 3) -------------------------------------------
+
+
+def _owned_list(request, list_id):
+    """The viewer's own live list, or 404. The one owner check every write uses.
+
+    R85 says a hidden control is not a permission: if the page withholds the
+    edit controls from somebody who did not make the list, the routes behind
+    them have to refuse that person too, or the hiding is decoration. Scoping
+    the lookup to ``user=request.user`` is what does that, and it makes "not
+    yours" answer the same way "does not exist" does — which is how the rest
+    of this site says *you may not touch this* (``delete_review`` scopes its
+    lookup for exactly this reason).
+
+    ``deleted=False`` carries as much weight as the owner clause. A soft
+    delete hides a list rather than removing it, so without the filter the
+    edit route would happily take a deleted list and write to it, and the
+    save-everything-else paths would find a live row nobody can see.
+    """
+    return get_object_or_404(FilmList, pk=list_id, user=request.user, deleted=False)
+
+
+def _positive_int(raw):
+    """Parse an id from a POST body, or ``None``.
+
+    A boundary check, not a domain check. ``get_object_or_404`` on a
+    non-numeric pk raises ``ValueError`` out of the ORM and turns a
+    hand-typed form field into a 500; the answer to garbage input is 400,
+    and the answer to a well-formed number that names nothing is 404.
+    """
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _editor_redirect(request, film_list):
+    """Back to the editor, with the member's search still on screen.
+
+    The add/remove forms carry the current ``q`` and ``page`` as hidden
+    fields so a member working down a search results page can add film after
+    film without retyping the query. Nothing else is preserved: the redirect
+    is built from the two named parameters rather than from the referer, so
+    it cannot be pointed at an arbitrary URL.
+    """
+    params = {}
+    query = request.POST.get("q", "").strip()
+    if query:
+        params["q"] = query
+        page = _positive_int(request.POST.get("page"))
+        if page and page > 1:
+            params["page"] = page
+    url = reverse("list-edit", args=[film_list.pk])
+    return redirect(f"{url}?{urlencode(params)}" if params else url)
+
+
+def _add_search(request, film_list):
+    """The editor's add-film search box, as template context.
+
+    The same path the global search page takes — TMDB when a key is
+    configured, degrading to the local library on a TMDB failure rather
+    than erroring the page — and the same row shape, so a result looks the
+    same here as it does on ``/search/``. One thing is added: each row knows
+    whether it is already in this list, because a curation tool that offers
+    an "Add" button for a film that is already there reads as a broken
+    button. ``add_films`` would have skipped it silently, which is the right
+    write behaviour and the wrong thing to show.
+
+    The blocked-film exclusion lives inside the shared row builders rather
+    than being re-implemented here, which is why they are reused instead of
+    a purpose-built list search: a second copy of that filter is a second
+    place to forget it.
+    """
+    out = {"query": "", "rows": [], "source": None, "page": 1, "total_pages": 0}
+    query = request.GET.get("q", "").strip()
+    out["query"] = query
+    if not query:
+        return out
+    try:
+        page = max(1, int(request.GET.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    member_ids = set(film_list.items.values_list("film_id", flat=True))
+    member_tmdb = set(
+        Film.objects.filter(id__in=member_ids)
+        .exclude(tmdb_id__isnull=True)
+        .values_list("tmdb_id", flat=True)
+    )
+
+    if is_configured():
+        try:
+            results = search_films(query, page)
+        except TmdbError as exc:
+            messages.error(request, str(exc))
+        else:
+            rows = _tmdb_rows(results, request.user)
+            for row in rows:
+                row["in_list"] = row["tmdb_id"] in member_tmdb
+            out.update(
+                rows=rows,
+                source="tmdb",
+                page=results.page,
+                total_pages=results.total_pages,
+            )
+            return out
+
+    rows = _local_rows(search_local(query), request.user)
+    for row in rows:
+        row["in_list"] = row["film_id"] in member_ids
+    out.update(rows=rows, source="local")
+    return out
+
+
+def list_suggest(request, list_id):
+    """JSON suggestions for the editor's add-film typeahead.
+
+    Same shape, same TMDB-first-with-local-fallback rule, same blocked-film
+    exclusion and same row cap as the header's ``/search/suggest/`` — those
+    are imported rather than re-derived so the two boxes cannot drift apart.
+    Two things differ, and both are here because this picker *adds* rather
+    than *navigates*:
+
+    * each row carries the identifier the add route needs — ``tmdb_id`` for
+      a hit that is not a local film yet, ``film_id`` for one the library
+      already holds. The header box needs neither, because clicking it just
+      goes to a page.
+    * each row says whether it is already in this list, so the dropdown can
+      show that instead of offering an add that would silently do nothing.
+
+    Not ``@login_required``: this answers an XHR that parses JSON, and a 302
+    to the login page would hand it HTML where it expects a payload — the
+    same reasoning ``search_suggest`` gives for making the same choice.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "login required"}, status=401)
+    film_list = _owned_list(request, list_id)
+    query = request.GET.get("q", "").strip()
+    if len(query) < 2:
+        return JsonResponse({"results": []})
+
+    member_ids = set(film_list.items.values_list("film_id", flat=True))
+    member_tmdb = set(
+        Film.objects.filter(id__in=member_ids)
+        .exclude(tmdb_id__isnull=True)
+        .values_list("tmdb_id", flat=True)
+    )
+
+    rows = []
+    if is_configured():
+        try:
+            results = search_films(query)
+        except TmdbError:
+            results = None
+        if results is not None:
+            blocked = _blocked_tmdb_ids(request.user)
+            for hit in results.rows[:SUGGEST_LIMIT]:
+                if hit.tmdb_id in blocked:
+                    continue
+                rows.append(
+                    {
+                        "title": hit.title,
+                        "year": hit.year,
+                        "poster_url": hit.poster_url,
+                        "tmdb_id": hit.tmdb_id,
+                        "film_id": None,
+                        "in_list": hit.tmdb_id in member_tmdb,
+                    }
+                )
+    if not rows:
+        blocked = _local_film_ids(request.user)
+        for film in search_local(query, limit=SUGGEST_LIMIT):
+            if film.id in blocked:
+                continue
+            rows.append(
+                {
+                    "title": film.title,
+                    "year": film.year,
+                    "poster_url": film.poster.url if film.poster else None,
+                    "tmdb_id": None,
+                    "film_id": film.id,
+                    "in_list": film.id in member_ids,
+                }
+            )
+    return JsonResponse({"results": rows})
+
+
+@login_required
+def list_create(request):
+    """Make a list: a name and a description, then straight into the editor.
+
+    The create page deliberately does not collect films. A ranked row needs a
+    list to hang on, so the list is made first and the films come after, from
+    the editor's search — which is the single add door L5 asks for either
+    way. The alternative, collecting films before the list exists, means
+    holding a half-made list somewhere between the two steps, and this stack
+    has no session machinery for that and no reason to grow any.
+
+    ``create_list`` takes the **raw markdown** and renders it itself. Nothing
+    here renders the description, and nothing here writes a ``FilmList``.
+    """
+    if request.method == "POST":
+        form = ListForm(request.POST)
+        if form.is_valid():
+            film_list = create_list(
+                request.user,
+                title=form.cleaned_data["title"],
+                description=form.cleaned_data["description"],
+            )
+            messages.success(request, "List created — now add some films.")
+            return redirect("list-edit", list_id=film_list.pk)
+    else:
+        form = ListForm()
+    return render(request, "lists/create.html", {"form": form})
+
+
+@login_required
+def list_edit(request, list_id):
+    """Edit the member's own list: its text, its films, their order.
+
+    The name and description are one form and one submit. Each half is
+    written **only if it changed**, so pressing save without changing
+    anything cannot stamp the post face as edited — an edited stamp the wire
+    reports as ``editedTime`` has to mean something.
+
+    The film rows are not part of this form. Add, remove and reorder are each
+    their own POST, because they act on one row at a time and a single form
+    covering all of them would have to reconcile the whole ranking on every
+    submit, which is a far bigger and far easier-to-get-wrong write than the
+    adjacent swap ``services.move`` actually performs.
+    """
+    film_list = _owned_list(request, list_id)
+    if request.method == "POST":
+        form = ListForm(request.POST)
+        if form.is_valid():
+            title = form.cleaned_data["title"]
+            description = form.cleaned_data["description"]
+            changed = False
+            if title != film_list.title:
+                rename(film_list, title)
+                changed = True
+            if description != film_list.raw_description:
+                set_description(film_list, description)
+                changed = True
+            messages.success(request, "List updated." if changed else "Saved.")
+            return redirect("list-edit", list_id=film_list.pk)
+    else:
+        form = ListForm(
+            initial={
+                "title": film_list.title,
+                "description": film_list.raw_description,
+            }
+        )
+    return render(
+        request,
+        "lists/edit.html",
+        {
+            "film_list": film_list,
+            "form": form,
+            "items": list(
+                film_list.items.select_related("film").order_by("rank", "id")
+            ),
+            "search": _add_search(request, film_list),
+        },
+    )
+
+
+@login_required
+@require_POST
+def list_add_film(request, list_id):
+    """Add one film to the member's own list, from the editor's search box.
+
+    Two ways in, matching the two sources the search box answers from. A
+    ``tmdb_id`` runs the existing D7 find-or-create so the hit becomes a
+    local film first — the same call the global search's one-click watchlist
+    makes, so a film added to a list is created exactly the way it would be
+    added to a watchlist, not a second way. A ``film_id`` adds a film the
+    library already holds, which is all the no-TMDB-key fallback can offer,
+    since its rows are local films already.
+
+    Duplicate adds are a no-op with an "already in here" message rather than
+    an error: ``add_films`` skips what is already present, so a double-click
+    cannot fail, and the member still gets told why the row count did not move.
+    """
+    film_list = _owned_list(request, list_id)
+    tmdb_id = request.POST.get("tmdb_id")
+    film_id = request.POST.get("film_id")
+    if bool(tmdb_id) == bool(film_id):
+        return HttpResponseBadRequest("Expected exactly one of tmdb_id or film_id.")
+
+    if tmdb_id:
+        key = _positive_int(tmdb_id)
+        if key is None:
+            return HttpResponseBadRequest("Malformed tmdb_id.")
+        try:
+            film = create_or_match_film(key)
+        except TmdbError as exc:
+            messages.error(request, str(exc))
+            return _editor_redirect(request, film_list)
+    else:
+        key = _positive_int(film_id)
+        if key is None:
+            return HttpResponseBadRequest("Malformed film_id.")
+        try:
+            film = Film.objects.get(pk=key)
+        except Film.DoesNotExist:
+            raise Http404 from None
+
+    if add_films(film_list, [film]):
+        messages.success(request, f"Added “{film.title}”.")
+    else:
+        messages.info(request, f"“{film.title}” is already in this list.")
+    return _editor_redirect(request, film_list)
+
+
+@login_required
+@require_POST
+def list_remove_film(request, list_id):
+    """Take one film out of the member's own list.
+
+    The rank gap the removal leaves is left exactly as ``remove_film`` leaves
+    it. The editor prints ``forloop.counter`` like the list page does, so the
+    visible numbering stays 1..N while the ranks underneath keep the holes
+    they were given — nothing here renumbers to tidy them, which would break
+    the read side's whole reason for not printing ``rank``.
+    """
+    film_list = _owned_list(request, list_id)
+    key = _positive_int(request.POST.get("film_id"))
+    if key is None:
+        return HttpResponseBadRequest("Malformed film_id.")
+    try:
+        film = Film.objects.get(pk=key)
+    except Film.DoesNotExist:
+        raise Http404 from None
+
+    if remove_film(film_list, film):
+        messages.success(request, f"Removed “{film.title}”.")
+    else:
+        messages.info(request, f"“{film.title}” is not in this list.")
+    return _editor_redirect(request, film_list)
+
+
+@login_required
+@require_POST
+def list_move(request, list_id):
+    """Move one row up or down inside the member's own list.
+
+    The direction is checked at the boundary, and that is the only check here.
+    ``services.move`` *raises* on an unrecognised direction because that is a
+    caller's typo; a hand-typed form field is not a caller's typo, so it gets
+    a 400 rather than a 500. The ends are the opposite case and are
+    deliberately not pre-checked: ``move`` returns ``False`` there because
+    "already first" is a normal outcome of pressing the button, and the view
+    passes that straight through to an "already first" message.
+    """
+    film_list = _owned_list(request, list_id)
+    direction = request.POST.get("direction")
+    if direction not in (MOVE_UP, MOVE_DOWN):
+        return HttpResponseBadRequest("direction must be 'up' or 'down'.")
+    key = _positive_int(request.POST.get("item_id"))
+    if key is None:
+        return HttpResponseBadRequest("Malformed item_id.")
+    # Scoped to this list, so an item id from somebody else's list 404s
+    # rather than being moved inside ours.
+    item = get_object_or_404(ListItem, pk=key, film_list=film_list)
+
+    if move(item, direction):
+        label = "up" if direction == MOVE_UP else "down"
+        messages.success(request, f"Moved “{item.film.title}” {label}.")
+    else:
+        end = "first" if direction == MOVE_UP else "last"
+        messages.info(request, f"“{item.film.title}” is already {end}.")
+    return _editor_redirect(request, film_list)
+
+
+@login_required
+@require_POST
+def list_delete(request, list_id):
+    """Take the member's own list down, together with its post face.
+
+    This route exists because of the edge increment 2 left open.
+    ``delete_review`` looks up a ``Status``, and a list's face is a
+    ``Status``, so a crafted POST to that route could soft-delete the face on
+    its own and leave a live ``FilmList`` whose social half is gone — a list
+    that can be read but never applauded, replied to, or seen in a feed. That
+    route now refuses a ``LIST`` status outright, so the only way to delete a
+    list is through this one, which calls ``soft_delete_list`` and takes both
+    halves down in one transaction.
+    """
+    film_list = _owned_list(request, list_id)
+    title = film_list.title
+    soft_delete_list(film_list)
+    messages.success(request, f"Deleted “{title}”.")
+    return redirect("user-lists", localname=request.user.localname)

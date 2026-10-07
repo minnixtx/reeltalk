@@ -2091,3 +2091,274 @@ form.inline button,
   text-transform: uppercase;
   color: var(--muted);
 }
+
+/* --- List authoring (§2K increment 3) -------------------------------------
+   The create page, the editor, and the maker's link into it. Two traps here
+   are the same class the reply composer's comment calls out: a bare
+   <textarea> and a bare input[type=search] both render browser-default on
+   this dark theme, and neither shows up in a diff — only a browser catches
+   it. Both are given the field treatment explicitly below. */
+
+.list-edit-section {
+  margin: 1.75rem 0;
+}
+
+.list-edit-section h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.5rem;
+}
+
+/* The description field. Same values as .reply-form textarea, copied rather
+   than shared so this section stays self-contained. */
+.list-text-form textarea {
+  width: 100%;
+  max-width: 42rem;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  color: inherit;
+  background: var(--field);
+  border: 1px solid var(--brown);
+  border-radius: 4px;
+  margin-top: 0.25rem;
+}
+
+.list-text-form .btn {
+  margin-top: 0.9rem;
+}
+
+.list-cancel {
+  margin-left: 0.75rem;
+  font-family: var(--ui);
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.list-cancel:hover {
+  color: var(--accent);
+}
+
+/* The maker's "Edit list" on the list page. Pushed to the right edge of the
+   borrowed .review-head so it cannot crowd the applause and reply counts it
+   sits beside. */
+.list-edit-link {
+  margin-left: auto;
+  font-family: var(--ui);
+  font-size: 0.82rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.list-edit-link:hover {
+  color: var(--accent);
+}
+
+/* The editor's ranked row: the read page's .rank-row plus a control
+   cluster. flex-wrap on the editing row only — three controls beside a
+   poster and a title do not fit a phone width, and letting them drop to
+   their own line beats shrinking any of the four. */
+.rank-edit {
+  flex-wrap: wrap;
+}
+
+.rank-controls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+/* The up/down/remove controls sit in form.inline, whose
+   ``form.inline button`` rule (0,1,2) pins them to 0.9rem --muted, so a
+   bare ``.rank-btn`` (0,1,0) loses and the arrows stay at the secondary-text
+   colour. The owner's pass of 2026-10-07 took them off that: at
+   --cream-muted they read as disabled rather than as available, which is
+   the wrong signal for the main way you reorder a list. Scoping to
+   ``.rank-controls`` outranks the form rule the same way
+   ``.search-row .watchlist-btn`` does elsewhere in this file. */
+.rank-controls .rank-btn {
+  padding: 0.15rem 0.5rem;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--cream);
+}
+
+.rank-controls .rank-btn:hover:not(:disabled) {
+  color: var(--white);
+  border-color: var(--accent);
+  filter: none;
+  box-shadow: none;
+}
+
+.rank-controls .rank-btn:disabled {
+  color: var(--muted);
+}
+
+/* The add-film search box. */
+.list-add-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0 1rem;
+}
+
+/* The typeahead wrapper. position:relative is what the shared .suggest-list
+   anchors to, exactly as the header's .global-search does — the dropdown is
+   the same component, not a copy of it. */
+.list-add-picker {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 28rem;
+}
+
+.list-add-search input[type="search"] {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  color: inherit;
+  background: var(--field);
+  border: 1px solid var(--brown);
+  border-radius: 4px;
+}
+
+.list-add-search button {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+/* The dropdown's rows are <button>s, not <a>s, because picking one is an
+   action rather than a navigation. That means they arrive wearing the lit
+   crimson control chrome and the marquee face, and both have to come off —
+   otherwise every suggestion row is a big glowing red slab. The hover rule
+   repeats the filter/shadow resets for the same reason the base ones do
+   (R135). */
+.list-add-picker .suggest-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  margin: 0;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--fg);
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  text-shadow: none;
+}
+
+.list-add-picker .suggest-row:hover:not(:disabled),
+.list-add-picker .suggest-row.active:not(:disabled) {
+  /* Matches the header dropdown's own hover, so the two boxes highlight alike. */
+  background: var(--surface-2);
+  filter: none;
+  box-shadow: none;
+}
+
+.list-add-picker .suggest-row:disabled {
+  color: var(--muted);
+  cursor: default;
+  filter: none;
+  box-shadow: none;
+}
+
+.suggest-row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.suggest-row-state {
+  flex-shrink: 0;
+  font-family: var(--ui);
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* The per-row Add control: the same ghost the search page's one-click
+   watchlist button is, so adding to a list and adding to a watchlist look
+   like the same kind of action in the same kind of row. */
+.add-row .add-btn {
+  margin-top: 0;
+  padding: 0.25rem 0.7rem;
+  font-family: var(--ui);
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.55;
+  letter-spacing: normal;
+  text-transform: none;
+  background: none;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.add-row .add-btn:hover {
+  border-color: var(--accent);
+  filter: none;
+  box-shadow: none;
+}
+
+.add-state {
+  font-family: var(--ui);
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* The delete sits last and quietest. Every primary control on this site is
+   lit crimson, so a destructive one styled as a primary would be the
+   loudest thing on the page and the easiest to hit by accident; it takes
+   the ghost look and only picks up the accent on hover. The hover rule
+   repeats the filter/shadow resets because button:hover outspecs a bare
+   class-level reset the moment the cursor arrives (R135). */
+.list-delete-section {
+  margin-top: 2.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.btn-danger {
+  font-family: var(--ui);
+  font-weight: 600;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  letter-spacing: normal;
+  text-transform: none;
+  padding: 0.3rem 0.85rem;
+  background: none;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  text-shadow: none;
+}
+
+.btn-danger:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  filter: none;
+  box-shadow: none;
+}
+
+/* The "New list" entry on one's own lists page. */
+.list-toolbar {
+  margin: 1.25rem 0 0.5rem;
+}
+
+.list-toolbar .btn {
+  margin-top: 0;
+}

@@ -4,9 +4,10 @@
 {% block title %}{{ film_list.title }} — ReelTalk{% endblock %}
 
 {% block content %}
-{# The list page (§2K increment 2, L8/L9/L10). Read-only: no create, no #}
-{# edit, no reorder, no save. It borrows the post page's control row, its #}
-{# thread partial and its scripts rather than inventing a second set, so a #}
+{# The list page (§2K increment 2, L8/L9/L10). Read-only apart from the #}
+{# maker's "Edit list" link, which leads to increment 3 rather than doing #}
+{# anything here. It borrows the post page's control row, its thread #}
+{# partial and its scripts rather than inventing a second set, so a #}
 {# list's applause and replies are the same objects — and look the same — #}
 {# as a review's. #}
 <article class="list-page">
@@ -49,6 +50,14 @@
         <a class="reply-btn" href="?reply=1" data-state="{% if replies|length %}others{% else %}idle{% endif %}" title="{% if replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply to this list{% else %}Reply to this list{% endif %}"></a>
         <span class="reply-count" aria-live="polite">{{ replies|length }}</span>
       </span>
+      {% endif %}
+      {% if is_owner %}
+        {# The maker's way into increment 3. A link rather than a button: #}
+        {# this only navigates, and `button, .btn` is the lit crimson #}
+        {# control (R135's rule). It is the owner-only thing on this page, #}
+        {# and hiding it is not what makes the list safe to edit — the #}
+        {# routes behind it scope their lookup to the requesting user. #}
+        <a class="list-edit-link" href="{% url 'list-edit' film_list.id %}">Edit list</a>
       {% endif %}
     </div>
   </header>

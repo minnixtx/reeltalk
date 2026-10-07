@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}New list — ReelTalk{% endblock %}
+
+{% block content %}
+{# Making a list (§2K increment 3). Name and description only — a ranked row #}
+{# needs a list to hang on, so the films come after, from the editor's #}
+{# search, which is the single add door L5 asks for anyway. #}
+<article class="list-editor">
+  <header class="list-page-head">
+    <h1 class="list-name">New list</h1>
+    <p class="muted">
+      Name it, describe it if you like, then add films from the next page.
+    </p>
+  </header>
+
+  <form class="list-text-form" method="post" action="{% url 'list-create' %}">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="btn">Create list</button>
+    <a class="list-cancel" href="{% url 'user-lists' user.localname %}">Cancel</a>
+  </form>
+</article>
+{% endblock %}

@@ -1,11 +1,16 @@
-"""The write path for lists (§2K increment 1).
+"""The write path for lists (§2K increments 1 and 3).
 
-Every mutation of a list goes through one of these six functions, and nothing
-else writes these tables. That is not ceremony: L1 makes a list freely editable
+Every mutation of a list goes through one of these functions, and nothing else
+writes these tables. That is not ceremony: L1 makes a list freely editable
 forever, which means the interesting cases are all *repeated* edits, and a
 rank or a face maintained in two places is where a feature like this rots. Each
 function is small, atomic, and idempotent where the door that calls it can be
 pressed twice.
+
+Every function that changes something also stamps the post face's
+``edited_date`` — see ``_stamp_edited`` for why that belongs on the face rather
+than only on ``FilmList.updated_date``, and why a call that changed nothing
+must not stamp.
 
 No view, URL or template is here — increment 1 has no visual surface on
 purpose (§2K: the moment ``Status.Type.LIST`` exists, list rows are already in
@@ -16,6 +21,7 @@ visible).
 from collections.abc import Iterable
 
 from django.db import transaction
+from django.utils import timezone
 
 from reeltalk.core.models import Film, Status
 from reeltalk.core.utils import render_markdown
@@ -58,11 +64,33 @@ def create_list(
         description=render_markdown(description),
         raw_description=description,
     )
-    add_films(film_list, films)
+    # ``_append_films`` rather than ``add_films``: a list born with films is
+    # not a list that was *edited*, and a face stamped at creation would go
+    # out on the wire (increment 6) reporting an edit that never happened.
+    _append_films(film_list, films)
     return film_list
 
 
-def add_films(film_list: FilmList, films: Iterable[Film]) -> list[ListItem]:
+def _stamp_edited(film_list: FilmList) -> None:
+    """Mark the list's post face as edited.
+
+    ``Status.edited_date`` is the field the wire reports as ``editedTime``
+    (increment 6) and the one a reader can be shown as "edited", so the stamp
+    goes on the face and not only on ``FilmList.updated_date`` — the face is
+    the half other instances and the feed actually see, and a list whose text
+    changed while its face stayed unmarked would broadcast as untouched.
+
+    Callers stamp **only when the call changed something**. ``add_films`` with
+    everything already present, ``remove_film`` on a film that is not in the
+    list, and ``move`` at either end all return without stamping, so pressing
+    a button that does nothing cannot make a list look edited.
+    """
+    face = film_list.status
+    face.edited_date = timezone.now()
+    face.save(update_fields=["edited_date"])
+
+
+def _append_films(film_list: FilmList, films: Iterable[Film]) -> list[ListItem]:
     """Append films in the order given, skipping any already in the list.
 
     Skipping rather than raising is what makes the add door idempotent: L5 puts
@@ -90,6 +118,20 @@ def add_films(film_list: FilmList, films: Iterable[Film]) -> list[ListItem]:
     return created
 
 
+def add_films(film_list: FilmList, films: Iterable[Film]) -> list[ListItem]:
+    """Add films to an existing list, appending them in the order given.
+
+    ``_append_films`` plus the edited stamp — the split exists so
+    ``create_list`` can fill a brand-new list without marking it edited.
+    Returns the rows it actually created, which is empty when every film was
+    already in the list, and nothing is stamped in that case.
+    """
+    created = _append_films(film_list, films)
+    if created:
+        _stamp_edited(film_list)
+    return created
+
+
 def remove_film(film_list: FilmList, film: Film) -> bool:
     """Take a film out of the list. True if it was in it, False if it wasn't.
 
@@ -99,6 +141,8 @@ def remove_film(film_list: FilmList, film: Film) -> bool:
     column of integers nobody is allowed to depend on.
     """
     deleted, _ = ListItem.objects.filter(film_list=film_list, film=film).delete()
+    if deleted:
+        _stamp_edited(film_list)
     return deleted > 0
 
 
@@ -140,6 +184,7 @@ def move(item: ListItem, direction: str) -> bool:
     item.rank, neighbour.rank = neighbour.rank, item.rank
     item.save(update_fields=["rank"])
     neighbour.save(update_fields=["rank"])
+    _stamp_edited(item.film_list)
     return True
 
 
@@ -151,6 +196,29 @@ def rename(film_list: FilmList, title: str) -> FilmList:
     """
     film_list.title = title
     film_list.save(update_fields=["title", "updated_date"])
+    _stamp_edited(film_list)
+    return film_list
+
+
+def set_description(film_list: FilmList, description: str) -> FilmList:
+    """Change a list's description. L1 makes it editable forever, like the title.
+
+    The mirror of ``rename``, with one extra thing in it: the description is a
+    markdown/HTML pair, and ``create_list`` owns that pair rather than leaving
+    it to the form. Same rule here — **pass the markdown source in** and let
+    the service render it. A form that rendered in ``clean_description`` the
+    way ``FilmForm`` does would hand us already-rendered HTML to render again,
+    and the description would come out doubled (or escaped, depending on the
+    renderer). The form validates; this function is the only place the pair is
+    written.
+
+    Clearing the description is a legal edit and takes both halves to blank, so
+    a cleared list renders no description block rather than a stale one.
+    """
+    film_list.description = render_markdown(description)
+    film_list.raw_description = description
+    film_list.save(update_fields=["description", "raw_description", "updated_date"])
+    _stamp_edited(film_list)
     return film_list
 
 

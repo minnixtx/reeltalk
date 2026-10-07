@@ -165,6 +165,36 @@ urlpatterns = [
     # 302s here; the like and reply endpoints stay keyed on the status id,
     # which is the half of L10 that keeps the social machinery unchanged.
     path("list/<int:list_id>/", lists_views.list_detail, name="list-detail"),
+    # Authoring (§2K increment 3). ``/lists/new/`` is the only top-level list
+    # URL and it is a create form, not an index — R138 turned ``/lists/`` down
+    # as a *page*, and this is not one; the plural is simply the collection
+    # you are adding to. Everything that acts on a list that exists hangs off
+    # ``/list/<id>/``, the same way the like and reply endpoints already do.
+    # Order does not matter here: ``<int:list_id>`` cannot swallow ``1/edit/``,
+    # so the detail route above still resolves on its own.
+    path("lists/new/", lists_views.list_create, name="list-create"),
+    path("list/<int:list_id>/edit/", lists_views.list_edit, name="list-edit"),
+    path(
+        "list/<int:list_id>/add-film/",
+        lists_views.list_add_film,
+        name="list-add-film",
+    ),
+    # The typeahead behind the editor's add-film box. Its own route rather
+    # than a mode of the add route, because one answers an XHR with JSON and
+    # the other performs a write, and folding them together would leave one
+    # view having to tell a GET probe from a real submission.
+    path(
+        "list/<int:list_id>/suggest/",
+        lists_views.list_suggest,
+        name="list-suggest",
+    ),
+    path(
+        "list/<int:list_id>/remove-film/",
+        lists_views.list_remove_film,
+        name="list-remove-film",
+    ),
+    path("list/<int:list_id>/move/", lists_views.list_move, name="list-move"),
+    path("list/<int:list_id>/delete/", lists_views.list_delete, name="list-delete"),
     # Follow / unfollow a profile (M5 increment 2): POST-only routes sharing
     # the extended pattern so mirror handles (<user>@<netloc>) match too.
     re_path(

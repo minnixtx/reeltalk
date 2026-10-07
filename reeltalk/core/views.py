@@ -537,6 +537,18 @@ def delete_review(request, status_id):
     status = get_object_or_404(
         Status, id=status_id, user=request.user, local=True, deleted=False
     )
+    # A list's post face is a ``Status``, so this route's own lookup used to
+    # admit it — and ``status.delete()`` would take the face down while the
+    # ``FilmList`` above it stayed ``deleted=False``. That is a live list with
+    # no social half: readable, but impossible to applaud, reply to, or see in
+    # anybody's feed, and unreachable by the list's own delete because that
+    # delete had already been satisfied by half of it happening here. No link
+    # ever pointed a list's face at this form, but "the UI does not offer it"
+    # is not a guard, so the route refuses a LIST outright. Deleting a list
+    # goes through ``POST /list/<id>/delete/``, which takes both halves down
+    # together in one transaction.
+    if status.status_type == Status.Type.LIST:
+        raise Http404
     film_id = status.film_id
     status.delete()
     # Federation broadcast (M4 increment 6): the deletion to remote followers.
@@ -698,7 +710,14 @@ def _tmdb_rows(results, user) -> list[dict]:
 
 
 def _local_rows(films, user) -> list[dict]:
-    """Normalize local films into the same row shape as TMDB results."""
+    """Normalize local films into the same row shape as TMDB results.
+
+    ``film_id`` is here because a local row *is* a local film, so the id costs
+    nothing to carry and the list editor needs it to mark which results are
+    already in the list. A TMDB row cannot carry one — the hit has no local
+    film until someone clicks it — which is why that side marks on ``tmdb_id``
+    instead and the two paths are not interchangeable.
+    """
     blocked = _local_film_ids(user)
     rows = []
     for film in films:
@@ -706,6 +725,7 @@ def _local_rows(films, user) -> list[dict]:
             continue
         rows.append(
             {
+                "film_id": film.id,
                 "title": film.title,
                 "year": film.year,
                 "poster_url": film.poster.url if film.poster else None,

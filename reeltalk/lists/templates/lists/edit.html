@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Edit {{ film_list.title }} — ReelTalk{% endblock %}
+
+{% block content %}
+{# Authoring a list (§2K increment 3). Owner-only: every route below scopes #}
+{# its lookup to the requesting user, so this page is not merely the one #}
+{# place the controls are drawn — a stranger posting to them is refused, not #}
+{# just unseen (R85). #}
+{# Nothing on this page is JavaScript. Every control is an ordinary form #}
+{# post that redraws from the database, so the order on screen is always #}
+{# the order that was actually written. (CSP_SCRIPT_SRC is 'self', so an #}
+{# inline confirm() on the delete button would be blocked anyway.) #}
+<article class="list-editor">
+  <header class="list-page-head">
+    <h1 class="list-name">Edit “{{ film_list.title }}”</h1>
+    <p class="muted list-length">
+      {{ items|length }} film{{ items|length|pluralize }} ·
+      <a href="{% url 'list-detail' film_list.id %}">View the list</a>
+    </p>
+  </header>
+
+  <section class="list-edit-section">
+    <h2>Details</h2>
+    <form class="list-text-form" method="post" action="{% url 'list-edit' film_list.id %}">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <button type="submit" class="btn">Save</button>
+    </form>
+  </section>
+
+  <section class="list-edit-section">
+    <h2>Films</h2>
+    {# Numbered by forloop.counter, never by item.rank — remove_film leaves #}
+    {# the gap it makes, so ranks can read 1, 2, 4 while three films are #}
+    {# listed. The same rule the read-only page follows, for the same reason. #}
+    <ol class="rank-list">
+      {% for item in items %}
+      <li class="rank-row rank-edit">
+        <span class="rank-num">{{ forloop.counter }}</span>
+        {% if item.film.poster %}
+          <img class="thumb" src="{{ item.film.poster.url }}" alt="">
+        {% else %}
+          <span class="thumb thumb-placeholder" aria-hidden="true"></span>
+        {% endif %}
+        <a class="rank-film" href="{% url 'film' item.film.id %}">{{ item.film.title }}{% if item.film.year %} <span class="muted">({{ item.film.year }})</span>{% endif %}</a>
+        <span class="rank-controls">
+          <form method="post" action="{% url 'list-move' film_list.id %}" class="inline rank-control-form">
+            {% csrf_token %}
+            <input type="hidden" name="item_id" value="{{ item.id }}">
+            <input type="hidden" name="direction" value="up">
+            <button type="submit" class="rank-btn"{% if forloop.first %} disabled{% endif %} aria-label="Move {{ item.film.title }} up">↑</button>
+          </form>
+          <form method="post" action="{% url 'list-move' film_list.id %}" class="inline rank-control-form">
+            {% csrf_token %}
+            <input type="hidden" name="item_id" value="{{ item.id }}">
+            <input type="hidden" name="direction" value="down">
+            <button type="submit" class="rank-btn"{% if forloop.last %} disabled{% endif %} aria-label="Move {{ item.film.title }} down">↓</button>
+          </form>
+          <form method="post" action="{% url 'list-remove-film' film_list.id %}" class="inline rank-control-form">
+            {% csrf_token %}
+            <input type="hidden" name="film_id" value="{{ item.film.id }}">
+            <button type="submit" class="rank-btn rank-btn-remove" aria-label="Remove {{ item.film.title }} from this list">Remove</button>
+          </form>
+        </span>
+      </li>
+      {% empty %}
+      <li class="rank-empty muted">Nothing in this list yet. Search for a film below to add the first one.</li>
+      {% endfor %}
+    </ol>
+  </section>
+
+  <section class="list-edit-section list-add-section">
+    <h2>Add films</h2>
+    {# The typeahead. Same box shape as the header search: type a couple of #}
+    {# letters and a dropdown of matches appears under it. Picking one here #}
+    {# adds it rather than navigating, so the click fills the hidden form #}
+    {# below and submits that. Enter with nothing highlighted keeps its #}
+    {# default and runs the ordinary search, so the full result list is #}
+    {# still one keystroke away and is the path that works with no JS. #}
+    <form class="list-add-search" method="get" action="{{ request.path }}">
+      <div class="list-add-picker" data-suggest-url="{% url 'list-suggest' film_list.id %}">
+        <input type="search" name="q" value="{{ search.query }}" placeholder="Search for a film to add…" autocomplete="off" aria-label="Search for a film to add" aria-expanded="false" aria-autocomplete="list">
+        <ul class="suggest-list" hidden></ul>
+      </div>
+      <button type="submit">Search</button>
+    </form>
+    {# The picker's target. Both id fields exist empty and the script fills #}
+    {# exactly one, which is what the add route expects: it refuses a post #}
+    {# that names neither and one that names both. #}
+    <form id="list-add-pick-form" method="post" action="{% url 'list-add-film' film_list.id %}" hidden>
+      {% csrf_token %}
+      <input type="hidden" name="tmdb_id" value="">
+      <input type="hidden" name="film_id" value="">
+      <input type="hidden" name="q" value="{{ search.query }}">
+    </form>
+
+    {% if search.query %}
+      {% if search.rows %}
+        {% if search.source == "tmdb" and search.total_pages > 1 %}
+          <p class="muted">Page {{ search.page }} of {{ search.total_pages }}</p>
+        {% endif %}
+        <ul class="film-list search-results add-results">
+          {% for row in search.rows %}
+          <li class="film-row search-row add-row">
+            {% if row.poster_url %}
+              <img class="thumb" src="{{ row.poster_url }}" alt="">
+            {% else %}
+              <span class="thumb thumb-placeholder" aria-hidden="true"></span>
+            {% endif %}
+            <div class="search-row-main">
+              {% if row.link %}
+                <a href="{{ row.link }}">{{ row.title }}</a>
+              {% else %}
+                {{ row.title }}
+              {% endif %}
+              {% if row.year %}<span class="muted">({{ row.year }})</span>{% endif %}
+            </div>
+            {% if row.in_list %}
+              <span class="add-state muted">In this list</span>
+            {% else %}
+              {# tmdb_id when the row came from TMDB (no local film yet, so #}
+              {# the route runs the same find-or-create the watchlist button #}
+              {# uses); film_id when the row is a local film already — which #}
+              {# is all the no-TMDB-key fallback has to offer. #}
+              <form method="post" action="{% url 'list-add-film' film_list.id %}" class="inline">
+                {% csrf_token %}
+                {% if row.tmdb_id is not None %}
+                  <input type="hidden" name="tmdb_id" value="{{ row.tmdb_id }}">
+                {% else %}
+                  <input type="hidden" name="film_id" value="{{ row.film_id }}">
+                {% endif %}
+                <input type="hidden" name="q" value="{{ search.query }}">
+                {% if search.page > 1 %}<input type="hidden" name="page" value="{{ search.page }}">{% endif %}
+                <button type="submit" class="add-btn">Add to list</button>
+              </form>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% if search.source == "tmdb" and search.total_pages > 1 %}
+          <nav class="pager">
+            {% if search.page > 1 %}<a href="?q={{ search.query|urlencode }}&amp;page={{ search.page|add:"-1" }}">← Previous</a>{% endif %}
+            {% if search.page < search.total_pages %}<a href="?q={{ search.query|urlencode }}&amp;page={{ search.page|add:"1" }}">Next →</a>{% endif %}
+          </nav>
+        {% endif %}
+      {% else %}
+        <p class="muted">Nothing found for “{{ search.query }}”.</p>
+      {% endif %}
+    {% else %}
+      <p class="muted">Search above to find a film to add.</p>
+    {% endif %}
+  </section>
+
+  <section class="list-edit-section list-delete-section">
+    <form method="post" action="{% url 'list-delete' film_list.id %}" class="inline">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-danger">Delete this list</button>
+    </form>
+  </section>
+</article>
+<script src="{% static 'js/list_editor.js' %}" defer></script>
+{% endblock %}
