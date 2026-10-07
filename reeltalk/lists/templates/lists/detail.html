@@ -58,6 +58,25 @@
         {# and hiding it is not what makes the list safe to edit — the #}
         {# routes behind it scope their lookup to the requesting user. #}
         <a class="list-edit-link" href="{% url 'list-edit' film_list.id %}">Edit list</a>
+      {% else %}
+        {% if user.is_authenticated %}
+        {# The Save control (increment 5, L2). Built on `.btn`'s lit crimson #}
+        {# exactly as R140 2 ruled — that decision parked the weight question #}
+        {# for a future whole-UI pass rather than winning it on the merits, so #}
+        {# this is the existing control and nothing more. #}
+        {# #}
+        {# Not offered to the maker at all: L2 frames a save as a pointer at #}
+        {# somebody else's list. The hiding is not what enforces that — #}
+        {# `/list/<id>/save/` refuses the maker too, so the page and the #}
+        {# route agree rather than the page concealing what the route allows. #}
+        {# #}
+        {# Both toggle URLs ride on the button rather than the script building #}
+        {# one: the template owns the routing, and the JS only ever swaps #}
+        {# between two addresses it was handed. #}
+        <span class="list-save">
+          <button type="button" class="btn list-save-btn" data-save-url="{% url 'list-save' film_list.id %}" data-unsave-url="{% url 'list-unsave' film_list.id %}" data-state="{% if saved_by_viewer %}saved{% else %}unsaved{% endif %}" aria-pressed="{% if saved_by_viewer %}true{% else %}false{% endif %}" title="{% if saved_by_viewer %}Saved — click to remove{% else %}Save this list{% endif %}" aria-label="{% if saved_by_viewer %}Saved — click to remove this list{% else %}Save this list to your saved lists{% endif %}">{% if saved_by_viewer %}Saved{% else %}Save{% endif %}</button>
+        </span>
+        {% endif %}
       {% endif %}
     </div>
   </header>
@@ -125,5 +144,6 @@
   {# composer are gated alike here, and neither should ever render inert. #}
   <script src="{% static 'js/likes.js' %}" defer></script>
   <script src="{% static 'js/comments.js' %}" defer></script>
+  <script src="{% static 'js/list_save.js' %}" defer></script>
 {% endif %}
 {% endblock %}

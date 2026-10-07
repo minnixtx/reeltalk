@@ -34,17 +34,51 @@ page keeps its own three tabs untouched.
   {% if saves %}
   <ul class="list-mosaic">
     {% for save in saves %}
-    <li class="list-card">
-      <a class="list-card-name" href="{% url 'list-detail' save.film_list_id %}">{{ save.film_list.title }}</a>
+    <li class="list-card{% if save.film_list.deleted %} list-card-deleted{% endif %}">
+      {% if save.film_list.deleted %}
+        {# R140 1: the deleted list surfaces here carrying its notice. The #}
+        {# title is deliberately NOT a link. ``/list/<id>/`` 404s on a #}
+        {# deleted list, so an anchor here would put a live-looking link on #}
+        {# a card whose destination refuses — R85's offer-with-no-route bug, #}
+        {# and the exact shape this page used to avoid by filtering the whole #}
+        {# card out. The card is plain content now, not a navigation. #}
+        <span class="list-card-name">{{ save.film_list.title }}</span>
+      {% else %}
+        <a class="list-card-name" href="{% url 'list-detail' save.film_list_id %}">{{ save.film_list.title }}</a>
+      {% endif %}
       {# The card names the maker, never the saver (L2: a live pointer at #}
-      {# somebody else's list, labelled with who it belongs to). #}
+      {# somebody else's list, labelled with who it belongs to). Same on a #}
+      {# deleted card — who it came from is still the fact worth keeping. #}
       <span class="list-card-meta">saved from {{ save.film_list.user.localname }} · {{ save.item_count }} film{{ save.item_count|pluralize }}</span>
+      {% if save.film_list.deleted %}
+      {# The notice R140 1 asks for, and the only thing that takes this card #}
+      {# off the tab. Dismiss is per-saver because the marker sits on this #}
+      {# member's own ``ListSave`` row: one member dismissing says nothing #}
+      {# about anybody else's. #}
+      {# #}
+      {# The Dismiss control sits in a plain ``form.inline`` on purpose, so #}
+      {# it reads as the small muted control it is and NOT as `.btn`'s lit #}
+      {# crimson — ``form.inline button`` strips the lit fill, which is #}
+      {# wanted here and was unwanted on the Save button above. #}
+      <p class="list-deleted-notice">
+        <span class="list-deleted-text">{{ save.film_list.user.localname }} deleted this list.</span>
+        <form class="inline" method="post" action="{% url 'list-save-dismiss' save.film_list_id %}">
+          {% csrf_token %}
+          <button type="submit">Dismiss</button>
+        </form>
+      </p>
+      {% endif %}
     </li>
     {% endfor %}
   </ul>
   {% else %}
   {# The save button and its write path are increment 5; the tab and this #}
   {# empty state are here so the shape under review is the real page. #}
+  {# #}
+  {# This branch keys on ``saves`` being empty, which under R140 means #}
+  {# genuinely *nothing to show* — not *no live lists*. A member whose one #}
+  {# saved list was deleted and not yet dismissed still sees their notice #}
+  {# here rather than also being told they have saved nothing. #}
   <p class="muted">You haven't saved any lists yet.</p>
   {% endif %}
 {% else %}

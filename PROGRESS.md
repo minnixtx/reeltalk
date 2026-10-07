@@ -10,108 +10,112 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **Lists increment 4 — the feed row — BUILT, gate-verified, DEPLOYED, and
-  approved by the owner in a browser review (2026-10-07).** A list's row
-  in the home feed is now three lines: `minnix created a new list` / the
-  list title / up to five posters then `+N` (R139). New in
-  `core/models.py`: `LIST_FEED_POSTER_CAP = 5`, the `ListStrip` dataclass,
-  `FeedEntry.is_list_face` / `.list_strip` / `.replyable`, and the batched
-  `_attach_list_strips()`. New `.feed-verb` and `.list-strip` blocks in
-  `_feed_row.html` — so `/` and `/feed/page/` changed in the same commit,
-  which is the whole reason that partial exists — new CSS in `reeltalk.css`,
-  one fix in `core/views.py`, and a new test file
-  `tests/test_feed_list_row.py` (20 tests). Full gate **2366 passed + 5
-  skipped in 32:55, `PYTEST_EXIT=0`** (baseline 2345; **+21 = 20 new
-  tests + 1 clean-room param**), skips unchanged, with `ruff check` /
-  `ruff format --check` / `makemigrations --check` all clean and **no new
-  migration**. Full record: **"Executed — lists increment 4"** at the end
-  of §2K.
-- **The blank rows are gone, which was the visible point.** Before this
-  increment every list rendered on the home feed as ~62px of avatar, name
-  and date and nothing else, because the whole poster-and-verb block sat
-  behind `{% if entry.film %}` and a list has no film. Those rows are real
-  now.
-- **The bug the browser caught and the suite could not.** The brief said to
-  prove the reply control works *through the real route* — and the route
-  accepted the reply the whole time. `redirect("list-detail", ...)` in
-  `status_detail` rewrote the **path** and dropped the **query**, so the
-  feed's reply icon landed on `/list/<id>/` with the composer shut. The row
-  offered a thing the page it opened did not show: R85's
-  offer-with-no-route bug, one hop further along than the gate the entire
-  increment was built around. Fixed by carrying `request.GET` across the
-  redirect and pinning the 302's exact `Location`. **Worth keeping:
-  proving a route accepts a POST is not the same as proving the control
-  that reaches it works.**
-- **Two plan premises were already satisfied, so they did not move** — a
-  result, not a skipped check. The `KIND_RANK_*` tiebreak §2K asked for is
-  unnecessary: a list face is `kind="status"`, already `KIND_RANK_STATUS =
-  0`, and the cursor keys on `source_id`, which for a status row *is* the
-  status. A list-specific rank would have **changed** the tiebreak order for
-  same-timestamp rows to buy nothing. And of R138's "four halves", only the
-  feed template's gate moved, exactly as the brief predicted on
-  re-verification: the like lookup already keys on `status_id`,
-  `FeedEntry.interactive` is already true for a face, and the post page's
-  gate is moot because `/status/<id>/` 302s to the list page, which has
-  had its own reply control since increment 2.
-- **The reply gate is a property (`FeedEntry.replyable`), not a template
-  expression.** The inline form `{% if entry.interactive and (entry.film
-  or entry.is_list_face) %}` raises `KeyError: '(entry.film'` — Django's
-  `{% if %}` tokenizer splits on whitespace and will not separate an
-  unspaced parenthesis. Python keeps the precedence explicit and assertable
-  without rendering. **Never widen this gate on "no film"**: the live feed
-  holds film-less mirrored `Note`s (statuses 60 and 31 on the owner's box)
-  whose reply route answers 400. `is_list_face` is set from `status_type`
-  inside `feed_entries`, where the status is actually in hand.
-- **Measured live** (headless Chromium, throwaway probe member): a 7-film
-  list draws **5 tiles at 40×60, no wrap at 1440px or at 390px**, with
-  `+2`. The row is 157px at 1440px and **195px at 390px — the same height
-  as an ordinary review row**. An empty list draws verb + title and no
-  strip. Clicking the reply icon in the feed opens the composer on the list
-  page, the post lands, and the row's count ticks to 1 — zero `pageerror`s.
+- **Lists increment 5 — saving — BUILT, gate-verified, DEPLOYED, and
+  approved by the owner in a browser review of the live box (2026-10-07).**
+  `POST /list/<id>/save/` and `/unsave/` (login-required, CSRF,
+  **idempotent** — `get_or_create`, so a double press is one row and not an
+  `IntegrityError`), the Save / Saved control on `.btn`'s lit crimson per
+  R140 2, and the R140 1 deleted-list notice with its Dismiss on the Saved
+  tab. New in `lists/models.py`: `ListSave.notice_dismissed_at`, which is
+  why **this increment needed a migration** — the first the lists feature has
+  needed since `lists/0001` — and it is applied on the live box. New service
+  functions `save_list` / `unsave_list` / `dismiss_deleted_notice`, new
+  routes and views, `lists/static/js/list_save.js`, three CSS blocks, and a
+  new test file `tests/test_lists_saving.py` (37 tests). Full gate **2406
+  passed + 5 skipped in 34:01, `PYTEST_EXIT=0`** (baseline 2366; **+40 =
+  37 new tests + 3 clean-room params**), skips unchanged, with `ruff check`
+  / `ruff format --check` / `makemigrations --check` all clean. Full
+  record: **"Executed — lists increment 5"** at the end of §2K; the six
+  decisions it made are **R141**.
+- **The trap the brief predicted was real, and the first attempt fell into it
+  in the *easy* direction.** R140 1 required dropping the
+  `film_list__deleted=False` filter the Saved tab had carried since increment
+  2. The first reversed predicate was written
+  `.exclude(film_list__deleted=True, notice_dismissed_at__isnull=True)`,
+  which drops **exactly the row the decision exists to show**. The correct
+  form is `__isnull=False`: exclude a save when the list is deleted **and**
+  the notice has already been dismissed. The inverted predicate is no harder
+  to write and fails in the direction that looks like the old behaviour, so
+  the polarity is now spelled out in the comment where it lives.
+- **The deleted card is not a navigation.** `list_detail` 404s on a deleted
+  list, so the card's title renders as a plain `<span>` instead of the
+  `<a class="list-card-name">` every other card carries — R85's
+  offer-with-no-route bug, third appearance. Pinned **both ways**: the
+  deleted card has no `href`, and the *live* card keeps its anchor **and
+  following it returns 200**, so the rule reads as *keyed on `deleted`*
+  rather than *never link from a Saved card*.
+- **L6 silence proven by the ledger, not by the display.** Every silence
+  test compares `Notification.objects.count()` across the action rather than
+  what the page renders, and one carries a non-vacuity control that puts a
+  real row on the ledger through a real like first — so it cannot pass
+  against an empty table with the notifications app broken. **Live, the
+  ledger read 9 before every save / unsave / delete and 9 after.** No new
+  `Notification.Kind`, and none will be added.
+- **Dismiss retires the notice, not the save.** The `ListSave` row survives
+  with its marker and the card leaves the tab — which is *why* the field
+  exists at all: delete-on-dismiss would need no column. Per-saver by
+  construction and tested that way: alice dismissing leaves carol's notice
+  fully rendered. A second dismiss does not move the timestamp, so the field
+  keeps meaning *when it was seen*.
+- **A save does not stamp the post face.** `_stamp_edited` feeds
+  `editedTime` on increment 6's wire, and saving is one member's
+  bookkeeping about somebody else's list. The three new service functions sit
+  deliberately **outside** the stamping discipline every other one follows —
+  assume otherwise and increment 6 broadcasts edits that never happened.
+- **Verified live, by clicking, at both widths** (headless Chromium,
+  throwaway `l5probe_maker` / `l5probe_saver`, **30/30 checks, zero
+  `pageerror`s**): Save → `Saved` → reload still `Saved` → click → `Save`,
+  all through the real control; the button sits level with the author line
+  with `margin-top: 0` (R134 #6's non-opt-in base rule) and
+  `elementFromPoint` confirms it receives its own click; 77×45 and still
+  clickable at 390px; the live card's link **followed** to a 200; the
+  deleted card's notice not overflowing its card at 390px; Dismiss
+  redirecting and the empty state returning. Probe torn down — users, lists,
+  saves, films, statuses and faces all back to zero, ledger unchanged at 9,
+  and **only the one session the probe minted** deleted (sessions 4 → 3),
+  each decoded and matched on `_auth_user_id` so the owner's own browser
+  stays signed in.
 - **STANDING CONSTRAINTS — unchanged.**
   - **User-made lists are IN SCOPE.** The owner reversed the 2026-10-02
-    decision ("We won't do lists") on 2026-10-06. Do not cite the old
-    refusal; it no longer holds. The shape is locked as **L1–L13 = R137**
-    in §2K and the feed strip as **R139** — read §2K before asking any
-    design question about lists, because all of them are already answered.
-    Only **Q5** (a saved list whose creator deleted it) and **Q7** (the
-    Save button's weight) are still open, both at increment 5.
+    refusal ("We won't do lists") on 2026-10-06. Do not cite the old
+    refusal; it no longer holds. The shape is locked as **L1–L13 = R137** in
+    §2K, the feed strip as **R139**, and the last two open questions as
+    **R140**. **§2K has no open questions left** — anything unresolved is a
+    new question, not a carry-over.
   - No third column on the home feed (R64).
   - The genre subfeed keeps its numbered 20-per-page links, and its
     inconsistency with the endless home feed is deliberate (R132 7) — do
     not "fix" it.
-  - No virtualisation, no mid-scroll deep links, no resume-where-you-were,
-    no live updates on the home feed.
-  - TMDB search is the primary add-film flow; manual create is the
-    fallback.
-- **NEXT UP — increment 5: saving. Read
-  `.qwen/tmp/increment5-brief.md` before starting it** — it carries the
-  verified state, the traps and the gate recipe. `POST /list/<id>/save/`
-  and `/unsave/`, login-required, CSRF, **idempotent** like the like
-  toggle; cards labelled "saved from @user" — the creator, never the saver;
-  silent per L6, proven by the notification ledger count being *unchanged*
-  rather than merely not displayed. `ListSave` already exists from
-  increment 1. **Q5 and Q7 are now settled as R140, so §2K has no open
-  questions left.** Q5's answer **reverses a rule increment 2 shipped**:
-  the Saved tab must stop filtering `film_list__deleted=False` and instead
-  surface a deleted list carrying a **dismissible notice**. That needs a
-  dismiss marker on `ListSave`, so **increment 5 does need a migration** —
-  the first the lists feature has needed since `lists/0001`. Q7: build the
-  Save control on `.btn`'s lit crimson and spend no design effort on it;
-  explicitly parked for the future whole-UI polish pass, not won on the
-  merits.
+  - No virtualisation, no mid-scroll deep links, no resume-where-you-were, no
+    live updates on the home feed.
+  - TMDB search is the primary add-film flow; manual create is the fallback.
+- **NEXT UP — increment 6: federation outbound.** Out as a `Note` whose
+  content is the title, the description and the films written out in rank
+  order, **plus** a ReelTalk-namespaced extension carrying the structured
+  ranked items so ReelTalk↔ReelTalk rebuilds the ranking instead of parsing
+  prose; `Update` re-broadcasts on every edit, because L1 makes the list
+  live and L11 says the wire must follow. Delivery through the existing
+  `_status_targets` helper, `Delete` tombstone on soft-delete. **No brief
+  file exists yet for it** — write one from §2K's increment 6 bullets the way
+  1 through 5 were briefed, and carry the verified-state / trap / gate
+  structure. Two things it inherits from this increment and must not undo: the
+  face carries **no** stored body (the title and description live on
+  `FilmList` alone, so the `Note` body is composed at broadcast time), and
+  `save`-family service functions deliberately do **not** stamp
+  `edited_date` — the stamp is what means "this list changed".
 - **Process rules that still hold.** On anything visual: build → deploy →
   hand the owner the live URL → browser review → **only then** the full
   gate. Render it and show it; never describe a visual change in prose.
   Verify geometry, hover and click targets with `getComputedStyle` /
   `elementFromPoint` in a real browser rather than by reasoning about the
   cascade. And prove a control by **clicking it**, not by POSTing to its
-  endpoint — that is exactly what this increment's real bug looked like.
+  endpoint — increment 4's real bug was invisible to every route-level test
+  precisely because the route was never the broken part.
 - **What the feature is built on.** `Status`, `Like`, `reply_parent`,
   `FeedEntry`, `broadcast_*` and the inbox `HANDLERS` — not any inherited
   list scaffolding. There was none: the brief's claim that `List`/`ListItem`
-  already existed as BookWyrm inheritance was false, and §2K opens with
-  that correction. Increment 1 was the first code of the feature to exist.
+  already existed as BookWyrm inheritance was false, and §2K opens with that
+  correction. Increment 1 was the first code of the feature to exist.
 - **The repo and attribution facts still stand.** `github.com/minnixtx/
   reeltalk` is the repository (2026-10-04); the old one is private as
   `reeltalk-old`. No co-author trailer — blocked by `.githooks/commit-msg`
@@ -124,7 +128,8 @@ is history.**
   --oneline` rather than trusting anything written here. Anything a single
   command answers for free is a pointer in this block, not a value; only a
   literal hash goes stale faster than this block gets rewritten.
-- **Parked:** the M6 grindhouse artwork polish pass, at R73.
+- **Parked:** the M6 grindhouse artwork polish pass, at R73. R140 2's Save
+  button weight is parked *inside* that pass, not settled on the merits.
 
 ### How to read the project's docs
 
@@ -134,7 +139,7 @@ is history.**
 | Product contract — domain model, watch state, TMDB, federation surface, deployment shape | `PLAN.md` §3 |
 | **D-series** — the original product decisions (D1–D17) | `PLAN.md` §2 |
 | License audit | `PLAN.md` §4 |
-| **R-series** — rewrite-era decisions (R1–R140) | `PROGRESS.md` §4 |
+| **R-series** — rewrite-era decisions (R1–R141) | `PROGRESS.md` §4 |
 | **The lists feature — the plan, the locked shape, the increments** | `PROGRESS.md` §2K |
 | What was actually built, with commit hashes | `PROGRESS.md` §2 |
 | Host and deploy facts for this box | `PROGRESS.md` §3 |
@@ -6418,7 +6423,16 @@ which is why this is its own increment and why increment 1 ships with no UI.
 *Proves by:* a followed user's list appearing in the follower's feed, and the
 fragment route rendering byte-identical HTML to the full page for the same row.
 
-**Increment 5 — saving.**
+**Increment 5 — saving.** ✅ **DONE 2026-10-07** — gate-verified, deployed,
+and approved by the owner in a browser review of the live box. Full record at
+the end of this section. Built as written **except two bullets this plan
+outdated**, both overridden rather than silently applied: the "Saved section
+on `/lists/`" is `?tab=saved` on `/user/<localname>/lists/` (R138 1 settled
+that URL before this increment reached it), and *"the creator's delete
+cascades yours away"* is **not** what ships — R140 1 replaced the silent
+cascade with a visible, dismissible notice on the surviving soft-delete
+pointer. The CASCADE is the hard-delete half only, and that boundary is
+stated in the record.
 
 - `POST /list/<id>/save/` and `POST /list/<id>/unsave/` — login-required,
   CSRF, **idempotent**: a double save is one row, the same discipline as the
@@ -7114,6 +7128,160 @@ logged the owner out of their own browser.
 creator deleted it) and Q7 (the Save button's weight) remain open at
 increment 5.
 
+### Executed — lists increment 5 is DONE, gate-verified, deployed and browser-reviewed (2026-10-07)
+
+**What landed.** Three new files and six edited ones, with **one migration** —
+the first the lists feature has needed since `lists/0001`.
+
+- **`lists/models.py`** — `ListSave.notice_dismissed_at` (`null=True`), the
+  R140 1 dismiss marker. Named `notice_dismissed_at` rather than the bare
+  `dismissed_date` R140 floated, because the bare name reads as *"this save
+  was dismissed"*, i.e. undone. It is not: the save row survives and what the
+  flag retires is the notice.
+- **`lists/migrations/0002_listsave_notice_dismissed_at.py`** — the add-field.
+  Applied on deploy (`Applying lists.0002_listsave_notice_dismissed_at... OK`).
+- **`lists/services.py`** — `save_list` (`get_or_create`, so a double press is
+  a no-op and not an `IntegrityError`), `unsave_list` (a delete that matched
+  nothing is a success), `dismiss_deleted_notice` (a conditional `UPDATE` that
+  will not restamp). None of the three calls `_stamp_edited` — see below.
+- **`lists/views.py`** — `list_save`, `list_unsave`, `list_save_dismiss`, the
+  `_savable_list` guard, `_not_your_own_list`, the `saved_by_viewer` context,
+  and the **reversed** Saved-tab filter.
+- **`urls.py`** — `/list/<id>/save/`, `/list/<id>/unsave/`,
+  `/list/<id>/save/dismiss/`.
+- **`lists/templates/lists/detail.html`** — the Save control, and the
+  `list_save.js` include.
+- **`lists/templates/lists/user_lists.html`** — the deleted card: plain-text
+  title, the notice, the Dismiss control.
+- **`social/static/css/reeltalk.css`** — `.list-save-btn`, `.list-card-deleted`
+  and `.list-deleted-notice`.
+- **`lists/static/js/list_save.js`** — the toggle, same shape as `likes.js`.
+- **`tests/test_lists_saving.py`** — new, 37 tests.
+
+**The trap the brief named, and how it was closed.** Dropping the
+`film_list__deleted=False` filter makes the deleted card render with its
+existing `<a class="list-card-name">`, and `list_detail` 404s on a deleted
+list — the offer-with-no-route bug, third appearance. The card's title becomes
+a plain `<span>` and the card stops being a navigation. Pinned **both ways**:
+the deleted card contains no `href` to the list page, and the *live* card
+still carries its anchor **and following it returns 200** — so the rule is
+keyed on `deleted` and not simply "never link from a Saved card".
+
+**The first attempt at the reversed filter was wrong in the easy direction.**
+It was written `.exclude(film_list__deleted=True, notice_dismissed_at__isnull=True)`,
+which drops **exactly the row R140 exists to show** — deleted *and* still
+undismissed. The correct form is `__isnull=False`: exclude a save when the
+list is deleted **and** the notice has already been dismissed. The inverted
+predicate is no harder to write than the right one and fails silently in the
+direction that looks like the old behaviour, so the polarity is now spelled
+out in the comment where it was written.
+
+**Silence proven by the ledger, not by the display.** Every silence test
+compares `Notification.objects.count()` across the action rather than
+checking what the Saved page renders, and one of them carries a
+**non-vacuity control**: a real like is posted through the real route first
+to put exactly one row on the ledger, so the test cannot pass against an
+empty table with the notifications app broken. Live, the same proof: the
+ledger read **9** before every save / unsave / delete operation in the
+browser probe and **9** after. `Kind` gained no `save` value either, which
+forecloses the producer rather than merely omitting it.
+
+**A save does not stamp the face.** `_stamp_edited` feeds `editedTime` on the
+wire (increment 6), and a save is one member's bookkeeping about somebody
+else's list — stamping it would broadcast an edit that never happened. Pinned
+by asserting `face.edited_date` is unchanged across a save.
+
+**The own-list rule has both halves.** L2 frames saving as a pointer at
+*somebody else's* list; nothing in the model forbids the self-pointer, so the
+control is hidden on the maker's page **and** both routes answer 400 to the
+maker — R85's symmetry rather than decoration. 400 and not 404 because the
+list exists and the caller may see it; the action is what is wrong, not the
+resource.
+
+**Two transports, split on what each control does.** Save/Unsave are AJAX JSON
+mirroring `like_status` — the answer carries the caller's state and *no count*,
+because a save has no tally on the page the way a like does, so there is no
+second fact the client could be permitted to guess at. Dismiss is a form post
+with a redirect, the `list_remove_film` shape: it takes a card **off** a list
+rather than flipping a control in place, so the next render comes from the
+database rather than from a browser-side copy of the Saved tab.
+
+**Dismiss retires the notice, not the save.** The row survives with its
+marker and the card leaves the Saved tab — a card that leads nowhere and says
+nothing further is not worth showing. That is also why the marker can be
+per-saver at all, and the per-saver property is tested rather than asserted:
+alice dismissing leaves carol's notice fully rendered and leaves carol's
+`notice_dismissed_at` null. A second dismiss does not move the timestamp, so
+the field keeps meaning *when it was seen*.
+
+**The route refuses what the page withholds — all three ways.** `_savable_list`
+copies `list_detail`'s hide rules rather than re-deriving them: a **deleted**
+list 404s (there was never a page on which to offer saving it), a
+**suspended** author's list 404s (the same reason `like_status` gives for the
+same row), and a **blocked** author's list 404s rather than offering a lesser
+view. The dismiss route deliberately does **not** carry `deleted=False` —
+that would defeat it, since the notice exists precisely on the deleted list —
+and it 404s on a *live* list so the marker cannot be set for no reason.
+
+**Accepted boundary, stated rather than implied.** `ListSave.film_list` is
+`CASCADE`, so a **hard** delete (raw SQL, a future purge) removes the save
+row and its dismiss marker together and the saver sees nothing at all — no
+notice, no card, no trace of what they saved. No production path hard-deletes
+a list today (`FilmList.delete()` is soft and `soft_delete_list` touches
+neither table), so this is accepted. If a purge job is ever added, this is
+the place it silently breaks the R140 promise.
+
+**Increment 7 left open on purpose.** `_savable_list` filters nothing on
+`local`, and two tests save a **remote** author's list through the same route
+and drive its notice and dismissal locally, so the save path cannot inherit a
+`local=True` assumption that would block L12 from the inside out.
+
+**Measured live** (headless Chromium against the deployed box, throwaway
+`l5probe_maker` / `l5probe_saver` — **30/30 checks, zero `pageerror`s**):
+Save clicked through the real control → `Saved`, `aria-pressed=true`; reload →
+still `Saved`, so the state is the server's; clicked again → back to `Save`.
+The control sits level with the author line (`btn.top=222`, `author.top=233`),
+`margin-top` reset to `0` as R134 #6 demands of anything in `.review-head`,
+fill `rgb(134, 23, 19)` inherited from `.btn`, and `elementFromPoint` at its
+centre returns the button itself. At 390px it is 77×45 and still receives its
+own click. The live card's link was **followed** and landed on
+`/list/10/ → 200`; the deleted card carries the notice, names the maker, and
+offers no anchor. The notice does not overflow its card at 390px
+(`noticeRight 357 ≤ cardRight 374`). Dismiss redirected to `?tab=saved`, the
+card was gone, and the empty state came back. The maker saw no Save control on
+their own list and still saw their Edit link.
+
+**Gate: 2406 passed + 5 skipped in 34:01, `PYTEST_EXIT=0`** (baseline 2366;
+**+40 = 37 new tests + 3 clean-room params** for
+`lists/migrations/0002_listsave_notice_dismissed_at.py`,
+`lists/static/js/list_save.js` and `tests/test_lists_saving.py`), skips
+unchanged. `ruff check` / `ruff format --check` / `makemigrations --check`
+all clean, the last two run against the **host tree via bind mount** so they
+are not checking the image's stale copy. `test_federation_interactions.py`
+was run **early**, per the standing L13 precedent that a widening deletes an
+accidental guard and the federation suite is the thing that catches it; it was
+green before the full run.
+
+**One existing test was reversed, deliberately.**
+`test_the_saved_tab_excludes_a_list_the_maker_deleted` pinned the rule R140 1
+overturns. It is kept, inverted and renamed
+`test_the_saved_tab_no_longer_drops_a_list_the_maker_deleted`, because the
+reversal is the thing worth pinning — a future cleanup that reinstated the
+filter would look like the old correct behaviour and would silently undo an
+owner decision.
+
+**Probe torn down.** Both probe members, their two lists (one live, one
+soft-deleted) and their items, their two faces, five probe films and both save
+rows: probe users 2 → 0, lists 2 → 0, saves 2 → 0, films 5 → 0, statuses
+2 → 0, orphaned list items 0. The notification ledger stayed at **9
+unchanged** across the whole increment, which is the L6 proof read off the
+database rather than off the page. **Only the one session the probe minted was
+deleted** (total sessions 4 → 3) — each session was decoded with
+`SessionStore(session_key=…).load()` and matched on `_auth_user_id`, because
+deleting every session would have logged the owner out of their own browser.
+
+**Still owed: nothing inside increment 5.** §2K has no open questions.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -7437,3 +7605,5 @@ not an optimisation.
 - **R140 — §2K's last two open questions are settled: a deleted saved list shows a dismissible notice, and the Save button keeps lit crimson (owner decisions 2026-10-07, taken together at the close of increment 4).** **(1) Q5 — a saved list whose creator deleted it does NOT silently vanish.** The owner's ruling: *"a notice should be visible in the user's saved lists that the list has been deleted. The user can then dismiss that notice."* This **reverses the read rule increment 2 shipped.** `user_lists` currently filters `film_list__deleted=False` on the Saved tab with a comment calling that filter "not optional" — under R140 the deleted list must still surface, flagged, until the saver dismisses it. **What makes this expressible at all is that the delete is soft:** `FilmList.delete()` sets a flag and leaves the row, so the `ListSave` pointer survives and still names what was lost. The `CASCADE` on `ListSave.film_list` is the **hard**-delete half only. **The known boundary worth stating rather than discovering:** a hard delete (raw SQL, a future purge) cascades the save row away and takes the notice with it — the saver then sees nothing at all. That is accepted, because no production path hard-deletes a list today. Dismissing needs somewhere to live, which means a field on `ListSave` (a `dismissed_date`, most likely) and therefore **a migration** — the first the lists feature has needed since `lists/0001`. Dismiss is per-saver, not global: one member dismissing a notice says nothing about any other member's.
   **(2) Q7 — `.btn`'s lit crimson is the right weight for the Save control, for now.** The owner's reasoning defers the question rather than answering it on the merits: *"At a later time there will be a total design pass to polish everything within the UI and that can be addressed then."* So build the Save control on `.btn` and spend no design effort on it. **This is explicitly a parking decision, not a settled one** — the M6-style whole-UI polish pass owns it after that, and nothing here should be read as crimson-having-won on the merits against a quieter treatment.
   **With these two closed, §2K has no open questions left.** Increments 5 (saving), 6 (federation outbound) and 7 (federation inbound) are all unblocked on decisions; anything still unresolved in them is a new question, not a carry-over.
+
+- **R141 — Increment 5's six saving decisions: dismiss retires the notice and not the save, the deleted card stops being a navigation, and the transport splits on what each control does (owner-reviewed implementation decisions 2026-10-07, taken against the rendered live box rather than in the abstract).** R140 settled *that* a deleted saved list shows a dismissible notice and that the Save control is lit crimson; these are the six things it did not decide, each of which had two live options and only one of which the code can be read to explain afterwards. **(1) Dismissing retires the notice, and the card leaves the Saved tab with it — but the `ListSave` row survives.** R140 floated the field name `dismissed_date`; the shipped field is `notice_dismissed_at`, because the bare name reads as *"this save was dismissed"*, i.e. undone, which is a different feature. Keeping the row rather than deleting it is what makes the marker meaningful at all: delete-on-dismiss needs no field, so a field existing in the schema is itself the statement that the save persists and only its *display* changes. The alternative — leave the card, drop the notice — was rejected as a permanently dead card that links nowhere and says nothing further. **How to apply:** `notice_dismissed_at` is never a cancellation. Unsaving is `unsave_list`, which really deletes; dismissing is a marker on a row that stays. **(2) A deleted saved card is not a navigation.** Its title renders as a plain `<span>`, not the `<a class="list-card-name">` every other card carries, because `list_detail` 404s on `deleted=False` and an anchor there is R85's offer-with-no-route bug for the third time. Pinned in both directions — the live card keeps its anchor **and following it returns 200** — so the rule reads as *keyed on `deleted`* and not as *never link from a Saved card*. **(3) Two transports, split by what the control does, not by convenience.** Save/Unsave are AJAX JSON mirroring `like_status`; Dismiss is a form post with a redirect. The line is that a toggle repaints a control in place, while a dismiss removes a row from a list — and a row removal should come back from the database on the next render rather than be spliced out client-side, the `list_remove_film` precedent. The JSON answer carries **no count**, unlike a like's: a save has no tally on the page, so there is no second fact the client could be permitted to guess at. **How to apply:** do not "unify" these for consistency. If a future control removes something, it posts and re-renders; if it flips state on a thing still on screen, it is JSON. **(4) The own-list refusal is 400, and it is on both halves.** L2 frames saving as a pointer at somebody else's list; nothing in the model forbids the self-pointer, so the rule is stated as a hidden control **and** a refused route (R85's symmetry). 400 rather than 404 because the list exists and the caller may see it — the action is wrong, not the resource. Keeping the refusal on `unsave` too makes it one rule instead of one per half. **(5) A save must not stamp the face.** `_stamp_edited` feeds `editedTime` on increment 6's wire, and a save is one member's bookkeeping about somebody else's list; stamping it would broadcast an edit that never happened. This is why `save_list`/`unsave_list`/`dismiss_deleted_notice` deliberately sit outside the stamping discipline every other service function follows — a reader who assumes "service function ⇒ face gets stamped" will get increment 6 wrong. **(6) The save route is not owner-scoped and is not locality-scoped.** `_savable_list` is a new guard rather than `_owned_list`, because L4/L12 make any visible list savable; and it filters nothing on `local`, which is the forward-compatibility gate for increment 7 — an assumption that the list lives here would block L12 from the inside out rather than leaving it open. **How to apply:** when increment 7 wires the mirror, do not add a `local=True` filter to the save path to "be safe"; the two remote-author tests in `test_lists_saving.py` exist to catch exactly that. **Accepted, not overlooked:** `ListSave.film_list` is `CASCADE`, so a hard delete (raw SQL, a future purge) takes the save row and its dismiss marker together and the saver sees nothing at all — no notice, no card, no trace. No production path hard-deletes a list today, so this is accepted; if a purge job is ever added, this is where R140's promise silently breaks.

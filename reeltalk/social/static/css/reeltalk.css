@@ -2404,3 +2404,52 @@ form.inline button,
 .list-toolbar .btn {
   margin-top: 0;
 }
+
+/* --- Saving a list (§2K increment 5, L2 / R140) -------------------------
+   The Save control and the notice a deleted list wears on the Saved tab. */
+
+/* The Save control is `.btn` and nothing more — R140 2 ruled that lit
+   crimson weight and explicitly parked any further design work on it for a
+   future whole-UI pass, so the only line here is the reset R134 #6 demands
+   of anything dropped into `.review-head`: `button, .btn` carries
+   `margin-top: 1rem` and that rule is not opt-in. */
+.list-save-btn {
+  margin-top: 0;
+}
+
+/* A saved list whose maker deleted it stays on the Saved tab until its saver
+   dismisses the notice (R140 1). What it must NOT do is read as navigable:
+   the title is a plain span because `/list/<id>/` 404s, and the hover
+   background is exactly what sells a card as a link. So the hover is pinned
+   back to the resting paint — same specificity as `.list-card:hover`, later
+   in the file, which is what makes it win — and the whole card sits at
+   reduced emphasis to match being a record rather than a destination. */
+.list-card-deleted {
+  opacity: 0.62;
+}
+
+.list-card-deleted:hover {
+  background: var(--panel);
+  border-color: var(--border);
+}
+
+.list-card-deleted .list-card-name {
+  color: var(--muted);
+}
+
+/* The notice line: the sentence and its Dismiss control together, wrapping
+   onto a second line at narrow widths rather than overflowing the card. The
+   Dismiss button rides in `form.inline`, which already gives it the small
+   muted ghost look — deliberately NOT `.btn`, whose lit fill would make
+   dismissing louder than the fact being dismissed. */
+.list-deleted-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.6rem;
+  margin: 0.3rem 0 0;
+  font-family: var(--ui);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--cream);
+}

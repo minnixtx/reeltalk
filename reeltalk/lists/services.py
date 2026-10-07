@@ -25,7 +25,7 @@ from django.utils import timezone
 
 from reeltalk.core.models import Film, Status
 from reeltalk.core.utils import render_markdown
-from reeltalk.lists.models import FilmList, ListItem
+from reeltalk.lists.models import FilmList, ListItem, ListSave
 
 # The two directions ``move`` understands. Named because a typo in a bare
 # string literal at a call site would otherwise read as a third, silent one.
@@ -232,10 +232,71 @@ def soft_delete_list(film_list: FilmList) -> FilmList:
 
     The items and the saves are **not** touched. ``deleted`` hides the list from
     every reader, which is the observable half of L2 for a soft delete; the
-    CASCADE on ``ListSave.film_list`` is the hard-delete half. A reader of
-    "lists you saved" must therefore filter on ``film_list__deleted=False``
-    (increment 5) rather than assume a save row means a saveable list.
+    CASCADE on ``ListSave.film_list`` is the hard-delete half. R140 1 is what
+    reads that surviving pointer: the Saved tab shows the deleted list with a
+    dismissible notice instead of filtering it out, so a saver learns their
+    pointer went dead rather than watching it disappear.
     """
     film_list.delete()
     film_list.status.delete()
     return film_list
+
+
+# --- saving (increment 5, L2/L6/R140 1) -----------------------------------
+
+
+def save_list(user, film_list: FilmList) -> bool:
+    """Point the user's Saved tab at this list. True if that was new.
+
+    ``get_or_create`` rather than ``create``: the unique constraint on
+    ``(user, film_list)`` would reject a second insert with ``IntegrityError``
+    and turn a double-click into a 500. Skipping instead is the same
+    discipline as ``_append_films`` and ``shelve_to_watchlist`` (R19) — the
+    second call is a genuine no-op that still succeeds.
+
+    Returns whether a row was actually created so the caller can tell "saved
+    it" from "already had it" without a second query.
+
+    **Nothing here notifies.** L6 is absolute: saving is silent. There is no
+    ``Notification.Kind`` for it and no producer anywhere, and the proof is
+    the ledger count being identical before and after, not the absence of a
+    display.
+
+    Nor does this stamp the face as edited. A save is one member's own
+    bookkeeping about somebody else's list — it changes nothing about the
+    list, and ``_stamp_edited`` feeds ``editedTime`` on the wire, so
+    stamping here would broadcast an edit that never happened.
+    """
+    _, created = ListSave.objects.get_or_create(user=user, film_list=film_list)
+    return created
+
+
+def unsave_list(user, film_list: FilmList) -> bool:
+    """Drop the user's pointer at this list. True if there was one.
+
+    Idempotent by construction: a delete that matched nothing is a no-op that
+    still succeeds, so a double press cannot fail. The dismissal marker goes
+    with the row — it only ever meant something attached to that save.
+    """
+    deleted, _ = ListSave.objects.filter(user=user, film_list=film_list).delete()
+    return deleted > 0
+
+
+def dismiss_deleted_notice(user, film_list: FilmList) -> bool:
+    """Retire the "this list was deleted" notice on the user's own pointer.
+
+    True if this call set the marker, False if it was already set. The caller
+    has already established the row exists; the ``notice_dismissed_at__isnull``
+    clause in the update is what makes a second dismiss a no-op rather than a
+    restamp, so the button can be pressed twice without moving a timestamp.
+
+    Per-saver by construction and not by care: the marker is on the
+    ``(user, film_list)`` row, so one member dismissing says nothing about any
+    other member's notice. A marker anywhere else — on the ``FilmList``, on a
+    shared flag — would let one dismissal silence everybody, which is exactly
+    the wrong shape for a per-viewer acknowledgement.
+    """
+    updated = ListSave.objects.filter(
+        user=user, film_list=film_list, notice_dismissed_at__isnull=True
+    ).update(notice_dismissed_at=timezone.now())
+    return updated > 0

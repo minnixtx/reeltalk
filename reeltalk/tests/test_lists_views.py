@@ -449,17 +449,26 @@ def test_the_saved_tab_lists_what_you_saved_and_names_the_maker(alice, bob, dune
 
 
 @pytest.mark.django_db
-def test_the_saved_tab_excludes_a_list_the_maker_deleted(alice, bob, dune):
-    """``FilmList.delete()`` is soft, so a ``ListSave`` row can point at a
-    list that is gone. The read side has to filter it or the card would lead
-    to a 404."""
+def test_the_saved_tab_no_longer_drops_a_list_the_maker_deleted(alice, bob, dune):
+    """R140 1 **reverses** the rule this test used to pin.
+
+    Through increment 2 the Saved tab filtered ``film_list__deleted=False``,
+    so a deleted list vanished from the saver's view with no explanation. The
+    owner ruled against that: the list must still surface, carrying a notice
+    the saver can dismiss. The old assertion is kept here inverted rather than
+    deleted, because the reversal is the thing worth pinning — a future
+    "cleanup" that reinstates the filter would look like the old correct
+    behaviour and would silently undo an owner decision.
+
+    The full notice/dismiss surface is in ``test_lists_saving.py``.
+    """
     theirs = create_list(bob, title="Doomed list", films=[dune])
     ListSave.objects.create(user=alice, film_list=theirs)
     assert "Doomed list" in _body(_login("alice").get("/user/alice/lists/?tab=saved"))
     soft_delete_list(theirs)
     body = _body(_login("alice").get("/user/alice/lists/?tab=saved"))
-    assert "Doomed list" not in body
-    assert "You haven't saved any lists yet." in body
+    assert "Doomed list" in body
+    assert "You haven't saved any lists yet." not in body
 
 
 @pytest.mark.django_db

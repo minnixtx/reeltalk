@@ -48,11 +48,14 @@ from reeltalk.lists.services import (
     MOVE_UP,
     add_films,
     create_list,
+    dismiss_deleted_notice,
     move,
     remove_film,
     rename,
+    save_list,
     set_description,
     soft_delete_list,
+    unsave_list,
 )
 from reeltalk.social.views import _resolve_profile_user
 
@@ -110,6 +113,13 @@ def list_detail(request, list_id):
             "like_count": like_count,
             "liked_by_viewer": request.user.is_authenticated
             and face.likes.filter(user=request.user).exists(),
+            # Whether the viewer already has a pointer at this list, so the
+            # Save control renders in its Saved state rather than being
+            # painted by the browser. Same one-row lookup the like state uses.
+            "saved_by_viewer": request.user.is_authenticated
+            and ListSave.objects.filter(
+                user=request.user, film_list=film_list
+            ).exists(),
             # The thread on the list's face. Flat, labelled and block-filtered
             # by the post page's own helper, so a reply under a list reads
             # exactly as a reply under a review does.
@@ -165,10 +175,27 @@ def user_lists(request, localname):
     tab = "saved" if is_self and request.GET.get("tab") == "saved" else "made"
     made = saves = []
     if tab == "saved":
-        # ``film_list__deleted=False`` is not optional: FilmList.delete() is
-        # soft, so a save can be pointing at a list that is gone.
+        # R140 1 **reverses** the filter that sat here from increment 2, which
+        # excluded every deleted list and called that exclusion "not optional".
+        # It is no longer optional in the opposite direction: the deleted list
+        # must surface carrying its notice, and drop out only once the saver has
+        # dismissed that notice. So the rule is *exclude a save when the list
+        # is deleted **and** the notice has already been dismissed* —
+        # ``notice_dismissed_at__isnull=False``, not ``__isnull=True``. The
+        # polarity is worth spelling out because the inverted form is exactly
+        # as easy to write and drops the one row this whole decision exists to
+        # show; the notice test catches it.
+        #
+        # This is also what keeps the empty state honest. ``saves`` is the set
+        # with **nothing to show**, so a member whose only saved list was
+        # deleted and not yet dismissed still gets their notice rather than
+        # also being told they haven't saved anything.
+        #
+        # ``select_related`` already pulls the whole ``FilmList`` row, so the
+        # template's ``save.film_list.deleted`` costs nothing extra.
         saves = (
-            ListSave.objects.filter(user=profile, film_list__deleted=False)
+            ListSave.objects.filter(user=profile)
+            .exclude(film_list__deleted=True, notice_dismissed_at__isnull=False)
             .select_related("film_list", "film_list__user")
             .annotate(item_count=Count("film_list__items"))
             .order_by("-created")
@@ -587,3 +614,152 @@ def list_delete(request, list_id):
     soft_delete_list(film_list)
     messages.success(request, f"Deleted “{title}”.")
     return redirect("user-lists", localname=request.user.localname)
+
+
+# --- saving (increment 5: L2 / L6 / L12, R140) ----------------------------
+
+
+def _savable_list(request, list_id):
+    """A list the requesting member may point their Saved tab at, or 404.
+
+    Deliberately **not** ``_owned_list``. Saving is the one list write that is
+    not owner-scoped: L4 makes every list public and L12 makes every visible
+    list savable, so any member may save anybody's. Reaching for the owner
+    helper here would be the wrong guard and would quietly make the feature do
+    nothing at all.
+
+    Also deliberately unfiltered on ``local=True``. Increment 7 has to save a
+    remote mirror through this exact route, so baking in an assumption that
+    the list lives here would leave that path blocked from the inside out.
+
+    The three refusals are copied from ``list_detail``'s hide rules rather
+    than re-derived, because R85 says a route must refuse exactly what the
+    page withholds:
+
+    * **deleted** — ``/list/<id>/`` 404s on ``deleted=False``, so there is
+      no page on which saving could ever have been offered. Refusing here is
+      that same rule stated on the write side, not a new one. Without it a
+      hand-made POST would resurrect a pointer at a list nobody can open;
+    * **suspended author** — the page 404s (R102) and ``like_status`` 404s
+      on the same row for the same stated reason: a hidden post that still
+      accepts writes accumulates interactions nobody can ever see the
+      reason for;
+    * **blocked author** — the page 404s rather than offering a lesser view,
+      so the save route must not offer one either.
+    """
+    film_list = get_object_or_404(
+        FilmList.objects.select_related("user"), pk=list_id, deleted=False
+    )
+    if film_list.user.suspended_at is not None:
+        raise Http404
+    blocked_ids = (
+        set(request.user.blocks.values_list("id", flat=True))
+        if request.user.is_authenticated
+        else set()
+    )
+    if film_list.user_id in blocked_ids:
+        raise Http404
+    return film_list
+
+
+def _not_your_own_list(film_list, user):
+    """Refuse a save aimed at the member's own list.
+
+    L2 frames saving as taking a pointer at *somebody else's* list. Nothing
+    in the model forbids pointing at your own — the unique constraint is on
+    ``(user, film_list)``, not on the maker being a different person — so
+    the rule has to be stated. It is stated here as well as in the template
+    because R85 is symmetric: a control hidden from the owner's page is
+    decoration unless the route behind it refuses the owner too.
+
+    A JSON 400 rather than a 404: the list exists and the caller may see it,
+    so "not found" would be false. What is wrong is the action, not the
+    resource.
+    """
+    if film_list.user_id == user.pk:
+        return JsonResponse({"error": "You can't save your own list."}, status=400)
+    return None
+
+
+@login_required
+@require_POST
+def list_save(request, list_id):
+    """Save the list: put a live pointer at it on the viewer's Saved tab.
+
+    AJAX, mirroring ``like_status`` — JSON in, JSON out, no reload, no
+    messages framework. What the answer carries is the caller's own state and
+    nothing else: unlike a like, a save has no tally anywhere on the page to
+    keep in step, so there is no count to return and no second fact the
+    client could otherwise be permitted to guess at.
+
+    **Idempotent.** A double press lands here twice and produces one row,
+    because ``save_list`` uses ``get_or_create``; the unique constraint on
+    ``(user, film_list)`` would otherwise turn a double-click into an
+    ``IntegrityError`` and a 500.
+
+    **Silent, per L6.** There is no ``notify()`` call on this path and there
+    never will be — no new ``Notification.Kind``, no ledger row, nothing sent
+    to the maker. The proof is not that the Saved page displays no
+    notification but that ``Notification.objects.count()`` is identical
+    before and after a save, which is the only assertion that would notice a
+    producer that existed and was merely not rendered.
+    """
+    film_list = _savable_list(request, list_id)
+    refused = _not_your_own_list(film_list, request.user)
+    if refused is not None:
+        return refused
+    save_list(request.user, film_list)
+    return JsonResponse({"saved": True})
+
+
+@login_required
+@require_POST
+def list_unsave(request, list_id):
+    """Take the viewer's pointer at this list back off again.
+
+    The other half of the toggle, with the same guards and the same answer
+    shape. Idempotent in its own direction: a delete that matched nothing is
+    a no-op that still succeeds, so a double press cannot fail here either,
+    and unsaving a list that was never saved is not an error.
+    """
+    film_list = _savable_list(request, list_id)
+    refused = _not_your_own_list(film_list, request.user)
+    if refused is not None:
+        return refused
+    unsave_list(request.user, film_list)
+    return JsonResponse({"saved": False})
+
+
+@login_required
+@require_POST
+def list_save_dismiss(request, list_id):
+    """Retire the "this list was deleted" notice on the viewer's own save.
+
+    A form post with a redirect rather than AJAX, unlike the save toggle right
+    above it, because the two controls do different things: Save flips a
+    control in place, while Dismiss takes a card off a list. That is the
+    ``list_remove_film`` shape — post, and let the next render come from the
+    database rather than splicing the row out client-side, so there is no
+    browser-side copy of the Saved tab that could drift from the real one.
+
+    Note what this lookup does **not** filter. ``deleted=False`` would defeat
+    the whole route, because the notice exists precisely on the deleted list.
+    The scope is the save row and its owner; the deleted half is the
+    precondition, not something to exclude.
+
+    A live list 404s here rather than quietly accepting the marker. That keeps
+    ``notice_dismissed_at`` meaning exactly one thing — this saver saw the
+    notice about this list — instead of also being a field somebody can set on
+    a live save for no reason.
+    """
+    save = get_object_or_404(
+        ListSave.objects.select_related("film_list"),
+        user=request.user,
+        film_list_id=list_id,
+    )
+    if not save.film_list.deleted:
+        raise Http404
+    title = save.film_list.title
+    dismiss_deleted_notice(request.user, save.film_list)
+    messages.success(request, f"Dismissed “{title}”.")
+    return redirect(f"{reverse('user-lists', args=[request.user.localname])}?tab=saved")

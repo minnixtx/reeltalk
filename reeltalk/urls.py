@@ -195,6 +195,26 @@ urlpatterns = [
     ),
     path("list/<int:list_id>/move/", lists_views.list_move, name="list-move"),
     path("list/<int:list_id>/delete/", lists_views.list_delete, name="list-delete"),
+    # Saving (§2K increment 5, L2/L6/L12, R140). Two toggle routes rather
+    # than one that flips a flag, because the two halves are different writes
+    # -- an insert and a delete -- and a single "toggle" endpoint has to work
+    # out which one it means from the current state, which is a race with
+    # every other tab the member has open. Two named routes make the intent
+    # explicit in the URL.
+    path("list/<int:list_id>/save/", lists_views.list_save, name="list-save"),
+    path(
+        "list/<int:list_id>/unsave/",
+        lists_views.list_unsave,
+        name="list-unsave",
+    ),
+    # The dismiss for R140 1's deleted-list notice hangs off the same
+    # ``/list/<id>/save/`` stem rather than being its own shape: it acts on
+    # the same save row, and nesting it says so.
+    path(
+        "list/<int:list_id>/save/dismiss/",
+        lists_views.list_save_dismiss,
+        name="list-save-dismiss",
+    ),
     # Follow / unfollow a profile (M5 increment 2): POST-only routes sharing
     # the extended pattern so mirror handles (<user>@<netloc>) match too.
     re_path(

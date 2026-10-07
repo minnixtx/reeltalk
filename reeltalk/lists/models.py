@@ -155,6 +155,19 @@ class ListSave(models.Model):
     )
     created = models.DateTimeField(default=timezone.now)
 
+    # R140 1: when the maker soft-deletes a saved list, the saver sees a
+    # notice rather than a silent vanish, and can dismiss it. The marker lives
+    # here because this row is per-(saver, list) by its unique constraint,
+    # which is the only place a *per-saver* dismissal can be expressed at all
+    # -- anywhere else and one member's dismissal would silence everybody's.
+    #
+    # Named ``notice_dismissed_at`` rather than a bare ``dismissed_date``
+    # because the bare name reads as "this save was dismissed", i.e. undone.
+    # It is not: the save row survives, and what the flag retires is the
+    # notice -- which in turn takes the deleted list off the Saved tab, since
+    # a card that leads nowhere and says nothing more is not worth showing.
+    notice_dismissed_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         ordering = ["-created"]
         constraints = [
