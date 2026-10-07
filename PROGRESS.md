@@ -86,9 +86,10 @@ is history.**
     decision ("We won't do lists") on 2026-10-06. Do not cite the old
     refusal; it no longer holds. The shape is locked as **L1–L13 = R137**
     in §2K — read §2K before asking any design question about lists,
-    because all thirteen are already answered. Only Q1 (feed strip length),
-    Q5 (a saved list whose creator deleted it) and Q7 (the Save button
-    weight) are still open, and each belongs to a later increment.
+    because all thirteen are already answered. **Q1 is now settled too
+    (R139): the feed row is "X created a new list" / the title / five
+    posters then `+N`.** Only Q5 (a saved list whose creator deleted it)
+    and Q7 (the Save button weight) are still open, both at increment 5.
   - No third column on the home feed (R64).
   - The genre subfeed keeps its numbered 20-per-page links, and its
     inconsistency with the endless home feed is deliberate (R132 7) — do
@@ -103,8 +104,9 @@ is history.**
   right thing; `_feed_row.html` gains the `.list-strip` branch, which
   changes `/feed/page/` in the same commit because that partial is why it
   exists; and the reply-control gate widens, with all four halves moving
-  together per R85. **Settle Q1 (strip length, cap with `+N`?) with the
-  owner before building the strip.** This increment is visual: build →
+  together per R85. **Q1 is already settled — build the strip at five
+  posters with `+N`, on three lines: verb line, title, strip (R139).**
+  This increment is visual: build →
   deploy → hand the owner the live URL → browser review → only then the
   full gate.
 - **Process rules for the visual half of this feature.** Deploy and get the
@@ -142,7 +144,7 @@ is history.**
 | Product contract — domain model, watch state, TMDB, federation surface, deployment shape | `PLAN.md` §3 |
 | **D-series** — the original product decisions (D1–D17) | `PLAN.md` §2 |
 | License audit | `PLAN.md` §4 |
-| **R-series** — rewrite-era decisions (R1–R138) | `PROGRESS.md` §4 |
+| **R-series** — rewrite-era decisions (R1–R139) | `PROGRESS.md` §4 |
 | **The lists feature — the plan, the locked shape, the increments** | `PROGRESS.md` §2K |
 | What was actually built, with commit hashes | `PROGRESS.md` §2 |
 | Host and deploy facts for this box | `PROGRESS.md` §3 |
@@ -6467,11 +6469,15 @@ it, and the like lands back here.
 
 ### Open questions, to settle as each increment reaches them
 
-**Q2, Q3, Q6 and Q8 are closed — see R138.** Only Q1, Q5 and Q7 remain open.
+**Q1, Q2, Q3, Q6 and Q8 are closed — see R138 and R139.** Only Q5 and Q7
+remain open, both at increment 5.
 
-1. **Feed strip length** — a rendered mock showed all 7 posters and the row
-   measured 111px tall. Cap it (8? 10?) with a `+N`, or let a 40-film list
-   make a very tall feed row? *(increment 4)*
+1. ~~**Feed strip length**~~ — **settled: three lines, five posters, cap with
+   `+N`.** The row reads "minnix created a new list" / the list title / up
+   to five posters then `+N`. Measured on the live feed rather than from the
+   mock: 16 posters fit one line at 728px with the 40×60 thumbnail, a
+   normal review row is 195px, so the cap is for legibility and
+   click-through intent, not for height. *(R139)*
 2. ~~**List page length**~~ — **settled: no pagination.** The ranking is the
    content and a list is read top to bottom; a 200-film long page is
    accepted. Revisit only if it hurts first paint. The genre subfeed's
@@ -7299,3 +7305,4 @@ not an optimisation.
 
 - **R137 — User-made lists of films: the thirteen shape decisions that settle the feature before a line of it is written (owner decisions 2026-10-06, taken in a planning session that built nothing).** Full plan in **§2K**; the numbered list L1–L13 lives there. The decisions, in brief: **L1** freely editable forever; **L2** save is a live pointer labelled "saved from @user", cascading away with the creator's delete; **L3** ranked 1..N with up/down reorder; **L4** public only; **L5** films are added only from the list page, via TMDB search — one door, not four; **L6** saving is silent, so no new `Notification.Kind` is ever added; **L7** a "Lists" tab on profiles; **L8** a list's film row is poster + title + year and nothing more; **L9** a list gets a **post face** — a `Status` row stands for it socially; **L10** canonical `/list/<id>/`, with `/status/<id>/` redirecting to it; **L11** federates as a `Note` plus a ReelTalk-namespaced extension; **L12** any visible list is savable, remote mirrors included; **L13** a reply to a list carries **no `status_type`**. **L13 is the load-bearing one and the reason is a rule, not a preference:** `Status.save` raises on a typed status with no film, and `add_reply` labels its row `comment` while copying `film_id` off the parent — so a reply to a film-less list is rejected outright. Leaving the reply untyped was chosen because `activitypub/statuses.py:422` already does exactly that on the inbound path (`Status.Type.COMMENT if film is not None else None`), because **no production query reads the `comment` value at all** — every type filter asks for `REVIEW_TYPES` — and because it keeps the film rule one sentence with one exemption instead of two. **Verified before choosing, because the owner asked directly whether commenting would still work:** the thread is built from `reply_parent` and never from `status_type` (`reply_counts` filters on `reply_parent_id`, `deleted`, `suspended_at`), the reply producer keys on the parent's author and the notifications app never consults the type, and comments were never feed rows anyway since `Status.feed_for` excludes every reply unconditionally. **Two findings that change the build, both recorded in §2K and worth restating here:** `Film._repoint_related` repoints only shelf films, statuses and blocked films, so **`ListItem` must be added there or a film merge silently orphans it**; and the feed row's reply-control gate `entry.interactive and entry.film` would hide the reply icon on a list row without failing anything, since a list row is interactive by `status_id` but has no film. **And the correction the brief arrived with:** `List` and `ListItem` do **not** exist in this repo — no model, view, URL, template, migration or AP type. The prior claim in the NOW block that they survived as BookWyrm inheritance was false; `PLAN.md:293-295` already said "there is no lists app." The feature is greenfield on top of the existing post machinery, which is the only reason seven increments covers it.
 - **R138 — Four lists decisions taken before increment 2, settling §2K's open questions 2, 3 and 6 plus a feed-reply gate §2K never named (owner decisions 2026-10-06, all four taken in one pass after the options were laid out in plain prose; the owner agreed with each recommendation).** **(1) "My Lists" is `/user/<localname>/lists/` — not `/lists/`, not `/my-lists/`.** What settled it: "My Films" on this site is already `user/<localname>/films/`, a per-user page with no top-level index, so a top-level `/lists/` would be a *third* URL shape rather than the second one, and it would duplicate the profile's own Lists tab. Matching `user/<name>/films/` makes the nav item and the profile tab the **same page** with two entry points, gives somebody else's lists that shape for free, and means the nav's active state matches a `/user/` prefix the way My Films already does. **(2) No pagination on the list page.** The ranking is the content and a list is read top to bottom, so a pager interrupts the thing being read; a 200-film list being a long page is accepted rather than designed around, and the decision is to revisit only if real lists hurt first paint. Explicitly distinct from the genre subfeed's numbered 20-per-page links, which stay untouched. **(3) The profile "Lists" tab is hidden when the member has made no lists.** A tab that leads to nothing is worse than a tab that appears when there is something behind it, and the count needed to decide is already being made. Chosen over always showing it with an empty state, and over showing the owner their own tab even when empty. **(4) A list's feed row IS replyable from the feed, and the gate widens to admit it.** The existing reply-control gate is `entry.interactive and entry.film`; a list row is interactive by `status_id` but carries no film, so as written the icon would be withheld while the reply route happily accepted one — the route-behind-no-button half of the R85 shape. The gate becomes "interactive and (film or list face)", and per R85 the four halves that move together (this gate, the like lookup, `FeedEntry.interactive`, and the post page's control gate) move with it. Chosen over "replies only on the list page", which would have made a list visibly less conversational than a review and cut against L9's whole point in giving a list a post face. **Still open, and where each lands:** §2K's Q1 (feed poster-strip length) at increment 4; Q5 (a saved list whose creator deleted it — CASCADE means it silently vanishes from Saved) at increment 5, where it should be confirmed rather than discovered; Q7 (the "Save list" button weight) at increment 5. **Q8 is already answered by the build:** `test_two_lists_may_share_a_title` pins that nothing depends on a list title being unique per user.
+- **R139 — §2K's Q1 (feed poster-strip length) is settled: three lines, five posters, cap with "+N" (owner decision 2026-10-07, taken from a rendered measurement rather than from the mock).** The list's feed row is, top to bottom: a **verb line** — "minnix created a new list" — then the **list title**, then **up to five posters followed by "+N"** if there are more. The owner's own reasoning: *"There's no need to show a ton of posters on the feed when a user can just click on the post and see the list for themselves."* **The cap is not about height, and the measurement says so.** At the live feed width of 728px with the feed's own 40×60 thumbnail, **16 posters fit on one line**; a normal review row measures **195px**; the 2026-10-06 mock's 7-poster strip measured 111px; an uncapped 40-film strip would be 188px across three lines. So §2K's worry that a long list "makes a very tall feed row" was never really true — even 40 films is about one review row tall. **What the cap is actually for is legibility and intent:** a run of 30 thumbnails reads as texture rather than information, and the strip's job is to make the reader open the list, not to substitute for it. Capping at 5 keeps the row a teaser and keeps the click-through reason. **What this commits increment 4 to:** the strip never wraps; the cap is a named constant, not a magic number in the template; "+N" appears only when the list is longer than the cap; and the row needs a **verb line of its own** — "created a new list" — which is a new feed verb, not a shelf event's, so it has to be added rather than borrowed. This also makes the feed row consistent with L8's minimalism on the list page itself: poster-and-title information density, nothing extra at either level.
