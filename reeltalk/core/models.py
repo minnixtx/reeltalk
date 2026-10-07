@@ -826,6 +826,13 @@ FEED_BULK_WINDOW = timedelta(minutes=5)
 # much they can reach.
 FEED_PAGE_SIZE = 20
 
+# How many posters a list's feed row draws before it says ``+N`` instead
+# (R139). Named rather than written into the template because the cap is what
+# makes ``+N`` correct: the overflow is measured against THIS number, not
+# against however many tiles happened to render, so a poster-less film can
+# never quietly shift what the row claims the list holds.
+LIST_FEED_POSTER_CAP = 5
+
 # Tiebreak ranks inside the feed sort key (R132 decision 2). A shelf event
 # outranks a standalone status so a same-timestamp pair keeps the order the
 # pre-paging feed produced by insertion (shelf entries are built first). The
@@ -868,6 +875,30 @@ def decode_feed_cursor(raw: str) -> tuple[datetime, int, int]:
         raise ValueError(f"Unreadable feed cursor: {raw!r}") from exc
 
 
+@dataclass(frozen=True)
+class ListStrip:
+    """The poster strip a list's feed row draws (§2K increment 4, R139).
+
+    ``film_count`` is the list's **real** length and ``posters`` is the capped
+    slice that gets drawn. They are kept apart on purpose: ``overflow`` is
+    computed from the real length against :data:`LIST_FEED_POSTER_CAP`, never
+    from ``len(posters)``, so however the strip renders a film that has no
+    poster, the ``+N`` still reports what the list actually holds.
+
+    ``title`` rides along rather than being read off the entry twice so the
+    template has one object for the whole row body.
+    """
+
+    title: str
+    posters: list[Film]
+    film_count: int
+
+    @property
+    def overflow(self) -> int:
+        """Films in the list beyond the drawn cap. Zero when none."""
+        return max(0, self.film_count - LIST_FEED_POSTER_CAP)
+
+
 @dataclass
 class FeedEntry:
     """One home-feed row (R35; bulk aggregation per R37).
@@ -903,12 +934,26 @@ class FeedEntry:
     unlike is the same lie as a control that no-ops. ``feed_entries``
     fills them with two batched queries rather than one per row.
 
-    ``reply_count`` is how many live replies the row's status carries.
-    There is no reply control on a feed row — the thread is on the post
-    page and the row already links to it — but the number itself shows,
-    and it shows on a remote mirror too: R85's split again, a count is a
-    fact about the post and only the offer to act on it is gated on
-    locality.
+    ``reply_count`` is how many live replies the row's status carries. The
+    reply control was added to the feed row on 2026-10-05, so this is not
+    merely a number the reader sees — it is what the control next to it
+    reports, and it shows on a remote mirror too: R85's split again, a count
+    is a fact about the post and only the offer to act on it is gated.
+
+    ``is_list_face`` marks the row as standing for a list's post face
+    (§2K increment 4). It is set from ``status_type == LIST`` in
+    :func:`feed_entries`, where the ``Status`` is actually in hand — never
+    inferred downstream from the absence of a film. That inference is wrong
+    and live: the feed holds film-less mirrored ``Note``s whose reply route
+    refuses, so a template that read "no film" as "a list" would put a reply
+    control on a row that cannot take one (R85). This is the signal the
+    reply gate reads.
+
+    ``list_strip`` is the row's poster strip and title, loaded batched by
+    :func:`feed_entries`. It is ``None`` on every non-list row, and on the
+    rare list row whose ``FilmList`` half cannot be found — which leaves the
+    verb and the reply control intact, because those follow ``is_list_face``
+    and the route they post to, not this.
     """
 
     kind: str
@@ -933,6 +978,8 @@ class FeedEntry:
     like_count: int = 0
     liked_by_viewer: bool = False
     reply_count: int = 0
+    is_list_face: bool = False
+    list_strip: ListStrip | None = None
 
     @property
     def kind_rank(self) -> int:
@@ -977,6 +1024,25 @@ class FeedEntry:
         """
         return self.status_id is not None
 
+    @property
+    def replyable(self) -> bool:
+        """Whether this row may offer a **reply** control specifically.
+
+        ``interactive`` covers the like, which any status can take. The reply
+        is narrower: ``reply_to_status`` accepts exactly two parents — a post
+        with a film, and a list's face (L13) — and refuses every other
+        film-less status. This states that rule once, in Python, where it is a
+        single testable expression rather than a template guess.
+
+        The second half is ``is_list_face``, deliberately **not** ``film is
+        None``. Those are different facts: the live feed holds film-less
+        mirrored ``Note``s whose reply route answers 400. Reading the
+        absence of a film as "a list" would put a working-looking reply icon
+        on a row that cannot take one — R85's offer-with-no-route bug,
+        reopened by an inference.
+        """
+        return self.interactive and (self.film is not None or self.is_list_face)
+
 
 def _group_has_written_review(user_id: int, film_ids: list[int]) -> bool:
     """R37: True if the user has a live D5 review with text on any film."""
@@ -987,6 +1053,67 @@ def _group_has_written_review(user_id: int, film_ids: list[int]) -> bool:
         status_type__in=list(Status.REVIEW_TYPES),
         content__gt="",
     ).exists()
+
+
+def _attach_list_strips(entries: list[FeedEntry]) -> None:
+    """Fill every list row's poster strip, in a fixed number of queries.
+
+    Three queries for the whole batch, whatever the feed holds (§2K
+    increment 4):
+
+    1. the ``FilmList`` behind each face, with its real item count;
+    2. the ranked ``(list, film)`` pairs for those lists, as bare integers —
+       the wide rows are never materialised just to be discarded past the cap;
+    3. the capped set of films, drawn by id.
+
+    The cap is applied in Python because there is no cheap "first N per
+    group" in SQL here. What it slices is two integers per row, so the part
+    of the query that is unbounded stays the part that is cheap.
+
+    ``deleted=False`` rides the first query because every other read path for
+    this object carries it — ``list_detail`` included — so a hidden list never
+    draws a strip that leads nowhere. A list row whose ``FilmList`` half is
+    missing keeps ``list_strip`` as ``None`` rather than getting an empty
+    strip: "an empty list" and "no list behind this face" are different facts,
+    and dressing one up as the other is how a render stops being trustworthy.
+    """
+    from reeltalk.lists.models import FilmList, ListItem
+
+    face_ids = [entry.status_id for entry in entries if entry.status_id is not None]
+    rows = list(
+        FilmList.objects.filter(status_id__in=face_ids, deleted=False)
+        .annotate(item_count=Count("items"))
+        .values("id", "title", "status_id", "item_count")
+    )
+    if not rows:
+        return
+
+    drawn: dict[int, list[int]] = {}
+    for list_id, film_id in (
+        ListItem.objects.filter(film_list_id__in=[row["id"] for row in rows])
+        .order_by("film_list_id", "rank", "id")
+        .values_list("film_list_id", "film_id")
+    ):
+        bucket = drawn.setdefault(list_id, [])
+        if len(bucket) < LIST_FEED_POSTER_CAP:
+            bucket.append(film_id)
+
+    posters = {
+        film.id: film
+        for film in Film.objects.filter(
+            pk__in={film_id for bucket in drawn.values() for film_id in bucket}
+        )
+    }
+    by_status = {row["status_id"]: row for row in rows}
+    for entry in entries:
+        row = by_status.get(entry.status_id)
+        if row is None:
+            continue
+        entry.list_strip = ListStrip(
+            title=row["title"],
+            posters=[posters[fid] for fid in drawn.get(row["id"], [])],
+            film_count=row["item_count"],
+        )
 
 
 def feed_entries(
@@ -1115,6 +1242,9 @@ def feed_entries(
         for entry in entries
         if entry.kind == "watched" and entry.film is not None
     }
+    # List rows, kept aside so their posters load in one batch after the loop
+    # rather than one query per row (§2K increment 4).
+    list_entries: list[FeedEntry] = []
     for status in Status.feed_for(user):
         # Reviews of aggregated films ride on the bulk entry — no second row.
         # Written reviews never aggregate (above), so none are lost.
@@ -1133,19 +1263,26 @@ def feed_entries(
             target.status_id = status.id
             target.remote = not status.local
             continue
-        entries.append(
-            FeedEntry(
-                kind="status",
-                user=status.user,
-                film=status.film,
-                date=status.published_date,
-                source_id=status.id,
-                rating=status.rating,
-                content=status.content,
-                status_id=status.id,
-                remote=not status.local,
-            )
+        entry = FeedEntry(
+            kind="status",
+            user=status.user,
+            film=status.film,
+            date=status.published_date,
+            source_id=status.id,
+            rating=status.rating,
+            content=status.content,
+            status_id=status.id,
+            remote=not status.local,
         )
+        # Read off the status type, which is exactly what ``reply_to_status``
+        # checks for a film-less parent. Deriving the flag here rather than
+        # letting the template read "no film" is what keeps the offer and the
+        # route the same fact instead of two facts that happen to agree — the
+        # live feed holds film-less mirrored ``Note``s, and they are not lists.
+        if status.status_type == Status.Type.LIST:
+            entry.is_list_face = True
+            list_entries.append(entry)
+        entries.append(entry)
 
     # Like state for every row that can carry a control, batched: one
     # grouped count plus one membership query, whatever the feed's size.
@@ -1161,6 +1298,12 @@ def feed_entries(
             entry.like_count = counts.get(entry.status_id, 0)
             entry.liked_by_viewer = entry.status_id in liked
             entry.reply_count = replies.get(entry.status_id, 0)
+
+    # And the poster strips, batched the same way for the same reason: this is
+    # the busiest page in the app and it already carries enough per-row
+    # lookups. Nothing is queried when the feed holds no list row.
+    if list_entries:
+        _attach_list_strips(list_entries)
 
     # Total order, newest first (§2I increment 2). Before this the key was
     # ``entry.date`` alone, which left every same-timestamp pair ordered only by

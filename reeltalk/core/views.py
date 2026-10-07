@@ -242,7 +242,18 @@ def status_detail(request, status_id):
     if status.status_type == Status.Type.LIST:
         linked = FilmList.objects.filter(status_id=status.id, deleted=False).first()
         if linked is not None:
-            return redirect("list-detail", list_id=linked.pk)
+            # Carry the query string across. The feed's reply control points
+            # at ``/status/<id>/?reply=1`` and the list page opens its
+            # composer off that same param, so a redirect that rewrote only
+            # the path would land the reader on the list with the composer
+            # shut — the icon offered a thing the page then did not show,
+            # which is R85's bug one hop further along than the gate. Found
+            # in the browser, not in a unit test: the route accepted the
+            # reply fine, it was the door that did not open.
+            target = reverse("list-detail", kwargs={"list_id": linked.pk})
+            if request.GET:
+                target = f"{target}?{request.GET.urlencode()}"
+            return redirect(target)
     # The thread: every live reply under this post, flat and in conversation
     # order. The depth policy is written out on ``conversation``; the short
     # form is that the data keeps its real nesting (so inReplyTo stays

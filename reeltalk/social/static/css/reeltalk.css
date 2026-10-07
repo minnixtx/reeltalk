@@ -1071,6 +1071,7 @@ ul.errorlist {
 
 .film-row .thumb,
 .feed-item .thumb,
+.list-strip-poster,
 .thumb-placeholder {
   width: 2.5rem;
   height: 3.75rem;
@@ -1113,6 +1114,47 @@ ul.errorlist {
 
 .feed-item .feed-film {
   margin: 0;
+}
+
+/* --- The list row (lists increment 4, R139) ---------------------------------
+   Three lines: the verb in the head row, the title here, then the poster
+   strip. Nothing about the row is new chrome — it reuses the head, the tile
+   size and the text colours every other feed row already wears. */
+.feed-verb {
+  color: var(--cream);
+}
+
+.list-strip {
+  margin: 0.25rem 0;
+}
+
+.list-strip-title {
+  margin: 0.25rem 0;
+  font-weight: 600;
+  color: var(--white);
+}
+
+/* The strip never wraps. The cap is what keeps the row short, so a wrapped
+   strip would be the worst of both: the tiles it has room for on line one,
+   and the +N stranded on a line of its own reading as a count of nothing.
+   overflow:hidden is the backstop for a column narrower than five tiles,
+   which the cap makes a corner case rather than the normal render. */
+.list-strip-posters {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  overflow: hidden;
+}
+
+/* Secondary colour, vertically centred against the tiles: it reads as "and
+   more in here", not as a sixth tile. */
+.list-strip-count {
+  flex-shrink: 0;
+  color: var(--cream-muted);
+  font-weight: 600;
+  font-size: 0.9rem;
 }
 
 /* --- Landing/about + footer (M1 increment 7) --------------------------------- */

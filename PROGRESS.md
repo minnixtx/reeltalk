@@ -10,86 +10,72 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **Lists increment 3 — authoring — BUILT, gate-verified, DEPLOYED, and
-  reviewed by the owner in a real browser (two rounds, 2026-10-07).**
-  `GET /lists/new/` and `GET /list/<id>/edit/`, behind seven POST routes:
-  `list-create`, `list-edit`, `list-add-film`, `list-suggest`,
-  `list-remove-film`, `list-move`, `list-delete`. New: `lists/forms.py`,
-  `lists/static/js/list_editor.js`, `templates/lists/create.html`,
-  `templates/lists/edit.html`, `tests/test_lists_authoring.py`. Full gate
-  **2345 passed + 5 skipped in 31:24, `PYTEST_EXIT=0`** (baseline 2283;
-  **+62 = 57 new tests + 5 clean-room params**), skips unchanged, with
-  `ruff check` / `ruff format --check` / `makemigrations --check` all
-  clean and **no new migration** — `Status.edited_date` already existed.
-  Full record: **"Executed — lists increment 3"** at the end of §2K.
-- **A member can now make a list, change it, and delete it.** Before this
-  increment lists existed only from fixtures. The editor is one page:
-  details at the top, the ranked films with up/down/remove on each row, an
-  add-film box, and delete at the bottom. Every control is an ordinary form
-  post that redraws from the database, so the order on screen is always the
-  order that was actually written.
-- **`lists/services.py` is the only door.** No view or form writes
-  `FilmList` or `ListItem`. `forms.py` is a plain `forms.Form` rather than
-  a `ModelForm` precisely because a `ModelForm` ships a `save()` that could
-  bypass the invariants. Raw markdown goes into the service and
-  `render_markdown` runs there — the `FilmForm.clean_description` habit of
-  rendering into the cleaned value would render a list description twice.
-  `set_description` was added for the half L1 promises and §2K's six
-  functions did not cover; it mirrors `rename`. `edited_date` is stamped on
-  the face by every real edit and by **no** create — `create_list` calls
-  `_append_films` directly, because a list born with films was not edited.
-- **The delete edge is closed, in both directions.** `delete_review` could
-  soft-delete a list's *face* alone from a crafted POST and orphan a
-  `FilmList` still `deleted=False` — a live list with no social half. It
-  now 404s on `status_type == LIST`; a test asserts **both** the face and
-  the list stay undeleted, and a second test proves ordinary reviews still
-  delete. Deleting a list goes through `POST /list/<id>/delete/` →
-  `soft_delete_list`, which takes the face down with it.
-- **R85 held on both halves, tested at the route.** All five write routes
-  refuse a stranger with 404 and an anonymous member with a login redirect.
-  The typeahead answers anonymous with **401 JSON** rather than a redirect,
-  on purpose — an XHR handed HTML where it expects a payload fails
-  confusingly, and `/search/suggest/` already makes the same choice.
-- **The two browser-review asks, and the one that was silently doing
-  nothing.** The owner's first round asked for a cascade dropdown on the
-  add-film box and heavier reorder arrows. The arrows' first fix —
-  `.rank-btn { color: var(--cream) }` — was written, formatted, built and
-  **served**, and changed nothing: `form.inline button` (0,1,2) outranks
-  `.rank-btn` (0,1,0) and pins `0.9rem` / `--muted`. `getMatchedStyles`
-  found it; reading the stylesheet could not have. Scoped to
-  `.rank-controls .rank-btn` it wins the way `.search-row .watchlist-btn`
-  already does in that file. Measured after: live `rgb(233,223,203)`
-  16px/700, disabled `rgb(184,170,145)`. The dropdown is `list_editor.js`
-  — same debounce, floor and keyboard model as the header search, except
-  that picking a row **adds** instead of navigating, so the write stays a
-  form post. Verified live: `dial m` returns the 1954 *Dial M for Murder*
-  tagged "In this list" and disabled while the homonyms stay clickable.
-- **What is deliberately NOT done: the list's feed shape — and it is
-  visible on the live home feed right now.** `Status.feed_for` has never
-  filtered on `status_type`, so every LIST face is *already* a feed entry:
-  `feed_entries` gives it `kind="status"` with `film=None`, and
-  `_feed_row.html` renders that as **author + date + an empty body**, with
-  the invisible whole-row click target pointing at `/status/<id>/` (which
-  302s to the list, so the click itself works). Three of these sit at the
-  top of the owner's home feed as of this increment — `minnix · 2026-10-06`
-  and nothing else. It is unshaped rather than broken, and it is the ugliest
-  thing this feature has shipped so far. **If the owner wants it gone before
-  increment 4, the interim fix is one filter, not a redesign** — drop
-  `status_type == LIST` out of the feed query and the rows disappear with no
-  other behaviour touched. Say the word.
-  The reply-gate widening (`entry.interactive`, `entry.film`, the like
-  lookup, and the post page's control gate — four halves that move
-  together per R85) is also still owed and was deliberately left exactly as
-  increment 2 had it, so nothing is half-widened.
-- **STANDING CONSTRAINTS — unchanged, and one is still reversed.**
+- **Lists increment 4 — the feed row — BUILT, gate-verified, DEPLOYED, and
+  approved by the owner in a browser review (2026-10-07).** A list's row
+  in the home feed is now three lines: `minnix created a new list` / the
+  list title / up to five posters then `+N` (R139). New in
+  `core/models.py`: `LIST_FEED_POSTER_CAP = 5`, the `ListStrip` dataclass,
+  `FeedEntry.is_list_face` / `.list_strip` / `.replyable`, and the batched
+  `_attach_list_strips()`. New `.feed-verb` and `.list-strip` blocks in
+  `_feed_row.html` — so `/` and `/feed/page/` changed in the same commit,
+  which is the whole reason that partial exists — new CSS in `reeltalk.css`,
+  one fix in `core/views.py`, and a new test file
+  `tests/test_feed_list_row.py` (20 tests). Full gate **2366 passed + 5
+  skipped in 32:55, `PYTEST_EXIT=0`** (baseline 2345; **+21 = 20 new
+  tests + 1 clean-room param**), skips unchanged, with `ruff check` /
+  `ruff format --check` / `makemigrations --check` all clean and **no new
+  migration**. Full record: **"Executed — lists increment 4"** at the end
+  of §2K.
+- **The blank rows are gone, which was the visible point.** Before this
+  increment every list rendered on the home feed as ~62px of avatar, name
+  and date and nothing else, because the whole poster-and-verb block sat
+  behind `{% if entry.film %}` and a list has no film. Those rows are real
+  now.
+- **The bug the browser caught and the suite could not.** The brief said to
+  prove the reply control works *through the real route* — and the route
+  accepted the reply the whole time. `redirect("list-detail", ...)` in
+  `status_detail` rewrote the **path** and dropped the **query**, so the
+  feed's reply icon landed on `/list/<id>/` with the composer shut. The row
+  offered a thing the page it opened did not show: R85's
+  offer-with-no-route bug, one hop further along than the gate the entire
+  increment was built around. Fixed by carrying `request.GET` across the
+  redirect and pinning the 302's exact `Location`. **Worth keeping:
+  proving a route accepts a POST is not the same as proving the control
+  that reaches it works.**
+- **Two plan premises were already satisfied, so they did not move** — a
+  result, not a skipped check. The `KIND_RANK_*` tiebreak §2K asked for is
+  unnecessary: a list face is `kind="status"`, already `KIND_RANK_STATUS =
+  0`, and the cursor keys on `source_id`, which for a status row *is* the
+  status. A list-specific rank would have **changed** the tiebreak order for
+  same-timestamp rows to buy nothing. And of R138's "four halves", only the
+  feed template's gate moved, exactly as the brief predicted on
+  re-verification: the like lookup already keys on `status_id`,
+  `FeedEntry.interactive` is already true for a face, and the post page's
+  gate is moot because `/status/<id>/` 302s to the list page, which has
+  had its own reply control since increment 2.
+- **The reply gate is a property (`FeedEntry.replyable`), not a template
+  expression.** The inline form `{% if entry.interactive and (entry.film
+  or entry.is_list_face) %}` raises `KeyError: '(entry.film'` — Django's
+  `{% if %}` tokenizer splits on whitespace and will not separate an
+  unspaced parenthesis. Python keeps the precedence explicit and assertable
+  without rendering. **Never widen this gate on "no film"**: the live feed
+  holds film-less mirrored `Note`s (statuses 60 and 31 on the owner's box)
+  whose reply route answers 400. `is_list_face` is set from `status_type`
+  inside `feed_entries`, where the status is actually in hand.
+- **Measured live** (headless Chromium, throwaway probe member): a 7-film
+  list draws **5 tiles at 40×60, no wrap at 1440px or at 390px**, with
+  `+2`. The row is 157px at 1440px and **195px at 390px — the same height
+  as an ordinary review row**. An empty list draws verb + title and no
+  strip. Clicking the reply icon in the feed opens the composer on the list
+  page, the post lands, and the row's count ticks to 1 — zero `pageerror`s.
+- **STANDING CONSTRAINTS — unchanged.**
   - **User-made lists are IN SCOPE.** The owner reversed the 2026-10-02
     decision ("We won't do lists") on 2026-10-06. Do not cite the old
     refusal; it no longer holds. The shape is locked as **L1–L13 = R137**
-    in §2K — read §2K before asking any design question about lists,
-    because all thirteen are already answered. **Q1 is now settled too
-    (R139): the feed row is "X created a new list" / the title / five
-    posters then `+N`.** Only Q5 (a saved list whose creator deleted it)
-    and Q7 (the Save button weight) are still open, both at increment 5.
+    in §2K and the feed strip as **R139** — read §2K before asking any
+    design question about lists, because all of them are already answered.
+    Only **Q5** (a saved list whose creator deleted it) and **Q7** (the
+    Save button's weight) are still open, both at increment 5.
   - No third column on the home feed (R64).
   - The genre subfeed keeps its numbered 20-per-page links, and its
     inconsistency with the endless home feed is deliberate (R132 7) — do
@@ -98,31 +84,23 @@ is history.**
     no live updates on the home feed.
   - TMDB search is the primary add-film flow; manual create is the
     fallback.
-- **NEXT UP — increment 4: the feed row.** **Read
-  `.qwen/tmp/increment4-brief.md` before starting it** — it carries the
-  verified state, the traps, and the gate recipe, all re-checked against the
-  live tree on 2026-10-07 rather than copied from the plan. Headline: the
-  reply gate must **not** be widened on "no film", because the live feed
-  already holds film-less mirrored `Note`s whose reply route refuses — a
-  list face needs its own signal on `FeedEntry`. `FeedEntry` gains a list shape
-  (title, poster strip, film count) and a `KIND_RANK_*` tiebreak, with
-  `source_id` keyed on the list's own row so the cursor pages off the
-  right thing; `_feed_row.html` gains the `.list-strip` branch, which
-  changes `/feed/page/` in the same commit because that partial is why it
-  exists; and the reply-control gate widens, with all four halves moving
-  together per R85. **Q1 is already settled — build the strip at five
-  posters with `+N`, on three lines: verb line, title, strip (R139).**
-  This increment is visual: build →
-  deploy → hand the owner the live URL → browser review → only then the
-  full gate.
-- **Process rules for the visual half of this feature.** Deploy and get the
-  owner's browser review **before** running the full gate on anything
-  visual — the gate costs ~31 minutes and a design change routinely needs
-  two or three visual rounds. Render it and show it; never describe a
-  visual change in prose. Ask about design decisions rather than guessing,
-  and verify hover and pseudo-class claims with `getComputedStyle` in a
-  real browser rather than by reasoning about the cascade — this increment
-  shipped a CSS rule that was correct on the page and wrong on screen.
+- **NEXT UP — increment 5: saving.** `POST /list/<id>/save/` and
+  `/unsave/`, login-required, CSRF, **idempotent** like the like toggle;
+  cards labelled "saved from @user" — the creator, never the saver; silent
+  per L6, proven by the notification ledger count being *unchanged* rather
+  than merely not displayed. `ListSave` already exists from increment 1.
+  Every reader of "lists you saved" must filter
+  `film_list__deleted=False`, because the soft path **hides** a list rather
+  than cascading the save rows away — the CASCADE is the hard-delete half.
+  **Settle Q5 and Q7 with the owner before building them**; they are the
+  last two open questions in §2K.
+- **Process rules that still hold.** On anything visual: build → deploy →
+  hand the owner the live URL → browser review → **only then** the full
+  gate. Render it and show it; never describe a visual change in prose.
+  Verify geometry, hover and click targets with `getComputedStyle` /
+  `elementFromPoint` in a real browser rather than by reasoning about the
+  cascade. And prove a control by **clicking it**, not by POSTing to its
+  endpoint — that is exactly what this increment's real bug looked like.
 - **What the feature is built on.** `Status`, `Like`, `reply_parent`,
   `FeedEntry`, `broadcast_*` and the inbox `HANDLERS` — not any inherited
   list scaffolding. There was none: the brief's claim that `List`/`ListItem`
@@ -6178,10 +6156,14 @@ minted session was deleted by exact key afterwards.
 
 ## 2K. Forward plan — user-made lists of films: the object, the page, the feed, and saving
 
-**Written 2026-10-06. NOTHING IN THIS SECTION IS BUILT.** The owner asked for
-the plan and approved its shape; the next session executes it. Do not read any
-of it as shipped. Re-verify every `file:line` below against the current tree
-before acting on it.
+**Written 2026-10-06. Increments 1, 2, 3 and 4 are now BUILT, gate-verified
+and deployed** — see the `### Executed —` records at the end of this
+section, and the NOW block at the top for what is live. **Increment 5
+(saving) is next; 6 and 7 (federation out, then in) follow.** The plan text
+below is the shape as approved, not a status report: where a bullet and its
+`### Executed —` record disagree, the record is what shipped. Re-verify
+every `file:line` against the current tree before acting on it — several
+have already moved once this session.
 
 ### The brief, in the owner's words
 
@@ -6403,7 +6385,12 @@ that edge required. They are in the record rather than silently applied.
 re-rendering to see the new order, and a non-owner turned away. Then the owner
 drives it in a browser on the deployed box.
 
-**Increment 4 — the feed row.**
+**Increment 4 — the feed row.** ✅ **DONE 2026-10-07** — gate-verified,
+deployed, and approved by the owner in a browser review of the live box.
+Full record at the end of this section. Built as written **except** two
+bullets the brief had already shown to be unnecessary, and **plus** one fix
+the plan could not have seen — the reply door. The overrides are noted
+inline rather than silently applied.
 
 **The risk here is inverted and worth naming.** `Status.feed_for` filters on
 user, `deleted` and `reply_parent` — never on `status_type`. The moment
@@ -6991,6 +6978,130 @@ top: `minnix · 2026-10-06` and nothing else. The click works — `/status/`
 most visible artifact the feature has produced, and it arrived with
 increment 1 rather than with this one. **The interim fix, if wanted, is one
 exclusion in the feed query and touches nothing else.**
+
+### Executed — lists increment 4 is DONE, gate-verified (2026-10-07)
+
+**What landed.** Five files, no migration.
+
+- **`core/models.py`** — `LIST_FEED_POSTER_CAP = 5`; the `ListStrip`
+  dataclass (`title`, `posters`, `film_count`, and `overflow` computed from
+  the real length against the cap, never from the tiles drawn);
+  `FeedEntry.is_list_face` and `FeedEntry.list_strip`; `FeedEntry.replyable`;
+  `_attach_list_strips()`, the batched loader; and `feed_entries` marking
+  each list row and calling it. `reply_count`'s docstring — which still
+  claimed *"There is no reply control on a feed row"*, true before
+  2026-10-05 and misleading since — is corrected.
+- **`templates/_feed_row.html`** — the `.feed-verb` in the head, the
+  `.list-strip` block, and the reply gate now reading `{% if entry.replyable %}`.
+- **`social/static/css/reeltalk.css`** — `.feed-verb`, `.list-strip`,
+  `.list-strip-title`, `.list-strip-posters`, `.list-strip-count`, and
+  `.list-strip-poster` added to the existing shared poster-tile rule rather
+  than given a copy of it, so the strip's tiles are the same 2.5rem × 3.75rem
+  every other poster in the app draws.
+- **`core/views.py`** — the LIST redirect carries the query string (below).
+- **`reeltalk/tests/test_feed_list_row.py`** — new, 20 tests.
+
+**The blank rows are gone, which was the visible point.** The owner's
+home-feed list rows went from ~62px of avatar-name-and-date to the real
+three-line row. The cause was exactly what the brief said: the whole
+poster-and-verb block sat behind `{% if entry.film %}`, and a list has no film.
+
+**The door, not the route — found only in a browser.** The brief said to
+prove the reply control works *through the real route*, and the route
+accepted the reply the whole time. What was broken was one hop earlier:
+`redirect("list-detail", list_id=linked.pk)` in `status_detail` rewrote the
+**path** and dropped the **query**, so the feed's reply icon
+(`/status/<id>/?reply=1`) landed on `/list/<id>/` with the composer shut.
+The row offered a thing the page it opened did not show — R85's
+offer-with-no-route bug, one hop further along than the gate the whole
+increment was built around, and invisible to every unit test written against
+the route. Fixed by rebuilding the target with `request.GET.urlencode()`
+appended, and pinned end to end: the row's `href`, the 302's exact
+`Location` **with** `?reply=1`, and the composer present on the page that
+answers it — plus a second test that a query-less visit still redirects
+clean, so the fix cannot grow a bare `?` or disturb what increment 2 pinned.
+
+**Two premises the plan named that turned out already satisfied, so they did
+not move.** Recording them as results rather than quietly skipping them:
+
+1. **`KIND_RANK_*` for the list tiebreak was not needed.** A list face is
+   `kind="status"`, so it already sorts at `KIND_RANK_STATUS = 0`, and the
+   cursor keys on `source_id` which for a status row *is* the status.
+   Adding a list-specific rank would have **changed** the tiebreak order for
+   same-timestamp rows to buy nothing. Not added.
+2. **R138's "four halves" — only one moved**, exactly as the brief
+   predicted on re-verification. The like lookup already keys on
+   `status_id`; `FeedEntry.interactive` is already `True` for a face; the
+   post page's control gate is moot because `/status/<id>/` 302s to the
+   list page, which has had its own reply control since increment 2. Only
+   the feed template's gate changed.
+
+**Why the gate is a property and not a template expression.** The first cut
+was `{% if entry.interactive and (entry.film or entry.is_list_face) %}` and
+it raised `KeyError: '(entry.film'` — Django's `{% if %}` tokenizer splits
+on whitespace and will not separate an unspaced parenthesis. Rather than
+write it with padded parens that a later reader would "tidy" back into a
+breakage, the rule moved into `FeedEntry.replyable`, where the precedence is
+explicit, it sits next to `interactive` whose docstring already claims to be
+"the one flag a template reads", and both directions are assertable without
+rendering anything.
+
+**The counting trap in the test, not the code.** `.list-strip-posters` (the
+container) is a literal prefix of `.list-strip-poster` (a tile), so
+`row.count('class="list-strip-poster')` reports **one tile too many** and
+every cap assertion fails by exactly one. The `_tiles()` helper counts
+against the closing quote instead, and says why in its docstring.
+
+**A poster-less film draws a placeholder tile** rather than being skipped, so
+the strip is always exactly the cap wide and `overflow` never has to know
+which films had art. `deleted=False` rides the strip query because every
+other read path for `FilmList` carries it — `list_detail` among them — so a
+hidden list cannot draw a strip that leads to a 404. A list row whose
+`FilmList` half is missing keeps `list_strip = None` rather than getting an
+empty strip: "empty list" and "no list behind this face" are different facts.
+
+**Measured live, headless Chromium against the deployed box** (throwaway
+probe member, 7-film and empty lists):
+
+| | 1440px | 390px |
+|---|---|---|
+| tiles drawn (7-film list) | 5 at 40×60 | 5 at 40×60 |
+| wrapped | **no** | **no** |
+| `+N` | `+2` | `+2` |
+| row height | 157px | **195px — same as an ordinary review row** |
+| empty list | verb + title, no strip, 91px | 129px |
+
+Reply click-through proven by **clicking the icon in the feed**, not by
+typing a URL: `/status/72/?reply=1` → 302 → `/list/6/?reply=1` with
+`hasComposer: true` and the form's action `/status/72/reply/` → POST 200 →
+the feed row's `.reply-count` reads `1`. **Zero `pageerror`s.** The owner
+reviewed the rendered rows and approved the shape as built: verb in the head
+row, posters not links, placeholder tiles for films without art.
+
+**Gate: 2366 passed + 5 skipped in 32:55, `PYTEST_EXIT=0`** (baseline
+2345; **+21 = 20 new tests + 1 clean-room param** for
+`tests/test_feed_list_row.py`), skips unchanged. `ruff check` /
+`ruff format --check` / `makemigrations --check` all clean — **no new
+migration**. `test_federation_interactions.py` was run **early**, on the
+brief's warning that this increment changes what a route offers and that
+increment 2's L13 change is the precedent for a widening deleting an
+accidental guard; it stayed green, and the two-directional proof is in the
+new file rather than inherited: a list row gets the reply control **and**
+its reply lands, a film-less mirrored `Note` row gets no control **and**
+its reply is still refused 400 — asserted at the model (`replyable`), at
+the template (the row's HTML) and at the route, separately.
+
+**Probe torn down.** The throwaway member, its two lists and seven items,
+its two faces, the one reply the browser posted, and its four sessions:
+users 85 → 84, statuses 26 → 23, lists 7 → 5, items 23 → 16. The
+notification ledger stayed at **9 unchanged**, which independently confirms
+a self-reply wrote no ledger row. The owner's four sessions were checked by
+decoded `_auth_user_id` and left intact — deleting every session would have
+logged the owner out of their own browser.
+
+**Still owed, unchanged: nothing inside increment 4.** Q5 (a saved list whose
+creator deleted it) and Q7 (the Save button's weight) remain open at
+increment 5.
 
 ## 3. Host facts (this box)
 

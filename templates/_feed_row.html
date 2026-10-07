@@ -37,6 +37,13 @@ a second channel to say so.
     {# and notifications — the bare span here was why no profile #}
     {# was reachable from the feed at all. #}
     <a class="review-author" href="{% url 'user-profile' entry.user.localname %}">{{ entry.user.localname }}</a>
+    {# The list verb (R139 line 1). It sits here rather than in the row body #}
+    {# because the author is already on this line: "minnix created a new #}
+    {# list" is one sentence, and splitting it across two lines to keep the #}
+    {# verb with the posters would leave the head reading as a name with no #}
+    {# predicate. Not the shelf-event verb machinery — a list is not a shelf #}
+    {# event, and that block is behind the film check anyway. #}
+    {% if entry.is_list_face %}<span class="feed-verb">created a new list</span>{% endif %}
     {% if entry.rating %}<span title="{{ entry.rating|floatformat:'-1' }} / 5">{{ entry.rating|stars }}</span>{% endif %}
     {# Plain text, never a link: the .review-open overlay above already opens this #}
     {# post (owner pass, 2026-10-04). #}
@@ -59,13 +66,20 @@ a second channel to say so.
     ONLY way to start a reply now: clicking the row itself opens the post
     page to read, and the reply icon opens it to answer.
 
-    Gated on `entry.film` as well as `entry.interactive`, because that is
-    exactly the composer's own gate on the post page. A post with no film
-    behind it can never be replied to at all — `Status.save` refuses a
-    typed status with no film, and a reply is a typed status — so offering
-    a reply icon on such a row would be the offer-with-no-route bug R85
-    exists to prevent. Verified against the live DB rather than inferred
-    from the model: zero live replies hang off a film-less status.
+    The gate names which parents are replyable, and it asks the model rather
+    than inferring, because "has no film" is NOT the same fact as "is a
+    list". ``reply_to_status`` accepts exactly two parents — a post with a
+    film, and a list's face (L13) — and refuses every other film-less
+    status. The live feed holds mirrored ``Note``s with no film whose reply
+    route answers 400, so widening this on "no film" would put a
+    working-looking reply icon on rows that cannot take one: R85's
+    offer-with-no-route bug, reopened by a template guess. ``entry.replyable``
+    states the route's rule once, in Python, off ``is_list_face`` — which is
+    set from ``status_type`` in ``feed_entries``, where the status is
+    actually in hand. (It is a property rather than an inline expression also
+    because Django's ``{% if %}`` tokenizer will not split an unspaced
+    parenthesis; a gate that has to be written awkwardly gets "simplified"
+    into the wrong thing.)
 
     The icon is an <a> carrying ?reply=1, not a JS toggle: the same URL
     renders the composer open server-side, so the control works with
@@ -73,7 +87,7 @@ a second channel to say so.
 
     The count always renders, zero included, matching the applaud count.
     {% endcomment %}
-    {% if entry.interactive and entry.film %}
+    {% if entry.replyable %}
       <span class="reply">
         <a class="reply-btn" href="{% url 'status' entry.status_id %}?reply=1" data-state="{% if entry.reply_count %}others{% else %}idle{% endif %}" title="{% if entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply to this post{% else %}Reply to this post{% endif %}"></a>
         <span class="reply-count" aria-live="polite">{{ entry.reply_count }}</span>
@@ -89,6 +103,35 @@ a second channel to say so.
         <span class="thumb thumb-placeholder"></span>
       {% endif %}
       <p class="feed-film">{% if entry.kind == "watchlist" %}added {% elif entry.kind == "watched" %}watched {% endif %}<a href="{% url 'film' entry.film.id %}">{{ entry.film.title }}{% if entry.film.year %} ({{ entry.film.year }}){% endif %}</a>{% if entry.other_count %} and {{ entry.other_count }} other film{{ entry.other_count|pluralize }}{% endif %}{% if entry.kind == "watchlist" %} to their Watchlist{% endif %}</p>
+    </div>
+  {% endif %}
+  {% if entry.list_strip %}
+    {# The list row's body — R139 lines 2 and 3: the title, then up to #}
+    {# LIST_FEED_POSTER_CAP posters and ``+N`` when the list runs longer. #}
+    {# The title is plain text, never a link: the .review-open overlay #}
+    {# already opens this very page, and the 2026-10-04 pass took away the #}
+    {# second link to the same destination on the post date for exactly #}
+    {# that reason. The posters are not links either — the strip is a #}
+    {# preview of the list, and the row's one job is to open the list. #}
+    {# A film with no poster draws the same placeholder every other poster #}
+    {# slot in the app draws, so the tile count stays equal to the cap and #}
+    {# the +N never has to care which tiles had art. #}
+    <div class="list-strip">
+      <p class="list-strip-title">{{ entry.list_strip.title }}</p>
+      {% if entry.list_strip.posters %}
+        <div class="list-strip-posters">
+          {% for film in entry.list_strip.posters %}
+            {% if film.poster %}
+              <img class="list-strip-poster" src="{{ film.poster.url }}" alt="">
+            {% else %}
+              <span class="list-strip-poster thumb-placeholder" aria-hidden="true"></span>
+            {% endif %}
+          {% endfor %}
+          {% if entry.list_strip.overflow %}
+            <span class="list-strip-count">+{{ entry.list_strip.overflow }}</span>
+          {% endif %}
+        </div>
+      {% endif %}
     </div>
   {% endif %}
   {% if entry.content %}<div class="review-body">{{ entry.content|safe }}</div>{% endif %}
