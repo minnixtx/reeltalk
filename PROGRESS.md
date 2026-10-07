@@ -64,13 +64,23 @@ is history.**
   that picking a row **adds** instead of navigating, so the write stays a
   form post. Verified live: `dial m` returns the 1954 *Dial M for Murder*
   tagged "In this list" and disabled while the homonyms stay clickable.
-- **What is deliberately NOT done: increment 4's widened reply gate is
-  still owed.** `entry.interactive`, `entry.film`, the like lookup and the
-  post page's control gate are exactly as increment 2 left them. A list's
-  face is now editable, but **a list still does not render in a follower's
-  feed** — `Status.feed_for` has never filtered on `status_type`, so LIST
-  rows are in every timeline and are waiting on their `FeedEntry` shape.
-  That, plus the four-halves reply-gate move, is increment 4.
+- **What is deliberately NOT done: the list's feed shape — and it is
+  visible on the live home feed right now.** `Status.feed_for` has never
+  filtered on `status_type`, so every LIST face is *already* a feed entry:
+  `feed_entries` gives it `kind="status"` with `film=None`, and
+  `_feed_row.html` renders that as **author + date + an empty body**, with
+  the invisible whole-row click target pointing at `/status/<id>/` (which
+  302s to the list, so the click itself works). Three of these sit at the
+  top of the owner's home feed as of this increment — `minnix · 2026-10-06`
+  and nothing else. It is unshaped rather than broken, and it is the ugliest
+  thing this feature has shipped so far. **If the owner wants it gone before
+  increment 4, the interim fix is one filter, not a redesign** — drop
+  `status_type == LIST` out of the feed query and the rows disappear with no
+  other behaviour touched. Say the word.
+  The reply-gate widening (`entry.interactive`, `entry.film`, the like
+  lookup, and the post page's control gate — four halves that move
+  together per R85) is also still owed and was deliberately left exactly as
+  increment 2 had it, so nothing is half-widened.
 - **STANDING CONSTRAINTS — unchanged, and one is still reversed.**
   - **User-made lists are IN SCOPE.** The owner reversed the 2026-10-02
     decision ("We won't do lists") on 2026-10-06. Do not cite the old
@@ -6950,9 +6960,25 @@ route accepts, and stayed green.
 
 **Deliberately not touched: increment 4's reply gate.** `entry.interactive`,
 `entry.film`, the like lookup and the post page's control gate are left as
-increment 2 left them. A list's face is now editable, but a list still does
-not render in a follower's feed — widening that gate is increment 4's job
-and is still owed.
+increment 2 left them. Widening them is increment 4's job and is still owed.
+
+**A finding that corrected this record while it was being written.** The
+first draft of the NOW block said a list "does not render in a follower's
+feed". That was wrong, and checking it rather than repeating it is the whole
+point of writing the record. `Status.feed_for` filters on user, `deleted`
+and `reply_parent` and **never** on `status_type`, so LIST faces were
+already in the timeline from increment 1 onward. Verified against the live
+database: `feed_for(minnix)` returns status ids 65, 66 and 67 as LIST rows,
+`feed_entries(minnix)` turns them into `kind="status"` entries with
+`film=None`, and the rendered home page contains them as
+`<li class="review" data-status="67">` carrying an avatar, the author, a
+date, the invisible whole-row `.review-open` link to `/status/67/`, and **no
+body at all**. So the owner's home feed has three near-empty rows at the
+top: `minnix · 2026-10-06` and nothing else. The click works — `/status/`
+302s to the list — so it is unshaped rather than broken, but it is the
+most visible artifact the feature has produced, and it arrived with
+increment 1 rather than with this one. **The interim fix, if wanted, is one
+exclusion in the feed query and touches nothing else.**
 
 ## 3. Host facts (this box)
 
