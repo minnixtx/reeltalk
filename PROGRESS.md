@@ -84,16 +84,22 @@ is history.**
     no live updates on the home feed.
   - TMDB search is the primary add-film flow; manual create is the
     fallback.
-- **NEXT UP — increment 5: saving.** `POST /list/<id>/save/` and
-  `/unsave/`, login-required, CSRF, **idempotent** like the like toggle;
-  cards labelled "saved from @user" — the creator, never the saver; silent
-  per L6, proven by the notification ledger count being *unchanged* rather
-  than merely not displayed. `ListSave` already exists from increment 1.
-  Every reader of "lists you saved" must filter
-  `film_list__deleted=False`, because the soft path **hides** a list rather
-  than cascading the save rows away — the CASCADE is the hard-delete half.
-  **Settle Q5 and Q7 with the owner before building them**; they are the
-  last two open questions in §2K.
+- **NEXT UP — increment 5: saving. Read
+  `.qwen/tmp/increment5-brief.md` before starting it** — it carries the
+  verified state, the traps and the gate recipe. `POST /list/<id>/save/`
+  and `/unsave/`, login-required, CSRF, **idempotent** like the like
+  toggle; cards labelled "saved from @user" — the creator, never the saver;
+  silent per L6, proven by the notification ledger count being *unchanged*
+  rather than merely not displayed. `ListSave` already exists from
+  increment 1. **Q5 and Q7 are now settled as R140, so §2K has no open
+  questions left.** Q5's answer **reverses a rule increment 2 shipped**:
+  the Saved tab must stop filtering `film_list__deleted=False` and instead
+  surface a deleted list carrying a **dismissible notice**. That needs a
+  dismiss marker on `ListSave`, so **increment 5 does need a migration** —
+  the first the lists feature has needed since `lists/0001`. Q7: build the
+  Save control on `.btn`'s lit crimson and spend no design effort on it;
+  explicitly parked for the future whole-UI polish pass, not won on the
+  merits.
 - **Process rules that still hold.** On anything visual: build → deploy →
   hand the owner the live URL → browser review → **only then** the full
   gate. Render it and show it; never describe a visual change in prose.
@@ -128,7 +134,7 @@ is history.**
 | Product contract — domain model, watch state, TMDB, federation surface, deployment shape | `PLAN.md` §3 |
 | **D-series** — the original product decisions (D1–D17) | `PLAN.md` §2 |
 | License audit | `PLAN.md` §4 |
-| **R-series** — rewrite-era decisions (R1–R139) | `PROGRESS.md` §4 |
+| **R-series** — rewrite-era decisions (R1–R140) | `PROGRESS.md` §4 |
 | **The lists feature — the plan, the locked shape, the increments** | `PROGRESS.md` §2K |
 | What was actually built, with commit hashes | `PROGRESS.md` §2 |
 | Host and deploy facts for this box | `PROGRESS.md` §3 |
@@ -6462,8 +6468,8 @@ it, and the like lands back here.
 
 ### Open questions, to settle as each increment reaches them
 
-**Q1, Q2, Q3, Q6 and Q8 are closed — see R138 and R139.** Only Q5 and Q7
-remain open, both at increment 5.
+**All eight are closed — see R138, R139 and R140. Nothing is left to settle
+before building.**
 
 1. ~~**Feed strip length**~~ — **settled: three lines, five posters, cap with
    `+N`.** The row reads "minnix created a new list" / the list title / up
@@ -6484,14 +6490,19 @@ remain open, both at increment 5.
    Saved tab's empty state was **built in increment 2** at the owner's
    request, so the shape under review was the real page rather than a stub.
    Increment 5 only has to make it fillable.)*
-5. **A saved list the creator deletes** — CASCADE means it silently vanishes
-   from your Saved. That is what L2 implies; confirm it is acceptable rather
-   than wanting a "this list is gone" row. *(increment 5)*
+5. ~~**A saved list the creator deletes**~~ — **settled: a visible,
+   dismissible notice.** Not a silent vanish and not a permanent "this list
+   is gone" row: the saver sees that the list was deleted and can dismiss
+   the notice. This **reverses** the `film_list__deleted=False` filter
+   increment 2 put on the Saved tab. Expressible because the delete is soft
+   — the `ListSave` pointer survives it; the CASCADE is the hard-delete half
+   only. Needs a dismiss marker on `ListSave`, so **a migration**. *(R140 1)*
 6. ~~**The profile "Lists" tab when empty**~~ — **settled: hidden.**
    *(R138)*
-7. **The "Save list" button weight** — `.btn` is the lit crimson control.
-   Right weight for a save, or too loud next to a primary action?
-   *(increment 5)*
+7. ~~**The "Save list" button weight**~~ — **settled for now: `.btn`'s lit
+   crimson is right.** Explicitly parked rather than won on the merits — the
+   owner deferred it to the future whole-UI polish pass. Build on `.btn`,
+   spend no design effort on it. *(R140 2)*
 8. ~~**Duplicate list titles per user**~~ — **settled: allowed**, and pinned
    by `test_two_lists_may_share_a_title` in increment 1. Nothing depends on
    a title being unique.
@@ -7423,3 +7434,6 @@ not an optimisation.
 - **R137 — User-made lists of films: the thirteen shape decisions that settle the feature before a line of it is written (owner decisions 2026-10-06, taken in a planning session that built nothing).** Full plan in **§2K**; the numbered list L1–L13 lives there. The decisions, in brief: **L1** freely editable forever; **L2** save is a live pointer labelled "saved from @user", cascading away with the creator's delete; **L3** ranked 1..N with up/down reorder; **L4** public only; **L5** films are added only from the list page, via TMDB search — one door, not four; **L6** saving is silent, so no new `Notification.Kind` is ever added; **L7** a "Lists" tab on profiles; **L8** a list's film row is poster + title + year and nothing more; **L9** a list gets a **post face** — a `Status` row stands for it socially; **L10** canonical `/list/<id>/`, with `/status/<id>/` redirecting to it; **L11** federates as a `Note` plus a ReelTalk-namespaced extension; **L12** any visible list is savable, remote mirrors included; **L13** a reply to a list carries **no `status_type`**. **L13 is the load-bearing one and the reason is a rule, not a preference:** `Status.save` raises on a typed status with no film, and `add_reply` labels its row `comment` while copying `film_id` off the parent — so a reply to a film-less list is rejected outright. Leaving the reply untyped was chosen because `activitypub/statuses.py:422` already does exactly that on the inbound path (`Status.Type.COMMENT if film is not None else None`), because **no production query reads the `comment` value at all** — every type filter asks for `REVIEW_TYPES` — and because it keeps the film rule one sentence with one exemption instead of two. **Verified before choosing, because the owner asked directly whether commenting would still work:** the thread is built from `reply_parent` and never from `status_type` (`reply_counts` filters on `reply_parent_id`, `deleted`, `suspended_at`), the reply producer keys on the parent's author and the notifications app never consults the type, and comments were never feed rows anyway since `Status.feed_for` excludes every reply unconditionally. **Two findings that change the build, both recorded in §2K and worth restating here:** `Film._repoint_related` repoints only shelf films, statuses and blocked films, so **`ListItem` must be added there or a film merge silently orphans it**; and the feed row's reply-control gate `entry.interactive and entry.film` would hide the reply icon on a list row without failing anything, since a list row is interactive by `status_id` but has no film. **And the correction the brief arrived with:** `List` and `ListItem` do **not** exist in this repo — no model, view, URL, template, migration or AP type. The prior claim in the NOW block that they survived as BookWyrm inheritance was false; `PLAN.md:293-295` already said "there is no lists app." The feature is greenfield on top of the existing post machinery, which is the only reason seven increments covers it.
 - **R138 — Four lists decisions taken before increment 2, settling §2K's open questions 2, 3 and 6 plus a feed-reply gate §2K never named (owner decisions 2026-10-06, all four taken in one pass after the options were laid out in plain prose; the owner agreed with each recommendation).** **(1) "My Lists" is `/user/<localname>/lists/` — not `/lists/`, not `/my-lists/`.** What settled it: "My Films" on this site is already `user/<localname>/films/`, a per-user page with no top-level index, so a top-level `/lists/` would be a *third* URL shape rather than the second one, and it would duplicate the profile's own Lists tab. Matching `user/<name>/films/` makes the nav item and the profile tab the **same page** with two entry points, gives somebody else's lists that shape for free, and means the nav's active state matches a `/user/` prefix the way My Films already does. **(2) No pagination on the list page.** The ranking is the content and a list is read top to bottom, so a pager interrupts the thing being read; a 200-film list being a long page is accepted rather than designed around, and the decision is to revisit only if real lists hurt first paint. Explicitly distinct from the genre subfeed's numbered 20-per-page links, which stay untouched. **(3) The profile "Lists" tab is hidden when the member has made no lists.** A tab that leads to nothing is worse than a tab that appears when there is something behind it, and the count needed to decide is already being made. Chosen over always showing it with an empty state, and over showing the owner their own tab even when empty. **(4) A list's feed row IS replyable from the feed, and the gate widens to admit it.** The existing reply-control gate is `entry.interactive and entry.film`; a list row is interactive by `status_id` but carries no film, so as written the icon would be withheld while the reply route happily accepted one — the route-behind-no-button half of the R85 shape. The gate becomes "interactive and (film or list face)", and per R85 the four halves that move together (this gate, the like lookup, `FeedEntry.interactive`, and the post page's control gate) move with it. Chosen over "replies only on the list page", which would have made a list visibly less conversational than a review and cut against L9's whole point in giving a list a post face. **Still open, and where each lands:** §2K's Q1 (feed poster-strip length) at increment 4; Q5 (a saved list whose creator deleted it — CASCADE means it silently vanishes from Saved) at increment 5, where it should be confirmed rather than discovered; Q7 (the "Save list" button weight) at increment 5. **Q8 is already answered by the build:** `test_two_lists_may_share_a_title` pins that nothing depends on a list title being unique per user.
 - **R139 — §2K's Q1 (feed poster-strip length) is settled: three lines, five posters, cap with "+N" (owner decision 2026-10-07, taken from a rendered measurement rather than from the mock).** The list's feed row is, top to bottom: a **verb line** — "minnix created a new list" — then the **list title**, then **up to five posters followed by "+N"** if there are more. The owner's own reasoning: *"There's no need to show a ton of posters on the feed when a user can just click on the post and see the list for themselves."* **The cap is not about height, and the measurement says so.** At the live feed width of 728px with the feed's own 40×60 thumbnail, **16 posters fit on one line**; a normal review row measures **195px**; the 2026-10-06 mock's 7-poster strip measured 111px; an uncapped 40-film strip would be 188px across three lines. So §2K's worry that a long list "makes a very tall feed row" was never really true — even 40 films is about one review row tall. **What the cap is actually for is legibility and intent:** a run of 30 thumbnails reads as texture rather than information, and the strip's job is to make the reader open the list, not to substitute for it. Capping at 5 keeps the row a teaser and keeps the click-through reason. **What this commits increment 4 to:** the strip never wraps; the cap is a named constant, not a magic number in the template; "+N" appears only when the list is longer than the cap; and the row needs a **verb line of its own** — "created a new list" — which is a new feed verb, not a shelf event's, so it has to be added rather than borrowed. This also makes the feed row consistent with L8's minimalism on the list page itself: poster-and-title information density, nothing extra at either level.
+- **R140 — §2K's last two open questions are settled: a deleted saved list shows a dismissible notice, and the Save button keeps lit crimson (owner decisions 2026-10-07, taken together at the close of increment 4).** **(1) Q5 — a saved list whose creator deleted it does NOT silently vanish.** The owner's ruling: *"a notice should be visible in the user's saved lists that the list has been deleted. The user can then dismiss that notice."* This **reverses the read rule increment 2 shipped.** `user_lists` currently filters `film_list__deleted=False` on the Saved tab with a comment calling that filter "not optional" — under R140 the deleted list must still surface, flagged, until the saver dismisses it. **What makes this expressible at all is that the delete is soft:** `FilmList.delete()` sets a flag and leaves the row, so the `ListSave` pointer survives and still names what was lost. The `CASCADE` on `ListSave.film_list` is the **hard**-delete half only. **The known boundary worth stating rather than discovering:** a hard delete (raw SQL, a future purge) cascades the save row away and takes the notice with it — the saver then sees nothing at all. That is accepted, because no production path hard-deletes a list today. Dismissing needs somewhere to live, which means a field on `ListSave` (a `dismissed_date`, most likely) and therefore **a migration** — the first the lists feature has needed since `lists/0001`. Dismiss is per-saver, not global: one member dismissing a notice says nothing about any other member's.
+  **(2) Q7 — `.btn`'s lit crimson is the right weight for the Save control, for now.** The owner's reasoning defers the question rather than answering it on the merits: *"At a later time there will be a total design pass to polish everything within the UI and that can be addressed then."* So build the Save control on `.btn` and spend no design effort on it. **This is explicitly a parking decision, not a settled one** — the M6-style whole-UI polish pass owns it after that, and nothing here should be read as crimson-having-won on the merits against a quieter treatment.
+  **With these two closed, §2K has no open questions left.** Increments 5 (saving), 6 (federation outbound) and 7 (federation inbound) are all unblocked on decisions; anything still unresolved in them is a new question, not a carry-over.
