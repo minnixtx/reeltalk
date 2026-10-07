@@ -4,14 +4,14 @@ A federated social network for tracking, reviewing, and discovering films. Free 
 ## Status
 This project is currently still in pre-alpha status. ReelTalk was originally built as a fork of BookWyrm under the Anti-Capitalist Software License v1.4. Because ACRL is not an OSI-approved free/open-source license, the project is being rewritten from scratch under the AGPLv3, using the original codebase purely as a functional reference. See REWRITE.md for the rationale and the rules that govern the rewrite.
 
-The frozen original lives at minnixtx/reeltalk-legacy (archived, reference-only — feature inventory, behavior, design decisions; no code is carried over).
+The frozen original lives at minnixtx/reeltalk-legacy (archived, reference-only - feature inventory, behavior, design decisions; no code is carried over).
 
 ## What Is ReelTalk?
 
-🌐 Federated — built on ActivityPub; instances can follow each other across the fediverse  
-🎬 Film-first — track what you've watched, rate it, write reviews, and build shelves of favorites  
-👥 Community-driven — small, trusted communities instead of one giant feed  
-🔓 Free and open source — AGPLv3, no corporate middleman
+🌐 Federated - built on ActivityPub; instances can follow each other across the fediverse  
+🎬 Film-first - track what you've watched, rate it, write reviews, and build shelves of favorites  
+👥 Community-driven - small, trusted communities instead of one giant feed  
+🔓 Free and open source - AGPLv3, no corporate middleman
 
 ## License
 GNU AGPLv3
