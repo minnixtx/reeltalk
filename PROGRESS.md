@@ -98,7 +98,13 @@ is history.**
     no live updates on the home feed.
   - TMDB search is the primary add-film flow; manual create is the
     fallback.
-- **NEXT UP — increment 4: the feed row.** `FeedEntry` gains a list shape
+- **NEXT UP — increment 4: the feed row.** **Read
+  `.qwen/tmp/increment4-brief.md` before starting it** — it carries the
+  verified state, the traps, and the gate recipe, all re-checked against the
+  live tree on 2026-10-07 rather than copied from the plan. Headline: the
+  reply gate must **not** be widened on "no film", because the live feed
+  already holds film-less mirrored `Note`s whose reply route refuses — a
+  list face needs its own signal on `FeedEntry`. `FeedEntry` gains a list shape
   (title, poster strip, film count) and a `KIND_RANK_*` tiebreak, with
   `source_id` keyed on the list's own row so the cursor pages off the
   right thing; `_feed_row.html` gains the `.list-strip` branch, which
