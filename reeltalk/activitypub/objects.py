@@ -32,7 +32,13 @@ from django.utils.html import escape
 
 from reeltalk.core.models import Status
 
-from .identity import absolute_uri, actor_path, outbox_path
+from .identity import (
+    PUBLIC_COLLECTION,
+    absolute_uri,
+    actor_path,
+    followers_path,
+    outbox_path,
+)
 
 _CONTEXT = [
     "https://www.w3.org/ns/activitystreams",
@@ -179,11 +185,83 @@ def mention_tag(user, request) -> dict:
     casing was typed, so the name and the href always describe the same
     account.
     """
+    return {
+        "type": "Mention",
+        "href": actor_reference(user),
+        "name": f"@{user.localname}",
+    }
+
+
+def actor_reference(user) -> str:
+    """The actor URI for ``user``, on the host that actually owns the identity.
+
+    The local/remote split ``mention_tag`` documents and every actor
+    reference here needs: a local member's actor is minted from their
+    localname on this host, a mirror's is the ``actor_url`` its home
+    instance published. Minting ``absolute_uri(actor_path(mirror))`` would
+    put a same-host URI on the wire about somebody who does not live here.
+
+    Shared with :func:`status_audience` because an audience array gets the
+    same rule for the same reason -- and an audience entry that names the
+    wrong host is worse than a missing one, because a peer will resolve it
+    and reach something that is not who the array claims.
+    """
     if user.local:
-        href = absolute_uri(actor_path(user.localname))
-    else:
-        href = user.actor_url
-    return {"type": "Mention", "href": href, "name": f"@{user.localname}"}
+        return absolute_uri(actor_path(user.localname))
+    return user.actor_url
+
+
+def status_audience(status, mentioned_users=None) -> tuple[list[str], list[str]]:
+    """The ``to``/``cc`` pair for a status, shaped to match the peer's own.
+
+    **Why this exists.** A receiving Mastodon derives a status's visibility
+    from these two arrays and from nothing else -- ``StatusParser#visibility``
+    reads the public collection in ``to`` and calls it ``public``; the
+    public collection in ``cc`` alone and it is ``unlisted``; ``to`` naming
+    only our followers collection and it is ``private``; and an activity
+    with neither falls through to **``direct``**. We emitted neither, so
+    every status we sent arrived on a peer filed as a direct message --
+    counted on the account, returned by nothing. That single fall-through
+    is the whole of the R143 measurement (``statuses_count: 18`` against a
+    profile endpoint that answers ``0``).
+
+    The mapping is the peer's own ``TagManager.to``/``.cc`` for a public
+    status, which is the only visibility this product has:
+
+    * ``to`` is the public collection, alone.
+    * ``cc`` is the author's **followers collection** -- one URI for the
+      collection, not one entry per follower -- followed by every
+      mentioned account's actor URI.
+
+    The mention entries are not decoration. A peer that finds a tagged
+    account absent from the audience marks that mention *silent*: recorded,
+    no notification, not in a timeline. An addressed mention is what makes
+    naming someone on the wire actually reach them.
+
+    **This is an audience, not a delivery list.** Who gets a POST is
+    ``broadcast._status_targets``, a different set answering a different
+    question: it holds local ``User`` rows to sign deliveries for, while
+    ``cc`` holds URIs describing who may see the post. They agree on every
+    remote member and differ on every local one, so neither is derived from
+    the other and both are needed.
+
+    ``mentioned_users`` lets a caller pass a mention list it already loaded.
+    ``note_document`` needs the same rows for its ``tag`` array, and the
+    outbox serializes a page of these at a time -- re-reading the mention
+    table per document for a second purpose is a needless query, not a
+    cheap one.
+    """
+    if mentioned_users is None:
+        mentioned_users = [
+            mention.user for mention in status.mentions.select_related("user")
+        ]
+    to = [PUBLIC_COLLECTION]
+    cc = [absolute_uri(followers_path(status.user.localname))]
+    for user in mentioned_users:
+        uri = actor_reference(user)
+        if uri and uri not in cc:
+            cc.append(uri)
+    return to, cc
 
 
 def note_document(status, request) -> dict:
@@ -195,12 +273,28 @@ def note_document(status, request) -> dict:
     id (a custom field); ``inReplyTo`` carries threading. The Note's id is a
     stable URL served at ``/status/<id>/`` (increment 6) — remotes usually
     consume the object inline from the outbox / delivery in v0.1.
+
+    The ``to``/``cc`` pair rides on the **object** as well as on the
+    activities that wrap it, because that is where the peer puts it
+    (``NoteSerializer`` declares both) and a receiver that reads the Note
+    rather than the envelope still has to be able to tell that this was a
+    public post. See :func:`status_audience` for what each array means and
+    why an address-less Note is the worst shape we could have sent.
     """
+    # One read of the mention table serves both the audience and the ``tag``
+    # array below. The outbox serializes a page of these documents at a
+    # time, so the second read would be a query per row for no reason.
+    mentioned_users = [
+        mention.user for mention in status.mentions.select_related("user")
+    ]
+    to, cc = status_audience(status, mentioned_users)
     doc = {
         "@context": _CONTEXT,
         "id": note_url(request, status),
         "type": "Note",
         "attributedTo": absolute_uri(actor_path(status.user.localname)),
+        "to": to,
+        "cc": cc,
         "publishedTime": _iso(status.published_date),
     }
     if status.content:
@@ -220,10 +314,7 @@ def note_document(status, request) -> dict:
         # for it would make the thread unresolvable there — and claim our own
         # identity for their object (R42).
         doc["inReplyTo"] = note_reference(request, status.reply_parent)
-    mentions = [
-        mention_tag(mention.user, request)
-        for mention in status.mentions.select_related("user")
-    ]
+    mentions = [mention_tag(user, request) for user in mentioned_users]
     # Omitted when there are none, the way ``film_document`` omits what a
     # document does not carry. An empty ``tag`` array says nothing, and a
     # peer that iterates it pays for the privilege.
@@ -385,13 +476,26 @@ def create_activity(status, user, request) -> dict:
 
     The activity id is stable (keyed on the status's origin identity) so
     receiving instances can dedup deliveries; the object rides inline.
+
+    The activity carries the same ``to``/``cc`` the wrapped Note does, which
+    is how the peer's ``CreateNoteSerializer`` is built. Both levels are
+    populated because receivers are not uniform: the peer reads the object
+    first and falls back to the activity, so either alone works there, but a
+    receiver that looks only at the envelope must still find an audience.
+
+    The pair is read off the built Note rather than computed a second time,
+    so the two levels cannot disagree and the note's single mention read
+    serves both.
     """
+    note = note_document(status, request)
     return {
         "id": f"{absolute_uri(outbox_path(user.localname))}"
         f"#activity-{note_local_id(status)}",
         "type": "Create",
         "actor": absolute_uri(actor_path(user.localname)),
-        "object": note_document(status, request),
+        "to": note["to"],
+        "cc": note["cc"],
+        "object": note,
         "publishedTime": _iso(status.published_date),
     }
 
@@ -403,13 +507,20 @@ def update_activity(status, user, request) -> dict:
     status must not collide on it, or the second edit would dedup as a
     redelivery of the first. The object's id stays stable, so applying the
     update is idempotent by origin identity on the receiving side.
+
+    The audience is recomputed on every call from the current mention rows,
+    the same way the delivery list is, so an edit that changes who is
+    mentioned changes who the post is addressed to.
     """
+    note = note_document(status, request)
     return {
         "id": f"{absolute_uri(outbox_path(user.localname))}"
         f"#update-{note_local_id(status)}-{uuid.uuid4().hex}",
         "type": "Update",
         "actor": absolute_uri(actor_path(user.localname)),
-        "object": note_document(status, request),
+        "to": note["to"],
+        "cc": note["cc"],
+        "object": note,
     }
 
 
@@ -420,12 +531,20 @@ def delete_activity(status, user, request) -> dict:
     soft-deleted review is replaced by a new row with its own identity). The
     object rides inline so the receiver can key the tombstone by origin id
     without a fetch.
+
+    ``to`` is the public collection and there is deliberately **no** ``cc``,
+    matching the peer's ``DeleteNoteSerializer``, which declares ``to`` and
+    stops. A tombstone is not addressed to anybody in particular: everyone who
+    could see the post needs to learn it is gone, which is what the public
+    audience says, and naming a follower collection would imply the removal
+    was aimed at those accounts rather than at the world.
     """
     return {
         "id": f"{absolute_uri(outbox_path(user.localname))}"
         f"#delete-{note_local_id(status)}",
         "type": "Delete",
         "actor": absolute_uri(actor_path(user.localname)),
+        "to": [PUBLIC_COLLECTION],
         "object": note_document(status, request),
     }
 
@@ -457,6 +576,16 @@ def like_activity(liker, target, request, *, undo: bool) -> dict:
     matches how ``Undo(Follow)`` already works here: the receiver finds the
     like by (actor, target) — the unique ``(user, status)`` pair R83
     decision 4 put on the table *is* that key — not by resolving an id.
+
+    **It carries no ``to`` and no ``cc``, and that is not an oversight.**
+    This is the one builder in the file that stays address-less, and it was
+    checked rather than left alone: the peer's own ``LikeSerializer`` emits
+    ``id``/``type``/``actor``/``object`` and nothing else. A ``Like`` is not
+    timeline content — ``broadcast_like`` delivers it to the post's author
+    alone for exactly that reason — so giving it a public audience would
+    both contradict that decision and make our favourites show up in public
+    timelines on the peer. Adding addressing here would look like adopting
+    the house idiom and would actually be the one place we diverge from it.
     """
     actor = absolute_uri(actor_path(liker.localname))
     like = {

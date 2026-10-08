@@ -22,6 +22,14 @@ from .crypto import public_key_multibase
 # Media types that mark a request as coming from an ActivityPub client.
 AP_MEDIA_TYPES = ("application/activity+json", "application/ld+json")
 
+# The ActivityStreams public audience collection. Named once because two
+# builders now emit it and a receiver that has to spot it must not be left
+# matching a string that drifted in one of them. Mastodon's own
+# ``TagManager::COLLECTIONS[:public]`` is the same IRI, and its inbound
+# ``public_collection?`` also accepts the short ``as:Public`` / ``Public``
+# forms -- we send the full IRI, which every implementation reads.
+PUBLIC_COLLECTION = "https://www.w3.org/ns/activitystreams#Public"
+
 # R12 localname charset: [a-zA-Z0-9._-], 1-30 chars. The route regexes share
 # this pattern so the actor page and the films page agree on what a valid
 # localname looks like (the older ``<str>`` converter rejected dots).
@@ -267,7 +275,7 @@ def person_delete_activity(user) -> dict:
         "id": f"{actor}#delete",
         "type": "Delete",
         "actor": actor,
-        "to": ["https://www.w3.org/ns/activitystreams#Public"],
+        "to": [PUBLIC_COLLECTION],
         "object": actor,
     }
 

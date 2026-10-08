@@ -10,180 +10,147 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **Lists increment 7 — federation inbound, and saving a remote list —
-  BUILT, gate-verified, DEPLOYED, and LIVE-PROVEN against a real second
-  ReelTalk instance (2026-10-08).** The inbox now recognises our own
-  extension on a `Note` and mirrors it: a `Status` face keyed on the
-  Note's id, and a `FilmList` + `ListItem`s keyed on the extension's
-  `url`. **No migration** — a mirror reuses the rows increment 1 defined.
-  Full record: **"Executed — lists increment 7"** at the end of §2K; its
-  decisions are **R144**. **This closes §2K's plan: the lists feature's
-  seven-increment arc is complete.**
-- **The unresolvable-film policy is the owner's, and it is "skip it, no
-  fetch" (R144 1).** An item that will not resolve is **dropped and
-  logged**; the list still mirrors. Raising was the rejected alternative —
-  at fifty items that is one bad film losing a whole list forever, with no
-  repair path for an inbound row. This is deliberately **different** from
-  the single-film note path, where a missing film does raise: a one-item
-  activity has nothing else to salvage. Do not "unify" the two.
-- **Zero network inside a list import, and the trap was one function
-  deep (R144 2).** The pre-existing `_film_for_reference` **fetches** on a
-  miss and raises `RemoteObjectError`, which rolls the whole activity back.
-  Left wired, a 50-film list with 43 unknown films would have opened 43
-  outbound connections inside one signed POST and then lost the list.
-  `_known_film_for_reference` resolves from local rows only and returns
-  `None` instead of fetching; the pinned test asserts
-  `len(responses.calls) == 0` **with 404 stubs registered**, because a
-  test that merely omits the stubs passes vacuously.
-- **Two rows, two different origin urls — and that is what makes the
-  delete work (R144 3).** The face is keyed on the Note's id
-  (`…/status/14/`), the `FilmList` on the extension's `url`
-  (`…/list/2/`). Keying both on one is the obvious wrong move: the
-  `Delete` arrives for the **Note**, so the list is only reachable through
-  the face. `_tombstone_mirror` therefore calls the **same `soft_delete_list`**
-  the local `POST /list/<id>/delete/` uses, so the two paths cannot drift
-  — and **R140 1's dismissible `.list-deleted-notice` is proven on a
-  remote row for the first time.**
-- **A missing `orderedItems` is not an empty `orderedItems` (R144 4).**
-  Absent or non-list leaves existing rows untouched (logged); `[]` empties
-  them — conflating them lets one malformed peer update silently delete a
-  mirrored list. Ranks are a **diff**, not an append: reorder reuses the
-  same `ListItem` pks. A bogus or boolean rank falls back to array
-  position; a duplicate resolution keeps one row.
-- **R143 is discharged, and it never blocked this.** Checked, not assumed:
-  the import is **push-driven** — the peer delivers straight to our inbox
-  with films identified inside the payload, resolved from rows already
-  held. No third party or anonymous requester ever needs to resolve
-  anything, so the `to`/`cc` gap does not enter the path. **It stays open
-  on the outbound and discovery side, where it still bites.**
-- **A logging bug found live, invisible to the tests written for it, and
-  caught by a test written two increments earlier (R144 8).** The drop line
-  never appeared in `docker compose logs web`: `LOGGING["root"]["level"]`
-  is `WARNING` and only `delivery`, `inbox` and `moderation.notify` are
-  raised explicitly, so all six new `logger.info` calls were **mute in
-  production while `caplog` forced the level in tests**. Adding the
-  `reeltalk.activitypub.statuses` block fixed the behavior — and then the
-  full gate **failed** on
-  `test_raising_the_federation_loggers_does_not_turn_on_info_everywhere`,
-  which pinned the INFO-raised set at `delivery + inbox`. **The test was
-  widened to three modules rather than the settings change reverted**,
-  because a drop nobody can see is silent data loss, not a policy. The
-  widened test also asserts `statuses` **owns a handler** — being enabled
-  for INFO and actually reaching somewhere are two different failures, and
-  the live bug was the second. **Durable rule: `caplog` can never catch
-  this class of gap; only an assertion against the live
-  `logging.getLogger(...).isEnabledFor(INFO)` and its `.handlers` can.**
-- **Live proof used a swapped peer, deliberately.** A throwaway second
-  ReelTalk (compose project `reeltalk-b`, port 3031, own DB) published a
-  real list and this instance imported it over the wire — because a
-  Mastodon peer cannot send a `reeltalk:list` extension at all, so it
-  could only prove the Note arrives, not that the mirror builds. Read from
-  this instance's own DB and log: `https://reeltalk.minnix.dev/list/13/`
-  = "Midnight Doubles, Ranked" from `…/list/2/`, three films resolved on
-  two different rungs of the ladder, one item dropped and named in the
-  log. Remote rename lands on the `FilmList`; **L12** proven
-  (`POST /list/12/save/` → `{"saved": true}`, card on the Saved tab);
-  delete on the peer soft-deletes both rows and the saver sees the notice.
-  **Zero outbound film fetches throughout.**
-- **Gate: 2498 passed + 5 skipped in 34:04, `PYTEST_EXIT=0`** (baseline
-  2450; **+48 = 47 new tests + 1 clean-room param** for
-  `tests/test_lists_inbound.py`), skips unchanged. `ruff check`,
-  `ruff format --check` and `makemigrations --check` all clean — read from
-  the log's own markers, never the wrapper's exit code. The federation and
-  list suites were run **early** and green before the full gate:
-  `test_lists_inbound.py` 47 passed and 257 passed across the seven
-  required files — the widening in `_mirror_status` changed no non-list
-  status. **The first full-gate run failed one test** (the logging
-  invariant in R144 8); after widening it the gate was re-run from a
-  **rebuilt image**, because the gate's pytest runs the baked code — a
-  source edit without a rebuild means the gate is testing the previous
-  increment.
+- **§2L increment 1 — outbound addressing — BUILT, gate-verified,
+  DEPLOYED and LIVE-MEASURED on the peer (2026-10-08).** Our outbound
+  statuses now carry a real audience: `to` is the ActivityStreams public
+  collection, `cc` is the author's followers collection plus every
+  mentioned actor. Full record: **§2L**, and its decisions are **R145**,
+  which **discharges R143**.
+- **The cause of R143 was one fall-through, and it was never a delivery
+  failure.** Mastodon 4.7.3's `StatusParser#visibility` derives a received
+  status's visibility from `to`/`cc` and from nothing else: public
+  collection in `to` → `public`; public collection in `cc` alone →
+  `unlisted`; `to` naming only our followers collection → `private`;
+  **neither → `direct`**. We emitted neither, so every status this project
+  ever sent arrived on a peer filed as a **direct message** — counted on
+  the account, returned by no endpoint. Delivery genuinely succeeded the
+  whole time, which is why nothing in our logs showed it.
+- **The brief's `to`/`cc` mapping was inverted and would have shipped a
+  near-miss.** "Mentions in `to`, followers-and-public in `cc`" reads
+  plausibly and lands every post in `unlisted`, one rung short of the
+  goal. The mapping that shipped is the peer's own: `to = [Public]` alone,
+  `cc = [followers collection] + mentioned actor URIs`. Kept as a test
+  (`test_public_in_cc_alone_would_only_be_unlisted`) because it is the
+  mistake this increment came closest to making.
+- **`Like` carries no audience, and that is matching the idiom, not
+  missing it.** The peer's own `LikeSerializer` emits
+  `id`/`type`/`actor`/`object` and nothing else. The brief framed four
+  builders as never having adopted the house idiom; for `like_activity`
+  that is wrong, and adding a public audience there would be the one place
+  we *diverge* from Mastodon — and would push our favourites into public
+  timelines. **Scope was three builders, not four.** `flag_activity` also
+  stays unaddressed, checked rather than assumed: a report whose recipients
+  are moderation targets must never be public.
+- **`Delete` gets `to: [Public]` and deliberately no `cc`,** matching the
+  peer's `DeleteNoteSerializer` — everyone who could see the post needs to
+  learn it is gone, which is what a public audience says and what a
+  follower collection does not. The audience rides on **both** the activity
+  and the Note, because the peer reads `@object['to'] || @json['to']` and
+  receivers are not uniform.
+- **Thread 3 — the mirror interaction traffic — PROVEN LIVE, and it had
+  never been proven before.** Driven through the real UI with real clicks
+  as `minnix` on `reeltalk.minnix.dev` against the mirrored face of
+  instance B's "Midnight Doubles, Ranked", then read from **instance B's
+  own database**: `core_like` 0 → **1** (liker `minnix@reeltalk.minnix.dev`,
+  `local = f`, target B's status 14), `core_status` 11 → **12** with
+  **`reply_parent_id = 14`** — threaded onto B's own list post via the
+  home-URL rule, not a URL we minted for their object — and the inbound
+  ledger 22 → **24**. **The reply-to-a-mirrored-list-face shape the brief
+  flagged as genuinely untested works.** This direction had only ever been
+  read-correct; increments 6 and 7 proved peer→us and B→us for lists.
+- **The fix is forward-only — a peer limitation, not our bug, and worth
+  knowing before anyone promises a repaired backlog.** `rebroadcast_lists`
+  re-sent all four live local lists as `Update` with the corrected
+  envelope: 4 sent, HTTP 202, **0 failures**, and the pre-existing
+  statuses **did not change classification**. The peer's
+  `ProcessStatusUpdateService` contains **no reference to `visibility` at
+  all** — visibility is assigned at Create and never re-derived on Update —
+  and `Update` additionally drops unknown objects older than one day.
+  Repairing the backlog would mean re-*creating* under fresh ids, which is
+  a separate and much larger decision, not made here.
+- **Measured on the peer, anonymously, before and after.**
+  `statuses_count` 18 → 19; `GET /api/v1/accounts/<id>/statuses`
+  **0 → 1**, `visibility: public`. The one returned item is a status
+  Created after the deploy, which is the cleanest form of the proof: a
+  fresh post carrying `to: [Public]` is publicly resolvable by a third
+  party with no account and no token.
+- **We are not a relay — closed by owner ruling, not left open.** Instance
+  A does not propagate a neighbor's content to its own followers. The
+  forcing function that made it a question: we cannot sign as the origin
+  (`_deliver_signed` signs as the actor handed to it, and we hold no
+  private key for another instance's identity), so relay could only ever
+  mean `Announce` — a boost, i.e. a product decision wearing a protocol
+  costume. **Consequence: the two tests asserting `Announce` is ignored
+  (`test_activitypub_inbox.py:353`, `:577`) stand unchanged. No decision
+  was reversed.** Do not re-open relay as a protocol gap; it was considered
+  and answered on product grounds.
+- **Not built, deliberately: `discoverable` / `indexable` on our Person
+  document.** We emit neither, so the peer stores both `false`
+  (`process_account_service.rb:256`). Checked what that gates before
+  assuming it mattered: **only Mastodon's FASP indexing and account-level
+  search — not the profile statuses endpoint** — so it does not affect
+  this fix. Turning it on is a separate decision about indexing our
+  members' content, not a bug to close.
+- **A query regression found in this increment's own code and fixed with a
+  test pinning it.** `status_audience` re-read the mention table
+  `note_document` had already read, and `create_activity` computed the
+  audience a third time — up to **3 mention queries per status where the
+  code previously did 1**, which on an outbox page is a query per row for
+  nothing. `note_document` now loads mentioned users once and serves both
+  the `cc` array and the `tag` array from it, and the activities read
+  `to`/`cc` off the finished Note rather than computing them again — which
+  also makes "the activity's audience equals its Note's audience"
+  structural rather than coincidental. **Durable rule: a helper added to a
+  hot serializer path needs its query count asserted, not assumed —
+  `CaptureQueriesContext` now pins both the Note and the wrapping activity
+  at exactly one read of the mention table.**
+- **New tests: 19** in `tests/test_outbound_audience.py`, written against
+  the peer's **transcribed visibility rule** rather than our own key names,
+  so they fail when a *receiver* would misfile our post. They include the
+  addressless legacy shape asserted as `direct` (keeps the diagnosis
+  executable) and the `cc`-instead-of-`to` mistake asserted as `unlisted`.
+- **Gate: **2518 passed, 5 skipped in 2123.65s (0:35:23)**, all four markers 0 (`ruff check`, `ruff format --check`, `makemigrations --check`, `pytest`) — increment 7 baseline 2498 + 19 new tests + 1 `test_clean_room.py` param**
 - **STANDING CONSTRAINTS — unchanged.**
   - **User-made lists are IN SCOPE.** The owner reversed the 2026-10-02
-    refusal ("We won't do lists") on 2026-10-06. Do not cite the old
-    refusal; it no longer holds. The shape is locked as **L1–L13 = R137** in
-    §2K, the feed strip as **R139**, and the last two open questions as
-    **R140**. **§2K has no open questions left** — anything unresolved is a
-    new question, not a carry-over.
+    refusal on 2026-10-06. Do not cite the old refusal. The shape is locked
+    as **L1–L13 = R137** in §2K, the feed strip as **R139**, and the last
+    two open questions as **R140**.
   - No third column on the home feed (R64).
   - The genre subfeed keeps its numbered 20-per-page links, and its
     inconsistency with the endless home feed is deliberate (R132 7) — do
     not "fix" it.
-  - No virtualisation, no mid-scroll deep links, no resume-where-you-were, no
-    live updates on the home feed.
+  - No virtualisation, no mid-scroll deep links, no resume-where-you-were,
+    no live updates on the home feed.
   - TMDB search is the primary add-film flow; manual create is the fallback.
   - **No new `Notification.Kind`** — and a mirror creates no notification
-    at all (R144 7), pinned by test so a future notification feature
-    cannot quietly fire on every mirrored activity.
-- **NEXT UP — §2K's plan is finished, so there is no increment 8 inside
-  it.** The lists feature is built end to end: model → pages → saving →
-  wire out → mirror in. What comes next is a **new section with its own
-  brief**, not a continuation, and the owner picks it. Candidates that this
-  increment surfaced rather than settled, recorded here as *candidates* and
-  decided nowhere:
-  - **R143's `to`/`cc` gap** — still open on the outbound/discovery side.
-    Our posts are not anonymously resolvable by a third party.
-  - **A remote list's own followers** — we mirror a neighbor's list but do
-    not yet propagate it onward, and a mirror's like/reply traffic goes to
-    the *origin*, not to our members.
+    at all (R144 7). The saved-remote-list-changed signal would need one
+    and therefore stays un-built until the owner reopens this explicitly.
+  - **We are not a relay (R145).** Do not re-litigate.
+  - **R85: the route refuses exactly what the page withholds.**
+- **NEXT UP — §2L has one increment built; the owner picks what's next.**
+  Candidates this increment surfaced rather than settled, decided nowhere:
+  - **The pre-existing backlog on peers stays `direct`.** Forward-only is
+    accepted for now; making old posts resolvable means re-creating them
+    under fresh ids. Not cheap, and not obviously worth it for 18 rows.
+  - **`discoverable` / `indexable` on our Person document** — a real
+    product decision about indexing members' content, now cleanly separated
+    from the addressing fix.
+  - **The saved-remote-list-changed signal**, which needs a new
+    `Notification.Kind` and therefore an explicit constraint reopening.
   - **The parked M6 grindhouse polish pass (R73)**, which still holds
     R140 2's Save-button weight.
 - **Process rules that still hold.** On anything visual: build → deploy →
   hand the owner the live URL → browser review → **only then** the full
   gate. Render it and show it; never describe a visual change in prose.
-  Verify geometry, hover and click targets with `getComputedStyle` /
-  `elementFromPoint` in a real browser rather than by reasoning about the
-  cascade. And prove a control by **clicking it**, not by POSTing to its
-  endpoint. On federation specifically: **a mock-only proof is not a
-  proof** — increment 7 stands up a whole second instance rather than
-  trusting a stub, and corroborates what the owner reports against this
-  instance's own records.
-- **What the feature is built on.** `Status`, `Like`, `reply_parent`,
-  `FeedEntry`, `broadcast_*`, the inbox `HANDLERS`, and `Film.find_match`
-  (D7) — not any inherited list scaffolding. There was none: the brief's
-  claim that `List`/`ListItem` already existed as BookWyrm inheritance was
-  false, and §2K opens with that correction. Increment 1 was the first
-  code of the feature to exist.
-- **The repo and attribution facts still stand.** `github.com/minnixtx/
-  reeltalk` is the repository (2026-10-04); the old one is private as
-  `reeltalk-old`. No co-author trailer — blocked by `.githooks/commit-msg`
-  on creation and by `pre-push` + CI on the way out. Never push
-  `refs/notes/*`: `pre-push` refuses it and CI fails if any exist on the
-  remote. `attribution-guard` is a required status check on `main`. **The
-  one thing no guard stops is a history rewrite** — published history here
-  stays as it is.
-- **git:** read the current state with `git status` and `git log -n 1
-  --oneline` rather than trusting anything written here. Anything a single
-  command answers for free is a pointer in this block, not a value; only a
-  literal hash goes stale faster than this block gets rewritten.
-- **Parked:** the M6 grindhouse artwork polish pass, at R73. R140 2's Save
-  button weight is parked *inside* that pass, not settled on the merits.
-  **Instance B (`reeltalk-b`, port 3031) is stopped with its volumes
-  retained** — it is a test rig, not a deployment, and tearing it down is
-  the owner's call.
-
-### How to read the project's docs
-
-| Question | Where |
-|---|---|
-| Clean-room rules (binding) | `REWRITE.md` |
-| Product contract — domain model, watch state, TMDB, federation surface, deployment shape | `PLAN.md` §3 |
-| **D-series** — the original product decisions (D1–D17) | `PLAN.md` §2 |
-| License audit | `PLAN.md` §4 |
-| **R-series** — rewrite-era decisions (R1–R144) | `PROGRESS.md` §4 |
-| **The lists feature — the plan, the locked shape, the increments** | `PROGRESS.md` §2K |
-| What was actually built, with commit hashes | `PROGRESS.md` §2 |
-| Host and deploy facts for this box | `PROGRESS.md` §3 |
-| What is live right now | the block above |
-
-**The two decision series are different numbering, and both are binding.**
-The D-series predates the rewrite; the R-series is everything decided during
-it. Where they touch the same subject the later **R** governs — R103b
-amends R103, R108 narrows R40, R109 supersedes R102's lift clause, R114
-narrows R103b. Read both halves of any pair rather than the latest line.
-
----
-
+  Prove a control by **clicking it**, not by POSTing to its endpoint. On
+  federation: **a mock-only proof is not a proof**, and **202 proves
+  delivery only** — delivery, follower visibility and anonymous
+  resolvability are three different questions on the wire. Read the peer's
+  own running source before designing against a belief about what it does;
+  that is how the inverted mapping was caught before it shipped.
+  **Never run a second pytest session concurrently with the gate** — they
+  share the `test_reeltalk` database, and the collision surfaces as
+  fixture-teardown `AssertionError`s rather than as a clear conflict.
 ## 1. Current state
 
 > **This section is a running log, not the status report.** Its entries were
@@ -7690,6 +7657,208 @@ is found first through `POST /find/`: `_resolve_profile_user` matches only
 existing mirrors, so the webfinger first-contact path is what creates the
 mirror a follow needs.
 
+## 2L. Federation reach — outbound addressing, and the relay question closed
+
+**One thread built, one thread proven live, one thread closed as a decision.**
+Opened 2026-10-08 from the three candidates §2K's close left behind, and
+scoped by the owner in plain prose rather than as a queue: build the
+outbound-addressing fix, prove the mirror interaction traffic that already
+existed but had never been driven, and rule on the relay question. The
+owner's ruling: **build Thread 1 + Thread 3's proof, and "we are not a
+relay."**
+
+### Why the brief's plan had to change before a line was written
+
+The brief asserted three things it asked not to be re-derived. Two held; one
+was wrong in a way that would have produced a real bug. Because the wrong
+one was load-bearing, the peer's own running code was read on
+`192.168.1.85` before anything was designed against it.
+
+**The premise is confirmed, and the mechanism is now proven rather than
+assumed.** Mastodon 4.7.3's `StatusParser#visibility`
+(`app/lib/activitypub/parser/status_parser.rb`) derives a received status's
+visibility from `to`/`cc` and from nothing else:
+
+```ruby
+if audience_to.any? { |to| public_collection?(to) }          then :public
+elsif audience_cc.any? { |cc| public_collection?(cc) }       then :unlisted
+elsif audience_to.include?(@options[:followers_collection])  then :private
+else :direct
+```
+
+We emitted neither array, so **every status this project ever sent arrived on
+a peer filed as a direct message** — counted on the account, returned by no
+endpoint. That single fall-through is the whole of the R143 measurement
+(`statuses_count: 18` against a profile endpoint answering `0`). It was
+never a delivery failure, never a fetch failure, and never visible in our
+own logs, because delivery genuinely succeeded.
+
+**The brief's `to`/`cc` mapping was inverted.** It proposed "direct
+mentions in `to`, followers-and-public in `cc`." Under the parser above,
+the public collection in `cc` *alone* yields `unlisted`, not `public` —
+so the intuitive mapping would have shipped a fix that looked applied and
+left us one rung short of the goal. The peer's actual shape for a public
+status (`TagManager.to` / `TagManager.cc`) is `to = [Public]` alone, and
+`cc = [followers collection] + mentioned actor URIs`.
+
+**`Like` must stay unaddressed, and already matched the peer exactly.** The
+peer's `LikeSerializer` emits `id`/`type`/`actor`/`object` and nothing
+else. The brief's framing — four builders that never adopted the house
+idiom — is wrong for `like_activity`: adding a public audience there would
+be the one place we *diverge* from Mastodon, and would push our favourites
+into public timelines on the peer, contradicting the stated reason
+`broadcast_like` targets the author alone. **Scope narrowed from four
+builders to three.**
+
+### The mapping that shipped
+
+| Builder | `to` | `cc` | Matched against |
+|---|---|---|---|
+| `note_document` | `[Public]` | followers collection + mentioned actor URIs | `NoteSerializer` (declares both) |
+| `create_activity` | `[Public]` | same as the Note | `CreateNoteSerializer` |
+| `update_activity` | `[Public]` | recomputed per call | `UpdateNoteSerializer` |
+| `delete_activity` | `[Public]` | **none** | `DeleteNoteSerializer` (declares `to`, stops) |
+| `like_activity` | **none** | **none** | `LikeSerializer` (no audience at all) |
+| `flag_activity` | **none** | **none** | `FlagSerializer` — a report must never be public |
+
+Three things in that table are decisions rather than mechanics:
+
+- **The audience goes on both the activity and the Note**, because the peer
+  reads `@object['to'] || @json['to']` — object first, activity as
+  fallback — and receivers are not uniform. Either alone works on this peer;
+  both levels work everywhere.
+- **`cc` holds the followers *collection* URI, not one entry per
+  follower.** Matching the peer, and it keeps the envelope from growing with
+  the audience.
+- **A tombstone gets `to: [Public]` and no `cc`.** Everyone who could see
+  the post needs to learn it is gone, which is what a public audience says
+  and what a follower collection does not.
+
+`status_audience(status)` is deliberately **not** derived from
+`broadcast._status_targets`, and the two are not the same set wearing
+different hats: `_status_targets` answers "who gets a POST" and holds local
+`User` rows to sign for, while `cc` answers "who may see this" and holds
+URIs. They agree on every remote member and differ on every local one,
+because a local member is addressable and has no inbox. A test asserts both
+halves of that rather than leaving the relationship as prose.
+
+The mentions in `cc` are not decoration either: a peer that finds a tagged
+account absent from the audience marks the mention **silent** — recorded, no
+notification, not in a timeline. An addressed mention is what makes naming
+someone on the wire actually reach them.
+
+### Thread 3 — the mirror interaction traffic, proven live
+
+Proven by driving the real UI on `reeltalk.minnix.dev` with real clicks
+(headless Chromium, real session, real CSRF) against the mirrored face of
+instance B's "Midnight Doubles, Ranked", then reading **instance B's own
+database** rather than trusting a 202:
+
+| Instance B | before | after |
+|---|---|---|
+| `core_like` | 0 | **1** |
+| `core_status` | 11 | **12** |
+| inbound ledger | 22 | **24** |
+
+- **Like** — `core_like` id 1, liker `minnix@reeltalk.minnix.dev`
+  (`local = f`), target = B's status 14. Signed by the local liker because
+  the mirror holds no key, and attributed to them on arrival.
+- **Reply** — B's status 15, author `minnix@reeltalk.minnix.dev`,
+  **`reply_parent_id = 14`** — threaded onto B's own list post via
+  `note_reference`'s home-URL rule, not onto a URL we minted for their
+  object.
+- Ledger rows 23 (`…user/minnix/#like-fe82c08b…`) and 24
+  (`…user/minnix/outbox/#activity-82`) record both arrivals.
+
+**The reply-to-a-mirrored-list-face shape the brief flagged as genuinely
+untested works.** B accepted a reply under its own `status_type = list`
+post and parented it correctly. This is the us→origin direction proven on a
+real wire for the first time; increments 6 and 7 proved peer→us and B→us
+for lists, and this direction had only ever been read-correct.
+
+One honest gap in the proof: on the peer side the reply came back with
+`in_reply_to_id = null`, i.e. Mastodon did not thread it into its own copy
+of the parent. That is about the peer resolving our parent reference, not
+about our envelope, and it is **not** proven either way here — instance B is
+the origin in this test, and it threaded correctly.
+
+### The repair does not reach the backlog — a peer limitation, not our bug
+
+`rebroadcast_lists` re-sent all four live local lists as `Update` with the
+corrected envelope: **4 sent, HTTP 202, 0 delivery failures.** The new
+post went `public` and is anonymously returned; **the pre-existing statuses
+did not change classification.**
+
+The reason is in the peer's source and is not fixable from here:
+`ProcessStatusUpdateService` contains **no reference to `visibility` at
+all** — visibility is assigned at Create time from `to`/`cc` and is never
+re-derived on Update. A second peer rule compounds it: `Update` drops
+unknown objects older than `OBJECT_AGE_THRESHOLD = 1.day`.
+
+**Consequence, stated plainly: this fix is forward-only.** Anything a peer
+already holds as `direct` stays that way. Making the backlog visible would
+need the old statuses re-*created* under fresh ids, which is a different
+and much larger decision, and is not what the 18 rows are worth.
+
+### Measured before and after, on the peer, anonymously
+
+| | before (2026-10-08, R143) | after (2026-10-08, this increment) |
+|---|---|---|
+| `statuses_count` | 18 | 19 |
+| `GET /api/v1/accounts/<id>/statuses` | **0** | **1**, `visibility: public` |
+
+The one returned item is a status Created after the deploy, which is the
+cleanest possible form of the proof: a fresh post carrying `to: [Public]`
+is publicly resolvable by a third party with no account and no token.
+
+### Not built, and why
+
+- **Relay (`Announce`) — closed by owner ruling.** Instance A does not
+  propagate a neighbor's content to its own followers. This closes the
+  question rather than leaving it open, and the two existing tests asserting
+  `Announce` is ignored (`test_activitypub_inbox.py:353`, `:577`) **stay
+  exactly as they are** — no decision reversed. The forcing function that
+  made this a real question is worth keeping on record: we cannot sign as the
+  origin (`_deliver_signed` signs as the actor handed to it and we hold no
+  private key for another instance's identity), so relay could only ever
+  mean `Announce` — a boost, i.e. a product decision wearing a protocol
+  costume. The owner made the product call.
+- **`discoverable` / `indexable` on our Person document.** Our actor emits
+  neither, so the peer stores both `false`
+  (`process_account_service.rb:256`: `@account.indexable = @json['indexable'] || false`).
+  Checked what that gates before assuming it mattered: **only Mastodon's
+  FASP indexing and account-level search — not the profile statuses
+  endpoint.** So it does not affect this fix, and turning it on is a
+  separate decision about indexing our members' content, not a bug to
+  close.
+- **The saved-remote-list-changed signal.** Still a real gap. Its only
+  answer is a new `Notification.Kind`, which is standing-forbidden, so it
+  stays forbidden until the owner reopens it explicitly as a new R.
+
+### Verification
+
+- **New tests: 19** in `tests/test_outbound_audience.py`, written against
+  the peer's transcribed decision table rather than our own key names, so
+  they fail when a *receiver* would misfile our post. Includes the
+  addressless legacy shape asserted as `direct` (keeps the diagnosis
+  executable), the `cc`-instead-of-`to` mistake asserted as `unlisted`
+  (keeps the near-miss on record), the mirror-mention wrong-host trap, and
+  the `Like`-stays-dark pin that a future "address everything" pass cannot
+  pass through quietly.
+- **Early suites run before the full gate**, per the standing habit from
+  increment 6: **362 passed, exit 0** across `test_activitypub`,
+  `test_activitypub_inbox`, `test_activitypub_status`,
+  `test_activitypub_collections`, `test_federation_inbound`,
+  `test_federation_interactions`, `test_lists_federation`,
+  `test_lists_inbound`, `test_mentions_wire`, `test_mentions_notify`.
+- **Nothing in the existing suite asserted the presence or absence of
+  `to`/`cc`**, and the only exact-equality assertion on a plain Note's
+  `@context` was untouched because no context term was added.
+- **Live:** the deployed instance emits the audience over public HTTPS on
+  both a plain Note (`/status/70/`) and a list face (`/status/65/`, with
+  `reeltalk:list` intact).
+- **Gate:** **2518 passed, 5 skipped in 2123.65s (0:35:23)**, all four markers 0 (`ruff check`, `ruff format --check`, `makemigrations --check`, `pytest`) — increment 7 baseline 2498 + 19 new tests + 1 `test_clean_room.py` param
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -8019,3 +8188,4 @@ not an optimisation.
 - **R142 — Increment 6's wire-shape decisions: the extension namespace is the project's own domain, the repair rides an `Update` and never a re-sent `Create`, the tombstone gets the wider audience, and the prose caps where the extension does not (owner-reviewed implementation decisions 2026-10-08).** Four things the locked shape in R137 did not decide, each with two live options. **(1) The namespace is `https://reeltalk.dev/ns#`, prefix `reeltalk` — the project's domain, not the running instance's.** The owner bought `reeltalk.dev` from Cloudflare on 2026-10-07 for exactly this purpose; the live instance stays `reeltalk.minnix.dev`. A prefix IRI is **never dereferenced** by a JSON-LD processor — it is a naming scope, not a link — so an unbuilt site costs nothing, and the precedent is already in this tree at `identity.py:156`, which declares `{"toot": "http://joinmastodon.org/ns#"}`: Mastodon's project domain, not the host it runs on. **How to apply:** this IRI freezes the moment a second ReelTalk instance federates. Any later change is a breaking protocol change against every mirror already published, not a cosmetic rename — treat it as wire format. **(2) Existing lists are re-broadcast as `Update` on deploy; a re-sent `Create` is not a repair.** `create_activity`'s id is `{outbox}#activity-<local_id>`, stable per status by design, so a re-sent `Create` for face 65 carries the exact id peers already hold and is discarded as a redelivery — the fix would land in the outbox for future fetchers and never touch the empty copies already sitting on peers. Only `Update` lands, because its id carries a uuid no peer has seen. `rebroadcast_lists` is the one-off pass; it ran live with three `Update`s at HTTP 202 and zero failures. **How to apply:** the command's idempotence is half-true and its docstring says so — two runs produce two activity ids and one object id, so the *result* is idempotent and the *traffic* is not. It is a repair tool, not a steady-state loop, and must never be wired to a timer. When a future increment changes a list's serialized body, the same pass is what reaches peers. **(3) All three list activities use `_status_targets`, not the followers-only helper `broadcast_status_delete` uses.** For a list the two sets are equal *today* — list descriptions render with `mentions=False`, so a list face carries no mention rows — and the wider helper is taken anyway so that create and delete cannot diverge if that widens later. **How to apply:** if list descriptions ever start naming remote users, do not "simplify" the list family back onto `_deliver_to_followers`; a named peer left out of the delete arm holds a copy no tombstone will ever reach. **(4) The human-readable prose caps at 50 films; the extension carries every item.** A long list must not become a 200 KB Note, but an importing peer needs the whole ranking. When truncated the post states the count and links the full list, so a shortened post never reads as a short list. **How to apply:** the cap governs `list_note_content` only — never let it leak into `list_document`, or increment 7 silently imports a partial list and nobody can tell from the wire.
 - **R143 — Every outbound activity carries no `to` and no `cc`; recorded as a finding in increment 6 and deferred to increment 7 rather than fixed inside it (owner decision 2026-10-08).** No activity this project emits declares an audience: verified live that `Create(65)`, `Update(65)`, `Delete(65)`, `Review(70)` and `Review(69)` all carry `{"to": null, "cc": null}`. Delivery works because we POST directly to inboxes, which does not require addressing. What the missing audience costs is **anonymous resolvability on the receiving side**: measured against the peer on 2026-10-08, the ReelTalk account mirrors into Mastodon with `statuses_count: 18`, while `/api/v1/accounts/<id>/statuses` returns **0**, and `/api/v2/search` returns **0** both plain and with `resolve=true`. **Scope it precisely — the first reading here was too strong and the owner's live review corrected it.** The owner favourited and replied to the Noir list post from Mastodon and **both landed back here** (`like` on face 65 and a `reply` with `reply_parent_id=65`, both from `minnix@upallnight.minnix.dev`, ledger 9 → 11), so a follower sees and interacts with these posts normally. The finding is **"not publicly resolvable by a third party"**, not "not visible", and it is **not** a blocker for anything increment 6 claims. **Why deferred rather than fixed:** adding `to`/`cc` changes the envelope shape that increment 7's importer is built against, and the brief locks increment 6 to the object body with the shape declared stable — fixing it mid-increment would be exactly the unannounced shape change the brief forbids. **How to apply:** decide it at the top of increment 7, before the inbound mapping is written, since it bears directly on whether an importing instance can resolve a list it has been told about. Do not re-derive the evidence; it is measured above. The durable lesson is the asymmetry: **delivery**, **follower visibility**, and **anonymous resolvability** are three different questions on the wire, and "the POST returned 202" proves only the first of them.
 - **R144 — Increment 7's inbound-mirror decisions: an unresolvable film is dropped and not rolled back, nothing is fetched inside the inbox, the two mirror rows keep two different origin urls, and a missing `orderedItems` is not an empty one (owner policy decision plus build decisions 2026-10-08).** **(1) An item that will not resolve is dropped and logged; the list still mirrors (owner decision, taken from two options at the top of the increment).** The rejected alternative was to raise, which rolls the whole activity back. At fifty items that is one bad film losing a whole list **forever** — the peer has no reason to retry and we have no repair path for an inbound row. The drop is logged with the list's remote url, the item's position and its name, so a mirror that lost half its films is visible in the log rather than inferred from a short page. **How to apply:** never convert a list item miss into an exception inside the inbox. This is deliberately *different* from the single-film note path, where a missing film does raise — a one-item activity has nothing else to salvage, a fifty-item one does. Do not "unify" the two failure modes. **(2) Zero network inside a list import.** The pre-existing `_film_for_reference` fetches on a miss and raises `RemoteObjectError`, which would have meant one outbound connection per unresolved film inside a single signed POST — a neighbor's typo turned into a request storm aimed at whatever host their items name. `_known_film_for_reference` resolves same-host urls from the local row and foreign urls from `Film.remote_url`, returning `None` instead of fetching; `_resolve_list_item` then falls to `Film.find_match` (D7: exact tmdb → imdb → `sort_title`+`year`, and a title **without** a year deliberately does not match). `_film_for_reference` still calls the shared lookup first and still raises its old messages verbatim, so no existing test changed. **How to apply:** the inbox is not allowed to fan out. Any future inbound collection that resolves N references needs the same fetch-free resolver, and the test that pins this asserts `len(responses.calls) == 0` with 404 stubs registered — a test that merely omits the stubs would pass vacuously. **(3) The extension's *presence* makes the face a `LIST`; the two rows keep two different origin urls.** A ReelTalk list is `type: "Note"` plus `reeltalk:list`, so the branch sits **inside** the existing Note handling — no new activity type, no new object type, and the branch is taken before the content-shape mapping so a list never gets read as a review. The face is keyed on the Note's id (`…/status/14/`) and the `FilmList` on the extension's `url` (`…/list/2/`), which is what the partial unique `unique_remote_url_for_list_mirrors` requires. **How to apply:** keying both on one url is the obvious wrong move and it breaks the delete, because the `Delete` arrives for the **Note** — the list is only reachable through the face. Two conflict guards exist because of this shape: an extension whose `url` is already mirrored under a *different* face is left alone, and a face already fronting another `FilmList` returns that holder instead of tripping the required OneToOne. **(4) A missing or non-list `orderedItems` leaves existing rows untouched; `[]` empties them.** Conflating the two means one malformed update from a peer silently deletes a mirrored list. Ranks are applied as a **diff**, not an append: reorder reuses the same `ListItem` pks, removals delete, additions insert. A bogus or boolean rank falls back to the item's array position, and a duplicate resolution keeps the first row rather than violating `one_row_per_film_per_list`. **How to apply:** `rank` is an ordering key, not the printed ordinal — non-dense ranks (1, 2, 4) are valid and preserved. Never infer "clear the items" from an absent key. **(5) The delete reaches the `FilmList` through the local service.** `_tombstone_mirror` calls the same `soft_delete_list` that `POST /list/<id>/delete/` calls, so the two paths cannot drift, and R140 1 (the dismissible `.list-deleted-notice`) is proven on a **remote** row for the first time. A non-list status still hard-deletes as before. **How to apply:** if a future increment changes what deleting a list means, change `soft_delete_list` — do not add a second delete path for mirrors. **(6) R143 was checked, not assumed, and does not block this increment.** R143's own "decide it at the top of increment 7" instruction is discharged: the import is push-driven, with films identified inside the payload and resolved from rows already held, so no third party or anonymous requester ever needs to resolve anything to complete a mirror. R143 stays open on the **outbound and discovery** side, where it still bites, and is now explicitly *not* on the critical path of anything built. **(7) A mirror creates no notification.** Importing a neighbor's list is not an event in anyone's inbox UI — consistent with the standing "no new `Notification.Kind`" constraint, and pinned by test so a future notification feature cannot quietly start firing on every mirrored activity. **(8) The INFO-raised logger set widens from two modules to three: `delivery` + `inbox` + `statuses`.** `test_raising_the_federation_loggers_does_not_turn_on_info_everywhere` pinned the set at `delivery + inbox`, and increment 7's `settings.LOGGING` addition broke it. **The test was changed rather than the settings reverted**, because the policy in (1) is "drop and log" and a drop nobody can see is silent data loss, not a policy — that log line is the only record the operator gets. **How to apply:** the raised set is the list of modules where *one line per event is the whole record we keep*; add a module to `settings.LOGGING` on that basis, not for verbosity, and expect that test to be what makes you say it out loud. The reason `caplog` cannot catch this class of bug is that it forces the level itself — **only an assertion against the live `logging.getLogger(...).isEnabledFor(INFO)` and its `.handlers` can**, so assert both: being enabled for INFO and actually reaching a handler are two different failures, and the live bug was the second.
+- **R145 — The outbound audience: `to` is the public collection alone, `cc` is the followers collection plus mentioned actors, `Delete` gets `to` and no `cc`, and `Like` stays address-less because the peer's own `LikeSerializer` has no audience at all (owner ruling 2026-10-08, closing R143; the mapping itself read off the live peer's serializers rather than chosen).** **(1) The mapping is the peer's, not ours.** Mastodon 4.7.3's `StatusParser#visibility` derives a received status's visibility from `to`/`cc` and nothing else: public collection in `to` → `public`; public collection in `cc` alone → `unlisted`; `to` naming only our followers collection → `private`; **neither → `direct`**. We emitted neither, so every status this project ever sent arrived filed as a direct message — counted on the account, returned by no endpoint. That single fall-through is the whole of R143's `statuses_count: 18` against a profile endpoint answering `0`. **How to apply:** treat `to`/`cc` as the visibility field on the wire, not as routing metadata. Any new outbound object that a human is meant to see needs `to: [Public]`. **(2) The obvious mapping is the wrong one.** "Mentions in `to`, followers-and-public in `cc`" reads plausibly and lands every post in `unlisted`, one rung short of the goal. The peer's `TagManager.to`/`.cc` for a public status is `to = [Public]` alone and `cc = [followers collection] + mentioned actor URIs`. Kept as a test (`test_public_in_cc_alone_would_only_be_unlisted`) because it is the mistake this increment came closest to making. **(3) `Like` staying address-less is matching the idiom, not missing it.** The peer's `LikeSerializer` emits `id`/`type`/`actor`/`object` and nothing else; adding a public audience there would be the one place we *diverge* from Mastodon and would push favourites into public timelines, contradicting why `broadcast_like` targets the author alone. **How to apply:** the scope was three builders, not four. `like_activity` is pinned address-less so a future "address everything" pass cannot pass through it quietly. **(4) `cc` holds the followers *collection* URI, not one entry per follower, and the mentions in it are load-bearing.** A peer that finds a tagged account absent from the audience marks the mention *silent* — recorded, no notification, not in a timeline. An addressed mention is what makes naming someone on the wire reach them. **(5) The audience is not the delivery list and is deliberately not derived from it.** `_status_targets` answers "who gets a POST" and holds local `User` rows to sign for; `cc` answers "who may see this" and holds URIs. They agree on every remote member and differ on every local one, because a local member is addressable and has no inbox. **(6) `Delete` gets `to: [Public]` and no `cc`,** matching `DeleteNoteSerializer` — everyone who could see the post needs to learn it is gone, which is what a public audience says and what a follower collection does not. **(7) The audience rides on both the activity and the Note,** because the peer reads `@object['to'] || @json['to']` — object first, activity as fallback — and receivers are not uniform. **(8) `Flag` stays unaddressed,** checked rather than assumed: a report whose recipients are moderation targets must never be public-addressed. **(9) We are not a relay (owner ruling, closing the relay question rather than leaving it open).** Instance A does not propagate a neighbor's content to its own followers. The forcing function that made it a question: we cannot sign as the origin (`_deliver_signed` signs as the actor handed to it, and we hold no private key for another instance's identity), so relay could only ever mean `Announce` — a boost, i.e. a product decision wearing a protocol costume. **Consequence: the two tests asserting `Announce` is ignored (`test_activitypub_inbox.py:353`, `:577`) stand unchanged. No decision was reversed.** **How to apply:** do not re-open relay as a protocol gap; it was considered and answered on product grounds. Reopening it needs a stated reason as a new R. **(10) The fix is forward-only.** `ProcessStatusUpdateService` on the peer has no reference to `visibility` at all — visibility is assigned at Create and never re-derived on Update — and `Update` additionally drops unknown objects older than one day. Measured: 4 lists re-sent as `Update` with the corrected envelope, 202s, 0 failures, and the pre-existing statuses did not change classification. **How to apply:** do not promise a repaired backlog from a rebroadcast; repairing it means re-*creating* under fresh ids, which is a separate and much larger decision.
