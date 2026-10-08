@@ -665,15 +665,22 @@ def test_the_delivery_info_line_reaches_the_console_not_lastresort():
 
 def test_raising_the_federation_loggers_does_not_turn_on_info_everywhere():
     # The other direction: these are named loggers, not project-wide INFO.
-    # The raised set is exactly delivery + inbox — the two directions where
-    # one line per event is the whole record we keep. Everything else,
-    # including the federation modules that log only when something is
-    # wrong, stays at the root's WARNING.
+    # The raised set is delivery + inbox + statuses — the three modules
+    # where one line per event is the whole record we keep. `statuses`
+    # joined it in lists increment 7: the unresolvable-list-item policy is
+    # "drop and log" (R144 1), and a drop nobody can see is not a policy
+    # but silent data loss. The line was mute live under the root's
+    # WARNING while `caplog` forced the level in tests, so only this
+    # assertion could catch the gap — which is why it is asserted on the
+    # live logger rather than through caplog, exactly as the delivery test
+    # above does. Everything else, including the federation modules that
+    # log only when something is wrong, stays at the root's WARNING.
     assert logging.getLogger("reeltalk.activitypub.delivery").isEnabledFor(logging.INFO)
     assert logging.getLogger("reeltalk.activitypub.inbox").isEnabledFor(logging.INFO)
-    assert not logging.getLogger("reeltalk.activitypub.statuses").isEnabledFor(
-        logging.INFO
-    )
+    statuses = logging.getLogger("reeltalk.activitypub.statuses")
+    assert statuses.isEnabledFor(logging.INFO)
+    assert statuses.handlers, "statuses logger must own a handler, not inherit silence"
+    assert any(isinstance(h, logging.StreamHandler) for h in statuses.handlers)
     assert not logging.getLogger("reeltalk.core.models").isEnabledFor(logging.INFO)
     assert not logging.getLogger("reeltalk").isEnabledFor(logging.INFO)
 

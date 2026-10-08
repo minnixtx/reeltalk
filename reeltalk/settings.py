@@ -395,6 +395,20 @@ LOGGING = {
             "level": env.str("INBOX_LOG_LEVEL", default="INFO"),
             "propagate": False,
         },
+        # The reason lines behind the inbox's ``handled`` verdict, for the
+        # list mirror specifically (lists increment 7). Raised to INFO on its
+        # own for the same reason as the two above: root stays at WARNING, so
+        # without this the ``dropped 1 unresolved item`` line -- the *only*
+        # record that a remote list arrived with a film we could not resolve
+        # -- never reaches ``docker logs``, and a mirror that silently lost a
+        # row would look identical to one that arrived whole. Found live, not
+        # in tests: ``caplog`` forces the level itself, so the unit test
+        # passed while production stayed mute.
+        "reeltalk.activitypub.statuses": {
+            "handlers": ["console"],
+            "level": env.str("STATUSES_LOG_LEVEL", default="INFO"),
+            "propagate": False,
+        },
         # The staff report email's delivery line (2E). Raised to INFO on its
         # own for the same reason the two above are: root stays at WARNING,
         # so without this the "Staff email sent to @warden" line — the only

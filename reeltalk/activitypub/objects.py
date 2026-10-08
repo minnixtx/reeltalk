@@ -53,6 +53,12 @@ REELTALK_NS = "https://reeltalk.dev/ns#"
 # list Notes carry it; a review keeps the two-entry ``_CONTEXT`` untouched.
 _LIST_CONTEXT = [*_CONTEXT, {"reeltalk": REELTALK_NS}]
 
+# The key the extension rides under. Named here rather than typed at each site
+# because the importer in ``statuses`` has to read exactly this term: a drift
+# between what we write and what we look for does not raise anywhere, it just
+# reads as "this Note is not a list" and mirrors a shapeless status.
+LIST_EXTENSION = "reeltalk:list"
+
 # How many ranked films get written into the human-readable body. The
 # extension carries every item regardless; this caps only the prose a
 # Mastodon reader sees, so a two-hundred-film list cannot hand a peer a
@@ -248,7 +254,7 @@ def note_document(status, request) -> dict:
         if film_list is not None:
             doc["@context"] = _LIST_CONTEXT
             doc["content"] = list_note_content(film_list)
-            doc["reeltalk:list"] = list_document(film_list, request)
+            doc[LIST_EXTENSION] = list_document(film_list, request)
     return doc
 
 
