@@ -28,12 +28,37 @@ idempotent by origin identity (increment 6).
 import uuid
 from datetime import UTC
 
+from django.utils.html import escape
+
+from reeltalk.core.models import Status
+
 from .identity import absolute_uri, actor_path, outbox_path
 
 _CONTEXT = [
     "https://www.w3.org/ns/activitystreams",
     "https://w3id.org/security/v1",
 ]
+
+# The ReelTalk extension vocabulary (L11 / R142). Declared as a prefix dict
+# on the *Note's* own ``@context`` rather than left as a bare term, because a
+# strict JSON-LD processor drops an undefined term instead of passing it
+# through -- the same reason ``toot`` is declared in
+# ``identity.person_document``. The IRI is the project's domain and not the
+# instance's: every ReelTalk install publishes the same vocabulary, and a
+# prefix IRI is never dereferenced, so the site behind it does not have to
+# exist yet.
+REELTALK_NS = "https://reeltalk.dev/ns#"
+
+# The Note context widened with the one prefix the list extension needs. Only
+# list Notes carry it; a review keeps the two-entry ``_CONTEXT`` untouched.
+_LIST_CONTEXT = [*_CONTEXT, {"reeltalk": REELTALK_NS}]
+
+# How many ranked films get written into the human-readable body. The
+# extension carries every item regardless; this caps only the prose a
+# Mastodon reader sees, so a two-hundred-film list cannot hand a peer a
+# document that trips its content limit and comes back looking broken with
+# no way back to the real thing.
+LIST_CONTENT_FILM_LIMIT = 50
 
 
 def _iso(dt) -> str:
@@ -198,7 +223,155 @@ def note_document(status, request) -> dict:
     # peer that iterates it pays for the privilege.
     if mentions:
         doc["tag"] = mentions
+    # A list's post face is the one Note whose body is composed rather than
+    # read, and the arm sits **last**, after the ordinary ``content`` arm, so
+    # the composed body wins. The face deliberately stores no text of its own
+    # (increment 2 keeps the title and description in exactly one place), and
+    # even if such a row somehow carried content it must not stand in for the
+    # ranked list.
+    #
+    # Composing from ``FilmList`` rather than off the face is also what makes
+    # the ``Delete`` tombstone correct without a second code path.
+    # ``Status.delete()`` clears ``content`` and ``raw_content``, but
+    # ``FilmList.delete()`` keeps the title, the description and the items,
+    # so a tombstone built off the wiped face would name nothing while one
+    # built off the surviving list still says which list went away.
+    if status.status_type == Status.Type.LIST:
+        # ``getattr`` rather than a bare attribute access: a LIST status with
+        # no backing ``FilmList`` is reachable -- ``test_lists.py`` creates
+        # one directly to exercise the film-anchoring carve-out -- and the
+        # outbox serializes every one of a user's statuses with no type
+        # filter. A malformed row must degrade to the plain Note this code
+        # sent before lists existed, not raise and take the whole outbox page
+        # down for the user over one bad row.
+        film_list = getattr(status, "film_list", None)
+        if film_list is not None:
+            doc["@context"] = _LIST_CONTEXT
+            doc["content"] = list_note_content(film_list)
+            doc["reeltalk:list"] = list_document(film_list, request)
     return doc
+
+
+def list_url(film_list) -> str:
+    """The list's canonical URL on this instance (L10).
+
+    This is the identifier a receiving ReelTalk stores as the mirror's
+    ``remote_url``, so it is minted from the canonical origin rather than
+    from the request, exactly like every other published identity.
+    """
+    return absolute_uri(f"/list/{film_list.pk}/")
+
+
+def _year_suffix(film) -> str:
+    """``" (1951)"`` when there is a year, empty when there is not.
+
+    Split out so the ranked line and the extension agree on what a film
+    without a known year looks like rather than each inventing one.
+    """
+    return f" ({film.year})" if film.year is not None else ""
+
+
+def list_item_document(item, request) -> dict:
+    """One ranked film inside the ``reeltalk:list`` extension.
+
+    Film identity reuses ``film`` / ``tmdbId`` / ``imdbId`` -- the very
+    same terms ``film_document`` already publishes -- rather than inventing
+    list-local ones. A receiving ReelTalk therefore maps a list item's film
+    with the same code it uses for a review's film, which is the difference
+    between an importer with one film-resolution path and one with two that
+    can drift.
+
+    ``reeltalk:rank`` is namespaced because rank is ours alone: ActivityStreams
+    has no ordinal for ``orderedItems``, and a bare ``rank`` would be a term
+    nothing can look up.
+    """
+    film = item.film
+    doc = {
+        "type": "reeltalk:ListItem",
+        "reeltalk:rank": item.rank,
+        "name": film.title,
+        "film": film_url(request, film),
+    }
+    if film.year is not None:
+        doc["year"] = film.year
+    if film.tmdb_id is not None:
+        doc["tmdbId"] = film.tmdb_id
+    if film.imdb_id:
+        doc["imdbId"] = film.imdb_id
+    return doc
+
+
+def list_document(film_list, request) -> dict:
+    """The ``reeltalk:list`` extension object (L11).
+
+    The standard AS terms carry what AS actually defines -- ``name`` for the
+    title, ``summary`` for the description, ``orderedItems`` for the films --
+    so a generic processor reads them without our vocabulary, and only the
+    genuinely ReelTalk-specific piece (the rank) needs the prefix.
+
+    ``summary`` is the **rendered HTML** the ``FilmList`` already stores, not
+    the markdown source. A mirror gets HTML into ``FilmList.description`` the
+    same way a mirrored review gets HTML into ``Status.content``; the
+    ``raw_description`` half stays empty on a mirror because the markdown
+    source is a fact about the origin member's editing session, not about the
+    list.
+
+    The full ranked set rides here even when the human-readable ``content``
+    is capped, so the cap costs a peer nothing it needed.
+    """
+    doc = {
+        "type": "reeltalk:List",
+        "url": list_url(film_list),
+        "name": film_list.title,
+        "orderedItems": [
+            list_item_document(item, request)
+            for item in film_list.items.select_related("film").order_by("rank", "id")
+        ],
+    }
+    if film_list.description:
+        doc["summary"] = film_list.description
+    return doc
+
+
+def list_note_content(film_list) -> str:
+    """The human-readable body of a list's Note.
+
+    L13 says a Mastodon user sees a post *about* the list rather than the
+    list itself, so this is prose with a way back to the real thing -- not an
+    attempt to reproduce the list page. The title and the film titles are
+    escaped because they are plain text; ``description`` is **not**, because
+    it is already sanitized HTML rendered at write time (R18) and escaping
+    it again would show a member their own markup.
+
+    The link is always present, and carries the count when the list is too
+    long to write out, so a truncated post still says how much there is and
+    where the rest lives. No ``request``: the link comes from
+    ``list_url``/``absolute_uri``, which mint from ``CANONICAL_ORIGIN``.
+    """
+    parts = [f"<p><strong>{escape(film_list.title)}</strong></p>"]
+    if film_list.description:
+        parts.append(film_list.description)
+
+    items = list(film_list.items.select_related("film").order_by("rank", "id"))
+    if items:
+        rows = "".join(
+            f"<li>{escape(item.film.title)}{_year_suffix(item.film)}</li>"
+            for item in items[:LIST_CONTENT_FILM_LIMIT]
+        )
+        parts.append(f"<ol>{rows}</ol>")
+
+    url = list_url(film_list)
+    remaining = len(items) - LIST_CONTENT_FILM_LIMIT
+    if remaining > 0:
+        parts.append(
+            f"<p>Showing the first {LIST_CONTENT_FILM_LIMIT} of {len(items)} films. "
+            f'The full list: <a href="{url}">{url}</a></p>'
+        )
+    elif items:
+        parts.append(f'<p>The full list: <a href="{url}">{url}</a></p>')
+    else:
+        parts.append(f'<p>No films in this list yet: <a href="{url}">{url}</a></p>')
+    return "".join(parts)
 
 
 def create_activity(status, user, request) -> dict:

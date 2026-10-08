@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-07
+**Last updated:** 2026-10-08
 
 ---
 
@@ -10,71 +10,89 @@
 this file disagrees with this block, **this block is current and the other
 is history.**
 
-- **Lists increment 5 — saving — BUILT, gate-verified, DEPLOYED, and
-  approved by the owner in a browser review of the live box (2026-10-07).**
-  `POST /list/<id>/save/` and `/unsave/` (login-required, CSRF,
-  **idempotent** — `get_or_create`, so a double press is one row and not an
-  `IntegrityError`), the Save / Saved control on `.btn`'s lit crimson per
-  R140 2, and the R140 1 deleted-list notice with its Dismiss on the Saved
-  tab. New in `lists/models.py`: `ListSave.notice_dismissed_at`, which is
-  why **this increment needed a migration** — the first the lists feature has
-  needed since `lists/0001` — and it is applied on the live box. New service
-  functions `save_list` / `unsave_list` / `dismiss_deleted_notice`, new
-  routes and views, `lists/static/js/list_save.js`, three CSS blocks, and a
-  new test file `tests/test_lists_saving.py` (37 tests). Full gate **2406
-  passed + 5 skipped in 34:01, `PYTEST_EXIT=0`** (baseline 2366; **+40 =
-  37 new tests + 3 clean-room params**), skips unchanged, with `ruff check`
-  / `ruff format --check` / `makemigrations --check` all clean. Full
-  record: **"Executed — lists increment 5"** at the end of §2K; the six
-  decisions it made are **R141**.
-- **The trap the brief predicted was real, and the first attempt fell into it
-  in the *easy* direction.** R140 1 required dropping the
-  `film_list__deleted=False` filter the Saved tab had carried since increment
-  2. The first reversed predicate was written
-  `.exclude(film_list__deleted=True, notice_dismissed_at__isnull=True)`,
-  which drops **exactly the row the decision exists to show**. The correct
-  form is `__isnull=False`: exclude a save when the list is deleted **and**
-  the notice has already been dismissed. The inverted predicate is no harder
-  to write and fails in the direction that looks like the old behaviour, so
-  the polarity is now spelled out in the comment where it lives.
-- **The deleted card is not a navigation.** `list_detail` 404s on a deleted
-  list, so the card's title renders as a plain `<span>` instead of the
-  `<a class="list-card-name">` every other card carries — R85's
-  offer-with-no-route bug, third appearance. Pinned **both ways**: the
-  deleted card has no `href`, and the *live* card keeps its anchor **and
-  following it returns 200**, so the rule reads as *keyed on `deleted`*
-  rather than *never link from a Saved card*.
-- **L6 silence proven by the ledger, not by the display.** Every silence
-  test compares `Notification.objects.count()` across the action rather than
-  what the page renders, and one carries a non-vacuity control that puts a
-  real row on the ledger through a real like first — so it cannot pass
-  against an empty table with the notifications app broken. **Live, the
-  ledger read 9 before every save / unsave / delete and 9 after.** No new
-  `Notification.Kind`, and none will be added.
-- **Dismiss retires the notice, not the save.** The `ListSave` row survives
-  with its marker and the card leaves the tab — which is *why* the field
-  exists at all: delete-on-dismiss would need no column. Per-saver by
-  construction and tested that way: alice dismissing leaves carol's notice
-  fully rendered. A second dismiss does not move the timestamp, so the field
-  keeps meaning *when it was seen*.
-- **A save does not stamp the post face.** `_stamp_edited` feeds
-  `editedTime` on increment 6's wire, and saving is one member's
-  bookkeeping about somebody else's list. The three new service functions sit
-  deliberately **outside** the stamping discipline every other one follows —
-  assume otherwise and increment 6 broadcasts edits that never happened.
-- **Verified live, by clicking, at both widths** (headless Chromium,
-  throwaway `l5probe_maker` / `l5probe_saver`, **30/30 checks, zero
-  `pageerror`s**): Save → `Saved` → reload still `Saved` → click → `Save`,
-  all through the real control; the button sits level with the author line
-  with `margin-top: 0` (R134 #6's non-opt-in base rule) and
-  `elementFromPoint` confirms it receives its own click; 77×45 and still
-  clickable at 390px; the live card's link **followed** to a 200; the
-  deleted card's notice not overflowing its card at 390px; Dismiss
-  redirecting and the empty state returning. Probe torn down — users, lists,
-  saves, films, statuses and faces all back to zero, ledger unchanged at 9,
-  and **only the one session the probe minted** deleted (sessions 4 → 3),
-  each decoded and matched on `_auth_user_id` so the owner's own browser
-  stays signed in.
+- **Lists increment 6 — federation outbound — BUILT, gate-verified,
+  DEPLOYED, and PROVEN LIVE ON THE REAL PEER including the round trip
+  (2026-10-08).** A list's post `Note` now carries a composed body — title,
+  description, and the films written out in rank order with years — plus a
+  `reeltalk:`-namespaced extension with the structured ranked items, so
+  ReelTalk↔ReelTalk rebuilds the ranking instead of parsing prose.
+  `Create` on creation, `Update` on every real edit, `Delete` tombstone on
+  soft-delete, all three through `_status_targets`. **No migration** —
+  nothing in this increment touches a model. Full record: **"Executed —
+  lists increment 6"** at the end of §2K; its decisions are **R142**, and
+  it raises **R143**.
+- **The trap the brief named was real and was closed with option 1.** A
+  re-sent `Create` carries `{outbox}#activity-<local_id>` — the exact id
+  peers already hold — so it is discarded as a redelivery and the fix
+  reaches nobody who already fetched the empty Note. **The repair rides an
+  `Update`**, whose id carries a uuid no peer has seen.
+  `lists/management/commands/rebroadcast_lists.py` ran live: **three
+  `Update`s delivered, HTTP 202, zero failures.** Its idempotence is
+  half-true and its docstring says so — the *result* is idempotent, the
+  *traffic* is not. **A repair tool, never a steady-state loop.**
+- **The extension namespace is `https://reeltalk.dev/ns#`, prefix
+  `reeltalk` — the project's own domain, not the running instance's
+  (R142 1).** The owner bought `reeltalk.dev` from Cloudflare on
+  2026-10-07 for this; the live instance stays `reeltalk.minnix.dev`. A
+  prefix IRI is never dereferenced, so an unbuilt site costs nothing, and
+  the `toot` → `joinmastodon.org` precedent is already in this tree at
+  `identity.py:156`. **This freezes the moment a second ReelTalk instance
+  federates** — any later change is a breaking protocol change, not a
+  rename.
+- **L13 proven end to end on the real peer, round trip included.** The
+  owner read all three repaired posts in their Mastodon home timeline as
+  real posts, then **favourited and replied to the Noir list post from
+  Mastodon and both landed back here** — corroborated against this
+  instance's own records, not taken on report: `like` on face 65 and a
+  `reply` with `reply_parent_id=65`, both from
+  `minnix@upallnight.minnix.dev`, ledger **9 → 11**. First federated
+  interaction a **list** has ever taken in this project.
+- **R143: our activities carry no `to` and no `cc`, and it is narrower
+  than it first looked.** Verified live for list *and* review statuses —
+  every activity ships `{"to": null, "cc": null}`. Delivery is unaffected
+  (we POST straight to inboxes) and, as the owner's favourite and reply
+  prove, **a follower sees and interacts normally**. What the missing
+  audience costs is **anonymous resolvability**: the peer mirrors our
+  account with `statuses_count: 18` while `/api/v1/accounts/<id>/statuses`
+  and `/api/v2/search` both return **0**. Deferred to increment 7 by the
+  owner — adding it changes the envelope shape increment 7's importer is
+  built against. **Decide it at the top of increment 7, before the inbound
+  mapping is written.**
+- **The body is composed at serialization time from `FilmList`, never from
+  the face.** The face stores no body and `Status.delete()` wipes
+  `content`, so composing from the surviving `FilmList` is what makes the
+  **`Delete` tombstone still name the list**. One choke point
+  (`note_document`, with the LIST branch appended last so the composed body
+  wins) feeds the outbox, the `/status/<id>/` AP arm, and all three
+  activities — no second serializer to keep in step. Escaping is
+  asymmetric on purpose: titles escaped, `description` not (already
+  sanitized at write time, R18). Prose caps at 50 films; **the extension
+  never caps** — do not let the cap leak into `list_document` or increment
+  7 silently imports a partial list.
+- **The change gate lives in the views, on the services' own return
+  values.** A double-click on add, a remove of a film that was never there,
+  a move-press at either end, and an unchanged form submit each send
+  **nothing**. Deliberately *not* the `mark_watched_view` shape — because
+  the Update id carries a uuid, a peer **cannot** dedup a spurious one, so
+  not sending it is the only guard there is.
+- **L6 silence proven, and its first proof was vacuous.** The silence test
+  had carol following **alice** while the list belonged to **bob** — an
+  empty audience, so it passed on *no recipients* rather than on
+  *silence*. Both it and its non-vacuity control now put the follower on
+  the list's owner. Two more test bugs caught in the same file:
+  `assert responses.calls == []` is **never** true (`responses.Calls` has
+  no list equality) — the house idiom is `len(responses.calls) == 0`; and
+  `--list` needed `dest="list_ids"` or argparse refuses to build.
+- **Gate: 2450 passed + 5 skipped in 35:27, `PYTEST_EXIT=0`** (baseline
+  2406; **+44 = 40 new tests + 4 clean-room params** for
+  `lists/management/__init__.py`, `lists/management/commands/__init__.py`,
+  `lists/management/commands/rebroadcast_lists.py` and
+  `tests/test_lists_federation.py`), skips unchanged. `ruff check` /
+  `ruff format --check` / `makemigrations --check` all clean. The
+  federation suites were run **early** and green before the full gate:
+  `test_lists_federation.py` 40 passed, and the six neighbouring
+  federation/list files 214 passed — the widening in `note_document`
+  changed no other document type.
 - **STANDING CONSTRAINTS — unchanged.**
   - **User-made lists are IN SCOPE.** The owner reversed the 2026-10-02
     refusal ("We won't do lists") on 2026-10-06. Do not cite the old
@@ -89,20 +107,25 @@ is history.**
   - No virtualisation, no mid-scroll deep links, no resume-where-you-were, no
     live updates on the home feed.
   - TMDB search is the primary add-film flow; manual create is the fallback.
-- **NEXT UP — increment 6: federation outbound.** Out as a `Note` whose
-  content is the title, the description and the films written out in rank
-  order, **plus** a ReelTalk-namespaced extension carrying the structured
-  ranked items so ReelTalk↔ReelTalk rebuilds the ranking instead of parsing
-  prose; `Update` re-broadcasts on every edit, because L1 makes the list
-  live and L11 says the wire must follow. Delivery through the existing
-  `_status_targets` helper, `Delete` tombstone on soft-delete. **No brief
-  file exists yet for it** — write one from §2K's increment 6 bullets the way
-  1 through 5 were briefed, and carry the verified-state / trap / gate
-  structure. Two things it inherits from this increment and must not undo: the
-  face carries **no** stored body (the title and description live on
-  `FilmList` alone, so the `Note` body is composed at broadcast time), and
-  `save`-family service functions deliberately do **not** stamp
-  `edited_date` — the stamp is what means "this list changed".
+- **NEXT UP — increment 7: federation inbound, and saving a remote list.**
+  The inbox recognises our extension on a `Note` and mirrors it as a remote
+  `FilmList` + `ListItem`s, keyed on remote URL the way status mirrors are,
+  populating `local=False`, `remote_id`, `remote_url`. **The mapping is
+  fixed here, not for increment 7 to improvise:**
+  `reeltalk:list.url` → `FilmList.remote_url`;
+  `_remote_id_from_url(url)` → `FilmList.remote_id`; `name` → `title`;
+  `summary` → `description`; `orderedItems[].reeltalk:rank` →
+  `ListItem.rank`; film resolved via the existing
+  `film` / `tmdbId` / `imdbId` terms.
+  `test_the_extension_maps_onto_a_mirror_row_without_invention` already
+  builds a mirror row out of the extension using the **existing** inbound
+  helper, so the shape is proven importable rather than asserted so.
+  **Brief file: `.qwen/tmp/increment7-brief.md`.** Two things it inherits
+  and must not undo: the face carries **no** stored body (the title and
+  description live on `FilmList` alone, so the `Note` body is composed at
+  broadcast time), and the `save`-family service functions deliberately do
+  **not** stamp `edited_date` — the stamp is what means "this list
+  changed". **R143 (the `to`/`cc` gap) is the first thing it must decide.**
 - **Process rules that still hold.** On anything visual: build → deploy →
   hand the owner the live URL → browser review → **only then** the full
   gate. Render it and show it; never describe a visual change in prose.
@@ -110,7 +133,10 @@ is history.**
   `elementFromPoint` in a real browser rather than by reasoning about the
   cascade. And prove a control by **clicking it**, not by POSTing to its
   endpoint — increment 4's real bug was invisible to every route-level test
-  precisely because the route was never the broken part.
+  precisely because the route was never the broken part. On federation
+  specifically: a mock-only proof is not a proof. Hand the owner the live
+  peer check and corroborate what they report against this instance's own
+  records.
 - **What the feature is built on.** `Status`, `Like`, `reply_parent`,
   `FeedEntry`, `broadcast_*` and the inbox `HANDLERS` — not any inherited
   list scaffolding. There was none: the brief's claim that `List`/`ListItem`
@@ -139,7 +165,7 @@ is history.**
 | Product contract — domain model, watch state, TMDB, federation surface, deployment shape | `PLAN.md` §3 |
 | **D-series** — the original product decisions (D1–D17) | `PLAN.md` §2 |
 | License audit | `PLAN.md` §4 |
-| **R-series** — rewrite-era decisions (R1–R141) | `PROGRESS.md` §4 |
+| **R-series** — rewrite-era decisions (R1–R143) | `PROGRESS.md` §4 |
 | **The lists feature — the plan, the locked shape, the increments** | `PROGRESS.md` §2K |
 | What was actually built, with commit hashes | `PROGRESS.md` §2 |
 | Host and deploy facts for this box | `PROGRESS.md` §3 |
@@ -6448,7 +6474,9 @@ names the **creator**, not the saver; and the notification ledger row count is
 **unchanged** by a save — which is what proves silence rather than merely
 failing to display it.
 
-**Increment 6 — federation outbound.**
+**Increment 6 — federation outbound.** ✅ **DONE 2026-10-08** — deployed
+and live-verified on the wire; full record: **"Executed — lists increment
+6"** at the end of §2K; its decisions are **R142**, and it raises **R143**.
 
 - Out as a `Note`: content is the title, the description, and the films
   written out in rank order, so a Mastodon follower reads a real post today
@@ -6462,8 +6490,15 @@ failing to display it.
   soft-delete.
 
 *Proves by:* the outgoing document asserted in tests, then live against the
-Mastodon 4.7.2 peer — the owner follows, sees the list as a post, favourites
-it, and the like lands back here.
+Mastodon peer — the owner follows, sees the list as a post, favourites
+it, and the like lands back here. **PROVEN LIVE 2026-10-08, round trip
+included.** The owner read all three repaired posts as real posts, then
+favourited and replied to the Noir list post from Mastodon; both landed
+back here as a `Like` on face 65 and a reply with `reply_parent_id=65`,
+both from `minnix@upallnight.minnix.dev`, ledger 9 → 11. First federated
+interaction a **list** has ever taken in this project. R143's missing
+`to`/`cc` turned out **not** to block it — see R143 for the narrowed
+finding.
 
 **Increment 7 — federation inbound, and saving a remote list.**
 
@@ -7282,6 +7317,217 @@ deleting every session would have logged the owner out of their own browser.
 
 **Still owed: nothing inside increment 5.** §2K has no open questions.
 
+### Executed — lists increment 6 is DONE, deployed and live-verified on the wire (2026-10-08)
+
+**What landed.** Two new source files, one new test file, three edited. **No
+migration** — nothing in this increment touches a model.
+
+- **`activitypub/objects.py`** — `REELTALK_NS` (`https://reeltalk.dev/ns#`),
+  `_LIST_CONTEXT` (the existing two-entry array **plus** the prefix dict),
+  `list_url`, `list_item_document`, `list_document`, `list_note_content`, and
+  the `Status.Type.LIST` branch appended at the **very end** of
+  `note_document`. The placement is load-bearing: it comes after the `tag`
+  arm, so the composed body wins rather than being overwritten by the empty
+  `status.content`.
+- **`activitypub/broadcast.py`** — `broadcast_list_create`,
+  `broadcast_list_update`, `broadcast_list_delete`, all three on
+  `_status_targets`.
+- **`lists/views.py`** — six broadcast call sites, each gated on the
+  service's own "did it change" answer.
+- **`lists/management/commands/rebroadcast_lists.py`** — new, with
+  `lists/management/` and `lists/management/commands/` packages. This is the
+  answer to the Create-dedup trap.
+- **`tests/test_lists_federation.py`** — new, 40 tests in seven groups.
+
+**The trap the brief named is real, and option 1 was taken.** A re-sent
+`Create` for face 65 carries `#activity-65` — the exact id every peer
+already holds — so it is discarded as a redelivery and the fix reaches
+nobody who already fetched the empty Note. **We re-broadcast as `Update` on
+deploy**, because `update_activity` puts a uuid in its id and no peer has
+seen that id before. The alternative — accept three permanently empty posts
+sitting on the owner's only follower — fails the brief's own test: the owner
+follows the account from Mastodon, sees an empty post for a list made before
+the deploy, and reasonably concludes the increment does not work.
+`rebroadcast_lists` ran live: **three `Update`s delivered, HTTP 202, zero
+failures**, to `https://upallnight.minnix.dev/users/minnix/inbox`.
+
+**Idempotence is stated honestly in the command's own docstring, because it
+is only half true.** Running it twice sends two activities with two different
+activity ids and one identical object id, so the peer applies the second to
+the list it already has — the *result* is idempotent. The *traffic* is not.
+It is a repair tool, not a steady-state loop, and the docstring says so
+rather than letting a future operator wire it into a timer.
+
+**The namespace is the project's own domain, not the running instance's
+(R142).** The owner bought `reeltalk.dev` on 2026-10-07 specifically for
+this. A prefix IRI is **never dereferenced** by a JSON-LD processor — it is
+a naming scope, not a link — so the fact that the site is not built yet costs
+nothing. The precedent is already in this tree: `identity.py:156` declares
+`{"toot": "http://joinmastodon.org/ns#"}`, and that is Mastodon's project
+domain, not the server it happens to run on. **This freezes the moment a
+second ReelTalk instance federates**, so any later change to the IRI is a
+breaking protocol change, not a cosmetic one.
+
+**The extension rides the object, not the envelope, and declares its
+prefix.** `with_context` is a shallow top-level check, so a `reeltalk:` term
+on the envelope would stay undeclared no matter what the object declared.
+Undeclared terms are dropped by strict processors and survive only with
+lenient ones, which is the worst combination: it works in testing and vanishes
+in production. Verified live on the deployed box:
+
+```
+@context: ["…activitystreams", "…security/v1", {"reeltalk": "https://reeltalk.dev/ns#"}]
+reeltalk:list → { type, url, name, summary, orderedItems[] }
+item          → { type: "reeltalk:ListItem", reeltalk:rank, name, film, year, tmdbId, imdbId }
+```
+
+**`reeltalk:rank` is namespaced because ActivityStreams has no ordinal for
+`orderedItems`** — the ordering is in the array, but a peer rebuilding a
+mirror row needs the rank as a field to write into `ListItem.rank`, and
+inventing a bare `rank` would collide with anything else that means
+something else. **Film identity reuses the existing `film` / `tmdbId` /
+`imdbId` terms** rather than minting list-specific ones, so the increment 7
+importer has **one** film-resolution path instead of two that can drift.
+
+**The mapping increment 7 must import is fixed here, not improvised later:**
+
+| Wire | Mirror field |
+|---|---|
+| `reeltalk:list.url` | `FilmList.remote_url` |
+| `_remote_id_from_url(url)` | `FilmList.remote_id` |
+| `reeltalk:list.name` | `FilmList.title` |
+| `reeltalk:list.summary` | `FilmList.description` |
+| `orderedItems[].reeltalk:rank` | `ListItem.rank` |
+| `orderedItems[].film` / `tmdbId` / `imdbId` | resolve to a local `Film` |
+
+`test_the_extension_maps_onto_a_mirror_row_without_invention` builds a
+`FilmList` mirror out of the extension using the **existing** inbound helper
+`_remote_id_from_url`, so the mapping is proven importable now rather than
+asserted importable in the prose.
+
+**The body is composed at serialization time, from `FilmList`, never from
+the face.** The face deliberately stores no body — the title and description
+live on `FilmList` alone — and `Status.delete()` wipes `content` and
+`raw_content`. Composing from the surviving `FilmList` row is what makes the
+**`Delete` tombstone still name the list** after the face has been emptied.
+One choke point (`note_document`) means the outbox, the `/status/<id>/` AP
+arm, and Create/Update/Delete all get the body from the same code, so there
+is no second serializer to keep in step.
+
+**Escaping is asymmetric on purpose.** The title and the film titles are
+escaped — they are plain text. `description` is **not**, because it is
+already-sanitized HTML rendered at write time (R18), and escaping it again
+would show a member their own markup. Both directions are tested.
+
+**The prose caps at 50 films (`LIST_CONTENT_FILM_LIMIT`); the extension does
+not.** A 500-film list must not become a 200 KB Note, but a peer importing
+it needs every item. When truncated, the post says so and gives the count,
+so a shortened post never reads as a short list. An empty list still reads as
+a post, because a bare Note is indistinguishable from the bug this increment
+was written to fix.
+
+**A `LIST` face with no backing `FilmList` degrades to a plain Note rather
+than 500ing the outbox.** That state is reachable — `test_lists.py:142`
+creates one directly — and the outbox has no type filter, so one malformed
+row would otherwise take down a user's entire outbox. `getattr(status,
+"film_list", None)` is the guard, and it is tested.
+
+**All three activities use `_status_targets`, not the followers-only
+helper.** `broadcast_status_delete` uses `_deliver_to_followers`, which
+means a remote user *named* in a post never receives its tombstone. For a
+list the two sets are **equal today** — list descriptions render with
+`mentions=False` (only `core/views.py:364` and `:498` pass `mentions=True`),
+so a list face carries no mention rows at all. The wider helper is chosen
+anyway, so that if list descriptions are ever widened to name remote users,
+create and delete cannot diverge and leave a named peer holding a copy that
+no deletion will ever reach. `test_the_tombstone_reaches_everyone_the_create_reached`
+hand-syncs a mention row to prove the behaviour rather than assuming it.
+
+**The change gate lives in the views, on the services' own return values.**
+`add_films` returns nothing for a duplicate, `move` returns `False` at
+either end, `list_edit` returns `changed`. A double-click, a remove of a film
+that was never there, a move-press at the top, and an unchanged form submit
+each send **nothing**. This is deliberately *not* the `mark_watched_view`
+shape, which broadcasts `Update` whenever an existing review was truthy with
+no change detection at all. Because the Update id carries a uuid, a peer
+**cannot** dedup a spurious one — not sending it is the only guard there is.
+
+**L6 silence is proven, and its first proof was vacuous.** The silence test
+had carol following **alice** while the list belonged to **bob** — an empty
+audience, so it passed on *no recipients* rather than on *silence*. Both it
+and its non-vacuity control now put the follower on the list's owner, which
+is the only arrangement under which the pair means anything: the control must
+send with the same rows the silence test claims to hold quiet.
+
+**Three test bugs found in my own file, none of them in the shipped code.**
+Beyond the vacuous audience: `assert responses.calls == []` is **never**
+true — `responses.Calls` defines no list equality, so nine assertions failed
+unconditionally and would have read as a broken feature. The house idiom is
+`len(responses.calls) == 0`. And `rebroadcast_lists --list` needed
+`dest="list_ids"`; argparse was reading the bare `"list_ids"` as a second
+option string and refusing to build the parser.
+
+**Peer review: PASSED, driven by the owner (2026-10-08).** The owner read
+all three repaired posts in their signed-in Mastodon home timeline — *"They
+all read fine and look like real posts"* — and took the round-trip further
+than §2K asked: **favourited and replied to the Noir list post on Mastodon,
+and both landed back on ReelTalk.** Corroborated against this instance's own
+records rather than taken on report:
+
+```
+core_like   : status 65 (status_type=list) <- minnix@upallnight.minnix.dev (local=f)
+core_status : 1 reply with reply_parent_id=65 <- minnix@upallnight.minnix.dev (local=f)
+ledger      : 9 -> 11, exactly {id 13 like, id 14 reply}, both from the remote mirror
+```
+
+**This is L13 proven end to end on the real peer**: a Mastodon user sees a
+post *about* the list, and can applaud and reply to it with no change on
+their side, with the interaction arriving here as a real `Like` and a real
+reply against the list's own face. It is also the first time a **list** has
+taken a federated interaction at all — every prior round-trip in this
+project was a review or a reply.
+
+**The addressing gap: recorded as R143, deferred, and narrower than it
+first looked.** Every outbound activity in this project carries **no `to`
+and no `cc`** — verified live for list *and* review statuses (`Create(65)`,
+`Update(65)`, `Delete(65)`, `Review(70)`, `Review(69)` all
+`{"to": null, "cc": null}`). We deliver by POSTing directly to inboxes,
+which needs no addressing. What that costs is **anonymous** visibility on the
+receiving side: measured against the peer, the ReelTalk account mirrors with
+`statuses_count: 18` while `/api/v1/accounts/<id>/statuses` returns **0**,
+and `/api/v2/search` returns **0** both plain and with `resolve=true`.
+
+**Corrected after the review, because the first reading was too strong.**
+What the owner's favourite and reply prove is that **a follower can see and
+interact with these posts normally** — the missing audience does not break
+the home timeline, the like, or the reply. What it does restrict is
+third-party/anonymous reach: a stranger or a crawler cannot resolve our
+posts through the peer. So the finding is *"not publicly resolvable"*, not
+*"not visible"*, and it is **not** a blocker for increment 6 or for the
+round-trip §2K asked for. It is still worth fixing in increment 7, where it
+bears on whether an importing instance can resolve a list it has been told
+about. **This is not increment 6's doing** — every status type has shipped
+this way for several increments.
+
+**Verified live on the deployed box.** The three faces that were empty before
+the deploy now carry a body and the extension — read straight from
+`/user/minnix/outbox/?page=1`:
+
+```
+/status/65/ → "Noir You Must See" + 6 ranked films + summary + reeltalk:list
+/status/66/ → "Fifty SFF, Mostly Forgotten" + 4 shown + reeltalk:list
+/status/67/ → "An Empty List" + "No films in this list yet" + reeltalk:list
+```
+
+`/list/1/`, `/list/2/`, `/list/3/` all serve HTML 200 and AP 200;
+`/status/65/` serves AP 200 with its HTML 302 to the list, unchanged from
+increment 2. The repair pass delivered three `Update`s at HTTP 202.
+
+**Peer review driven by the owner.** The list post is follower-addressed, so
+no anonymous route reaches it — Mastodon will not surface a non-public status
+to a logged-out requester. The owner checks their own signed-in home
+timeline and reports what the peer renders.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -7607,3 +7853,6 @@ not an optimisation.
   **With these two closed, §2K has no open questions left.** Increments 5 (saving), 6 (federation outbound) and 7 (federation inbound) are all unblocked on decisions; anything still unresolved in them is a new question, not a carry-over.
 
 - **R141 — Increment 5's six saving decisions: dismiss retires the notice and not the save, the deleted card stops being a navigation, and the transport splits on what each control does (owner-reviewed implementation decisions 2026-10-07, taken against the rendered live box rather than in the abstract).** R140 settled *that* a deleted saved list shows a dismissible notice and that the Save control is lit crimson; these are the six things it did not decide, each of which had two live options and only one of which the code can be read to explain afterwards. **(1) Dismissing retires the notice, and the card leaves the Saved tab with it — but the `ListSave` row survives.** R140 floated the field name `dismissed_date`; the shipped field is `notice_dismissed_at`, because the bare name reads as *"this save was dismissed"*, i.e. undone, which is a different feature. Keeping the row rather than deleting it is what makes the marker meaningful at all: delete-on-dismiss needs no field, so a field existing in the schema is itself the statement that the save persists and only its *display* changes. The alternative — leave the card, drop the notice — was rejected as a permanently dead card that links nowhere and says nothing further. **How to apply:** `notice_dismissed_at` is never a cancellation. Unsaving is `unsave_list`, which really deletes; dismissing is a marker on a row that stays. **(2) A deleted saved card is not a navigation.** Its title renders as a plain `<span>`, not the `<a class="list-card-name">` every other card carries, because `list_detail` 404s on `deleted=False` and an anchor there is R85's offer-with-no-route bug for the third time. Pinned in both directions — the live card keeps its anchor **and following it returns 200** — so the rule reads as *keyed on `deleted`* and not as *never link from a Saved card*. **(3) Two transports, split by what the control does, not by convenience.** Save/Unsave are AJAX JSON mirroring `like_status`; Dismiss is a form post with a redirect. The line is that a toggle repaints a control in place, while a dismiss removes a row from a list — and a row removal should come back from the database on the next render rather than be spliced out client-side, the `list_remove_film` precedent. The JSON answer carries **no count**, unlike a like's: a save has no tally on the page, so there is no second fact the client could be permitted to guess at. **How to apply:** do not "unify" these for consistency. If a future control removes something, it posts and re-renders; if it flips state on a thing still on screen, it is JSON. **(4) The own-list refusal is 400, and it is on both halves.** L2 frames saving as a pointer at somebody else's list; nothing in the model forbids the self-pointer, so the rule is stated as a hidden control **and** a refused route (R85's symmetry). 400 rather than 404 because the list exists and the caller may see it — the action is wrong, not the resource. Keeping the refusal on `unsave` too makes it one rule instead of one per half. **(5) A save must not stamp the face.** `_stamp_edited` feeds `editedTime` on increment 6's wire, and a save is one member's bookkeeping about somebody else's list; stamping it would broadcast an edit that never happened. This is why `save_list`/`unsave_list`/`dismiss_deleted_notice` deliberately sit outside the stamping discipline every other service function follows — a reader who assumes "service function ⇒ face gets stamped" will get increment 6 wrong. **(6) The save route is not owner-scoped and is not locality-scoped.** `_savable_list` is a new guard rather than `_owned_list`, because L4/L12 make any visible list savable; and it filters nothing on `local`, which is the forward-compatibility gate for increment 7 — an assumption that the list lives here would block L12 from the inside out rather than leaving it open. **How to apply:** when increment 7 wires the mirror, do not add a `local=True` filter to the save path to "be safe"; the two remote-author tests in `test_lists_saving.py` exist to catch exactly that. **Accepted, not overlooked:** `ListSave.film_list` is `CASCADE`, so a hard delete (raw SQL, a future purge) takes the save row and its dismiss marker together and the saver sees nothing at all — no notice, no card, no trace. No production path hard-deletes a list today, so this is accepted; if a purge job is ever added, this is where R140's promise silently breaks.
+
+- **R142 — Increment 6's wire-shape decisions: the extension namespace is the project's own domain, the repair rides an `Update` and never a re-sent `Create`, the tombstone gets the wider audience, and the prose caps where the extension does not (owner-reviewed implementation decisions 2026-10-08).** Four things the locked shape in R137 did not decide, each with two live options. **(1) The namespace is `https://reeltalk.dev/ns#`, prefix `reeltalk` — the project's domain, not the running instance's.** The owner bought `reeltalk.dev` from Cloudflare on 2026-10-07 for exactly this purpose; the live instance stays `reeltalk.minnix.dev`. A prefix IRI is **never dereferenced** by a JSON-LD processor — it is a naming scope, not a link — so an unbuilt site costs nothing, and the precedent is already in this tree at `identity.py:156`, which declares `{"toot": "http://joinmastodon.org/ns#"}`: Mastodon's project domain, not the host it runs on. **How to apply:** this IRI freezes the moment a second ReelTalk instance federates. Any later change is a breaking protocol change against every mirror already published, not a cosmetic rename — treat it as wire format. **(2) Existing lists are re-broadcast as `Update` on deploy; a re-sent `Create` is not a repair.** `create_activity`'s id is `{outbox}#activity-<local_id>`, stable per status by design, so a re-sent `Create` for face 65 carries the exact id peers already hold and is discarded as a redelivery — the fix would land in the outbox for future fetchers and never touch the empty copies already sitting on peers. Only `Update` lands, because its id carries a uuid no peer has seen. `rebroadcast_lists` is the one-off pass; it ran live with three `Update`s at HTTP 202 and zero failures. **How to apply:** the command's idempotence is half-true and its docstring says so — two runs produce two activity ids and one object id, so the *result* is idempotent and the *traffic* is not. It is a repair tool, not a steady-state loop, and must never be wired to a timer. When a future increment changes a list's serialized body, the same pass is what reaches peers. **(3) All three list activities use `_status_targets`, not the followers-only helper `broadcast_status_delete` uses.** For a list the two sets are equal *today* — list descriptions render with `mentions=False`, so a list face carries no mention rows — and the wider helper is taken anyway so that create and delete cannot diverge if that widens later. **How to apply:** if list descriptions ever start naming remote users, do not "simplify" the list family back onto `_deliver_to_followers`; a named peer left out of the delete arm holds a copy no tombstone will ever reach. **(4) The human-readable prose caps at 50 films; the extension carries every item.** A long list must not become a 200 KB Note, but an importing peer needs the whole ranking. When truncated the post states the count and links the full list, so a shortened post never reads as a short list. **How to apply:** the cap governs `list_note_content` only — never let it leak into `list_document`, or increment 7 silently imports a partial list and nobody can tell from the wire.
+- **R143 — Every outbound activity carries no `to` and no `cc`; recorded as a finding in increment 6 and deferred to increment 7 rather than fixed inside it (owner decision 2026-10-08).** No activity this project emits declares an audience: verified live that `Create(65)`, `Update(65)`, `Delete(65)`, `Review(70)` and `Review(69)` all carry `{"to": null, "cc": null}`. Delivery works because we POST directly to inboxes, which does not require addressing. What the missing audience costs is **anonymous resolvability on the receiving side**: measured against the peer on 2026-10-08, the ReelTalk account mirrors into Mastodon with `statuses_count: 18`, while `/api/v1/accounts/<id>/statuses` returns **0**, and `/api/v2/search` returns **0** both plain and with `resolve=true`. **Scope it precisely — the first reading here was too strong and the owner's live review corrected it.** The owner favourited and replied to the Noir list post from Mastodon and **both landed back here** (`like` on face 65 and a `reply` with `reply_parent_id=65`, both from `minnix@upallnight.minnix.dev`, ledger 9 → 11), so a follower sees and interacts with these posts normally. The finding is **"not publicly resolvable by a third party"**, not "not visible", and it is **not** a blocker for anything increment 6 claims. **Why deferred rather than fixed:** adding `to`/`cc` changes the envelope shape that increment 7's importer is built against, and the brief locks increment 6 to the object body with the shape declared stable — fixing it mid-increment would be exactly the unannounced shape change the brief forbids. **How to apply:** decide it at the top of increment 7, before the inbound mapping is written, since it bears directly on whether an importing instance can resolve a list it has been told about. Do not re-derive the evidence; it is measured above. The durable lesson is the asymmetry: **delivery**, **follower visibility**, and **anonymous resolvability** are three different questions on the wire, and "the POST returned 202" proves only the first of them.

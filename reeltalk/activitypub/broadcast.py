@@ -199,6 +199,84 @@ def broadcast_shelf_event(request, user, film, identifier: str, *, added: bool) 
     return _deliver_to_followers(request, user, activity)
 
 
+# --- lists (§2K increment 6, L1 / L11 / L13) --------------------------------
+#
+# A list travels as its own post face's ``Note``, so all three activities are
+# the status ones with the face substituted -- ``objects.note_document`` is
+# what composes the body, and these only decide who hears about it. Nothing
+# here builds a document.
+#
+# **All three share one audience, and it is ``_status_targets``.** That is
+# not the same helper ``broadcast_status_delete`` uses: that one delivers to
+# ``_deliver_to_followers`` alone, so a remote user *named* in a post never
+# receives that post's tombstone and keeps a copy of something the network
+# has been told is gone.
+#
+# For a list the two sets are equal **today** -- ``create_list`` renders the
+# description with ``mentions=False``, so a list face carries no mention
+# rows and ``_status_targets`` reduces to the follower set. It is still the
+# right call, for a reason that is about the next change rather than this one:
+# one audience definition across create, update and delete means that if a
+# list description ever does gain mentions, the tombstone follows without a
+# second edit, instead of the create widening and the delete silently not
+# following. The behaviour is pinned by a test that puts a mention row on a
+# face by hand, so the equality is proven rather than assumed.
+
+
+def broadcast_list_create(request, film_list) -> list[DeliveryFailure]:
+    """Announce a newly made list to everyone its Note should reach.
+
+    Called by the view right after ``services.create_list`` returns, not by
+    the service itself: the service layer is deliberately request-free, and
+    a broadcast needs a request to sign as. The list arrives with whatever
+    films it was made with, which for the create form is none -- the member
+    adds films from the editor afterwards, and each of those is an
+    ``Update``.
+    """
+    face = film_list.status
+    activity = create_activity(face, film_list.user, request)
+    return _deliver_signed(request, film_list.user, activity, _status_targets(face))
+
+
+def broadcast_list_update(request, film_list) -> list[DeliveryFailure]:
+    """Re-publish a list after a real edit (L1, L11).
+
+    **Call this only when something actually changed.** The activity id
+    carries a uuid, so a spurious call is not deduped anywhere -- it fans
+    out to every remote follower and named user as a genuine edit event,
+    and a peer that re-renders the same content still logs having been told
+    about a change that did not happen. The services already answer the
+    question precisely (``add_films`` returns the rows it made,
+    ``remove_film`` and ``move`` return a bool, and ``list_edit`` only
+    calls ``rename`` / ``set_description`` on a value that differs), so
+    the gate belongs at the call site and costs nothing.
+
+    This is the same discipline ``_stamp_edited`` follows, and it is the
+    opposite of ``mark_watched_view``, which broadcasts on ``existing_review``
+    being truthy with no change detection at all. Saving the same review text
+    twice there fans out a second ``Update``; a list must not inherit that.
+    """
+    face = film_list.status
+    activity = update_activity(face, film_list.user, request)
+    return _deliver_signed(request, film_list.user, activity, _status_targets(face))
+
+
+def broadcast_list_delete(request, film_list) -> list[DeliveryFailure]:
+    """Tell the network a list is gone.
+
+    Composed from the ``FilmList`` row, which is why it takes the list and
+    not the face. ``soft_delete_list`` takes both halves down, and
+    ``Status.delete()`` clears ``content`` -- but the title, description and
+    ranked items survive on the ``FilmList``, so the tombstone still says
+    which list it is deleting. The activity id is the stable
+    ``#delete-<local_id>``, so a re-send dedups on the peer rather than
+    stacking tombstones.
+    """
+    face = film_list.status
+    activity = delete_activity(face, film_list.user, request)
+    return _deliver_signed(request, film_list.user, activity, _status_targets(face))
+
+
 def broadcast_actor_update(request, user) -> list[DeliveryFailure]:
     """Tell a user's remote followers that their Person document changed (R102).
 

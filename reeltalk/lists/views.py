@@ -30,6 +30,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
+from reeltalk.activitypub.broadcast import (
+    broadcast_list_create,
+    broadcast_list_delete,
+    broadcast_list_update,
+)
 from reeltalk.core.catalog import create_or_match_film, search_local
 from reeltalk.core.models import Film
 from reeltalk.core.tmdb import TmdbError, is_configured, search_films
@@ -429,6 +434,12 @@ def list_create(request):
                 title=form.cleaned_data["title"],
                 description=form.cleaned_data["description"],
             )
+            # Broadcast after the service returns, never inside it: the
+            # service layer is request-free on purpose and a broadcast has
+            # to sign as somebody. A brand-new list goes out with no films,
+            # because the create form does not collect them -- the member
+            # adds them from the editor, and each add is an ``Update``.
+            broadcast_list_create(request, film_list)
             messages.success(request, "List created — now add some films.")
             return redirect("list-edit", list_id=film_list.pk)
     else:
@@ -464,6 +475,12 @@ def list_edit(request, list_id):
             if description != film_list.raw_description:
                 set_description(film_list, description)
                 changed = True
+            # One Update for the whole submit, and only if a field actually
+            # moved. Submitting the form unchanged must not fan out an edit
+            # event -- the uuid on the activity id means a peer cannot dedup
+            # a spurious one, so the only guard is not sending it.
+            if changed:
+                broadcast_list_update(request, film_list)
             messages.success(request, "List updated." if changed else "Saved.")
             return redirect("list-edit", list_id=film_list.pk)
     else:
@@ -529,6 +546,11 @@ def list_add_film(request, list_id):
             raise Http404 from None
 
     if add_films(film_list, [film]):
+        # Inside the ``if`` rather than after it: ``add_films`` returns the
+        # rows it actually created, so a re-add of a film already in the
+        # list takes this branch not at all and the network hears nothing
+        # about a list that did not change.
+        broadcast_list_update(request, film_list)
         messages.success(request, f"Added “{film.title}”.")
     else:
         messages.info(request, f"“{film.title}” is already in this list.")
@@ -556,6 +578,7 @@ def list_remove_film(request, list_id):
         raise Http404 from None
 
     if remove_film(film_list, film):
+        broadcast_list_update(request, film_list)
         messages.success(request, f"Removed “{film.title}”.")
     else:
         messages.info(request, f"“{film.title}” is not in this list.")
@@ -587,6 +610,10 @@ def list_move(request, list_id):
     item = get_object_or_404(ListItem, pk=key, film_list=film_list)
 
     if move(item, direction):
+        # A move at either end returns False and nothing is sent, so
+        # pressing "up" on the first row is silent on the wire and not a
+        # broadcast of an unchanged ranking.
+        broadcast_list_update(request, film_list)
         label = "up" if direction == MOVE_UP else "down"
         messages.success(request, f"Moved “{item.film.title}” {label}.")
     else:
@@ -612,6 +639,10 @@ def list_delete(request, list_id):
     film_list = _owned_list(request, list_id)
     title = film_list.title
     soft_delete_list(film_list)
+    # After the delete, and passed the list rather than the face: the face's
+    # content has just been wiped by ``Status.delete()``, and everything the
+    # tombstone needs survived on the ``FilmList``.
+    broadcast_list_delete(request, film_list)
     messages.success(request, f"Deleted “{title}”.")
     return redirect("user-lists", localname=request.user.localname)
 
