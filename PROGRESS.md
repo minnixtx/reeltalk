@@ -6,151 +6,50 @@
 
 ## NOW — read this first
 
-**Rewritten at each increment rather than appended to.** If anything else in
-this file disagrees with this block, **this block is current and the other
-is history.**
+**Rewritten at each increment. This block is current; later entries are history.**
 
-- **§2L increment 1 — outbound addressing — BUILT, gate-verified,
-  DEPLOYED and LIVE-MEASURED on the peer (2026-10-08).** Our outbound
-  statuses now carry a real audience: `to` is the ActivityStreams public
-  collection, `cc` is the author's followers collection plus every
-  mentioned actor. Full record: **§2L**, and its decisions are **R145**,
-  which **discharges R143**.
-- **The cause of R143 was one fall-through, and it was never a delivery
-  failure.** Mastodon 4.7.3's `StatusParser#visibility` derives a received
-  status's visibility from `to`/`cc` and from nothing else: public
-  collection in `to` → `public`; public collection in `cc` alone →
-  `unlisted`; `to` naming only our followers collection → `private`;
-  **neither → `direct`**. We emitted neither, so every status this project
-  ever sent arrived on a peer filed as a **direct message** — counted on
-  the account, returned by no endpoint. Delivery genuinely succeeded the
-  whole time, which is why nothing in our logs showed it.
-- **The brief's `to`/`cc` mapping was inverted and would have shipped a
-  near-miss.** "Mentions in `to`, followers-and-public in `cc`" reads
-  plausibly and lands every post in `unlisted`, one rung short of the
-  goal. The mapping that shipped is the peer's own: `to = [Public]` alone,
-  `cc = [followers collection] + mentioned actor URIs`. Kept as a test
-  (`test_public_in_cc_alone_would_only_be_unlisted`) because it is the
-  mistake this increment came closest to making.
-- **`Like` carries no audience, and that is matching the idiom, not
-  missing it.** The peer's own `LikeSerializer` emits
-  `id`/`type`/`actor`/`object` and nothing else. The brief framed four
-  builders as never having adopted the house idiom; for `like_activity`
-  that is wrong, and adding a public audience there would be the one place
-  we *diverge* from Mastodon — and would push our favourites into public
-  timelines. **Scope was three builders, not four.** `flag_activity` also
-  stays unaddressed, checked rather than assumed: a report whose recipients
-  are moderation targets must never be public.
-- **`Delete` gets `to: [Public]` and deliberately no `cc`,** matching the
-  peer's `DeleteNoteSerializer` — everyone who could see the post needs to
-  learn it is gone, which is what a public audience says and what a
-  follower collection does not. The audience rides on **both** the activity
-  and the Note, because the peer reads `@object['to'] || @json['to']` and
-  receivers are not uniform.
-- **Thread 3 — the mirror interaction traffic — PROVEN LIVE, and it had
-  never been proven before.** Driven through the real UI with real clicks
-  as `minnix` on `reeltalk.minnix.dev` against the mirrored face of
-  instance B's "Midnight Doubles, Ranked", then read from **instance B's
-  own database**: `core_like` 0 → **1** (liker `minnix@reeltalk.minnix.dev`,
-  `local = f`, target B's status 14), `core_status` 11 → **12** with
-  **`reply_parent_id = 14`** — threaded onto B's own list post via the
-  home-URL rule, not a URL we minted for their object — and the inbound
-  ledger 22 → **24**. **The reply-to-a-mirrored-list-face shape the brief
-  flagged as genuinely untested works.** This direction had only ever been
-  read-correct; increments 6 and 7 proved peer→us and B→us for lists.
-- **The fix is forward-only — a peer limitation, not our bug, and worth
-  knowing before anyone promises a repaired backlog.** `rebroadcast_lists`
-  re-sent all four live local lists as `Update` with the corrected
-  envelope: 4 sent, HTTP 202, **0 failures**, and the pre-existing
-  statuses **did not change classification**. The peer's
-  `ProcessStatusUpdateService` contains **no reference to `visibility` at
-  all** — visibility is assigned at Create and never re-derived on Update —
-  and `Update` additionally drops unknown objects older than one day.
-  Repairing the backlog would mean re-*creating* under fresh ids, which is
-  a separate and much larger decision, not made here.
-- **Measured on the peer, anonymously, before and after.**
-  `statuses_count` 18 → 19; `GET /api/v1/accounts/<id>/statuses`
-  **0 → 1**, `visibility: public`. The one returned item is a status
-  Created after the deploy, which is the cleanest form of the proof: a
-  fresh post carrying `to: [Public]` is publicly resolvable by a third
-  party with no account and no token.
-- **We are not a relay — closed by owner ruling, not left open.** Instance
-  A does not propagate a neighbor's content to its own followers. The
-  forcing function that made it a question: we cannot sign as the origin
-  (`_deliver_signed` signs as the actor handed to it, and we hold no
-  private key for another instance's identity), so relay could only ever
-  mean `Announce` — a boost, i.e. a product decision wearing a protocol
-  costume. **Consequence: the two tests asserting `Announce` is ignored
-  (`test_activitypub_inbox.py:353`, `:577`) stand unchanged. No decision
-  was reversed.** Do not re-open relay as a protocol gap; it was considered
-  and answered on product grounds.
-- **Not built, deliberately: `discoverable` / `indexable` on our Person
-  document.** We emit neither, so the peer stores both `false`
-  (`process_account_service.rb:256`). Checked what that gates before
-  assuming it mattered: **only Mastodon's FASP indexing and account-level
-  search — not the profile statuses endpoint** — so it does not affect
-  this fix. Turning it on is a separate decision about indexing our
-  members' content, not a bug to close.
-- **A query regression found in this increment's own code and fixed with a
-  test pinning it.** `status_audience` re-read the mention table
-  `note_document` had already read, and `create_activity` computed the
-  audience a third time — up to **3 mention queries per status where the
-  code previously did 1**, which on an outbox page is a query per row for
-  nothing. `note_document` now loads mentioned users once and serves both
-  the `cc` array and the `tag` array from it, and the activities read
-  `to`/`cc` off the finished Note rather than computing them again — which
-  also makes "the activity's audience equals its Note's audience"
-  structural rather than coincidental. **Durable rule: a helper added to a
-  hot serializer path needs its query count asserted, not assumed —
-  `CaptureQueriesContext` now pins both the Note and the wrapping activity
-  at exactly one read of the mention table.**
-- **New tests: 19** in `tests/test_outbound_audience.py`, written against
-  the peer's **transcribed visibility rule** rather than our own key names,
-  so they fail when a *receiver* would misfile our post. They include the
-  addressless legacy shape asserted as `direct` (keeps the diagnosis
-  executable) and the `cc`-instead-of-`to` mistake asserted as `unlisted`.
-- **Gate: **2518 passed, 5 skipped in 2123.65s (0:35:23)**, all four markers 0 (`ruff check`, `ruff format --check`, `makemigrations --check`, `pytest`) — increment 7 baseline 2498 + 19 new tests + 1 `test_clean_room.py` param**
-- **STANDING CONSTRAINTS — unchanged.**
-  - **User-made lists are IN SCOPE.** The owner reversed the 2026-10-02
-    refusal on 2026-10-06. Do not cite the old refusal. The shape is locked
-    as **L1–L13 = R137** in §2K, the feed strip as **R139**, and the last
-    two open questions as **R140**.
-  - No third column on the home feed (R64).
-  - The genre subfeed keeps its numbered 20-per-page links, and its
-    inconsistency with the endless home feed is deliberate (R132 7) — do
-    not "fix" it.
-  - No virtualisation, no mid-scroll deep links, no resume-where-you-were,
-    no live updates on the home feed.
-  - TMDB search is the primary add-film flow; manual create is the fallback.
-  - **No new `Notification.Kind`** — and a mirror creates no notification
-    at all (R144 7). The saved-remote-list-changed signal would need one
-    and therefore stays un-built until the owner reopens this explicitly.
-  - **We are not a relay (R145).** Do not re-litigate.
-  - **R85: the route refuses exactly what the page withholds.**
-- **NEXT UP — §2L has one increment built; the owner picks what's next.**
-  Candidates this increment surfaced rather than settled, decided nowhere:
-  - **The pre-existing backlog on peers stays `direct`.** Forward-only is
-    accepted for now; making old posts resolvable means re-creating them
-    under fresh ids. Not cheap, and not obviously worth it for 18 rows.
-  - **`discoverable` / `indexable` on our Person document** — a real
-    product decision about indexing members' content, now cleanly separated
-    from the addressing fix.
-  - **The saved-remote-list-changed signal**, which needs a new
-    `Notification.Kind` and therefore an explicit constraint reopening.
-  - **The parked M6 grindhouse polish pass (R73)**, which still holds
-    R140 2's Save-button weight.
-- **Process rules that still hold.** On anything visual: build → deploy →
-  hand the owner the live URL → browser review → **only then** the full
-  gate. Render it and show it; never describe a visual change in prose.
-  Prove a control by **clicking it**, not by POSTing to its endpoint. On
-  federation: **a mock-only proof is not a proof**, and **202 proves
-  delivery only** — delivery, follower visibility and anonymous
-  resolvability are three different questions on the wire. Read the peer's
-  own running source before designing against a belief about what it does;
-  that is how the inverted mapping was caught before it shipped.
-  **Never run a second pytest session concurrently with the gate** — they
-  share the `test_reeltalk` database, and the collision surfaces as
-  fixture-teardown `AssertionError`s rather than as a clear conflict.
+- **M6 main-feed/home-rail polish session closed: approved, DEPLOYED and
+  gate-verified, §2M / R146.** Review `https://reeltalk.minnix.dev/`.
+  Larger avatars; film posters under and aligned with usernames; clean
+  continuous rows; unified Archivo metadata; hover/focus-only link
+  underlines; compact heading, tighter text grouping; closer rail gaps,
+  rectangular genre tags, cream-bordered rank discs and search magnifier.
+  Far-right posters and mixed-font metadata were rejected.
+- **Latest full gate:** 2518 passed, 5 skipped in 2086.61s (0:34:46); all four markers 0.
+  Same 2518 passed / 5 skipped count as §2L; CSS design changes plus one
+  corrected guard test; no new tests.
+  Log `/tmp/inc6-gate.log`. Final image rebuilt before gate.
+- **R147 process:** full gate only on explicit owner request; approved
+  items may be committed during the session; consolidate record and
+  rewrite NOW at session end. Owner reviews browser URLs (SSH access).
+  Ask before pushing unless the current request explicitly authorizes it.
+  This session-close request did authorize push. No AI co-author trailer.
+- **Next session:** `.qwen/tmp/m6-design-polish-handoff.md`, local
+  gitignored handoff. No next item preselected; ask the owner or give one
+  measured suggestion if requested. Full M6 artwork is not declared done.
+  Save weight and mention treatment beyond feed links remain undecided.
+- **§2L outbound audience remains deployed and peer-proven (R145).**
+  Public in to; followers/mentions in cc; Delete public with no cc; Like
+  unaddressed. Peer anonymous statuses 0 → 1 after a fresh Create;
+  historical 18 remain direct because visibility is assigned at Create,
+  never re-derived by Update. No repaired-backlog implication. Mirrored
+  list like/reply proven on B: likes 0 → 1, statuses 11 → 12 with parent
+  14, inbound ledger 22 → 24. discoverable/indexable deliberately absent;
+  we are not a relay.
+- **Standing constraints:** no third home column; numbered 20-per-page
+  genre feed deliberately distinct from endless home feed; no
+  virtualisation, scroll restoration, mid-scroll deep links or live home
+  updates; TMDB primary/manual fallback. R85: routes refuse what controls
+  withhold. Anonymous rail text stays unlinked and header search absent;
+  hover rules apply to anchors only. Clean content/body/forms; original
+  grindhouse styling, reference artwork not copied. Deployer-agnostic.
+- Lists remain in scope (R137–R140). No new Notification.Kind; mirrors
+  notify nobody (R144); saved remote-list changes have no signal. Stop and
+  raise any backend need during design polish.
+- **Gate mechanics:** rebuild all compose services after source edits;
+  pytest uses baked source; markers, not wrapper exit, determine success.
+  Never run concurrent pytest sessions against test_reeltalk.
+
 ## 1. Current state
 
 > **This section is a running log, not the status report.** Its entries were
@@ -7859,6 +7758,84 @@ is publicly resolvable by a third party with no account and no token.
   `reeltalk:list` intact).
 - **Gate:** **2518 passed, 5 skipped in 2123.65s (0:35:23)**, all four markers 0 (`ruff check`, `ruff format --check`, `makemigrations --check`, `pytest`) — increment 7 baseline 2498 + 19 new tests + 1 `test_clean_room.py` param
 
+## 2M. M6 artwork polish resumed — main feed and home rail
+
+**Session opened 2026-10-08. Implemented, deployed, owner-approved and
+full-gate verified.** This closes the session's items, not the whole M6
+artwork pass. Decisions: R146–R147.
+
+### Approved design and commits
+
+- **03c4713 — Feed composition:** clean continuous dark surface with thin
+  dividers; 44px avatars and 64×96px film posters on desktop, 36px avatars
+  and 48×72px posters below 600px. Film posters sit beneath the username,
+  aligned at their left edge; film title and prose occupy the next column.
+  The owner liked larger artwork but rejected far-right posters. List-strip
+  poster sizes and cap stayed unchanged.
+- **a37d1c1 — Identity and metadata:** bold cream usernames; red film links
+  without permanent underlines, with underlines on hover/keyboard focus.
+  Username, action and date all use Archivo at 0.95rem. Dates and prose
+  remain white. The small Oswald-date candidate was rejected as too busy.
+- **16fbec9 — Text grouping:** auto/auto/1fr grid rows keep short prose
+  close to the film title despite the poster height. Short-review gap
+  measured desktop 24px → 8px; mobile stays 8px.
+- **47e8e9c — Now Playing:** 32px Bebas Neue, 18px gap before the red rule,
+  rule capped at 350px and with no glow. Other page headings unchanged.
+- **74d7c34 — Prose links:** feed mentions, hashtags and URLs retain red,
+  with underline only on hover/keyboard focus. Scoped to feed anchors;
+  this does not settle global mention styling or unresolved-handle styling.
+- **6ebd393 — Rail grouping:** gap 24px → 16px; ticket shadow reduced to
+  0 3px 6px at black .4. Ticket artwork and rotation retained.
+- **c7171ab — Genre tags:** 4px corners and #100e0c fill; type and
+  member-only amber hover retained. Anonymous spans remain inert.
+- **3580127 — Trending badges:** 27px #4b3b2c discs, bold cream Oswald
+  numbers, with a 1px cream border explicitly requested by the owner;
+  32px marker column, 9px gap. Titles and counts unchanged.
+- **7c37edd — Header search:** original decorative cream SVG magnifier
+  in the input background, 18px icon and 2.6rem left text padding.
+  No new control or search behavior.
+
+### Review and verification
+
+- Actual public URL used throughout: `https://reeltalk.minnix.dev/`.
+  Injected candidates into the live page with Playwright and inspected
+  screenshots; rebuilt **all** compose service images and deployed each
+  candidate for owner browser review before acceptance. Owner uses SSH;
+  browser URLs, not local image files, are the review surface.
+- Reference-only comparison with `MOCKUP.png` and `MOCKUP-HTML.html`.
+  The accompanying HTML specifies 46px avatars, 72×104px posters, 18px
+  vertical row padding, 16px gaps, 32px section headings and 27px rank
+  discs. These are HTML measurements, not claims that it reproduces the
+  PNG exactly; the delivered design follows owner choices.
+- Live browser checks at 1440px and 390px: no document horizontal overflow;
+  username/poster left edges both 236px desktop and both 78px mobile.
+  Real clicks proved full-row, profile, film, genre and autocomplete
+  navigation. Autocomplete returned 8 Aguirre suggestions; selecting one
+  opened `/film/293/`. Links underline on hover/focus; desktop rail stays
+  sticky and independently scrollable, mobile rail stacks in normal flow.
+  Anonymous search stays absent and rail titles/tags stay unlinked;
+  anonymous tags retain their resting style on hover.
+- **Design changes are CSS only:** no template, backend, route or dependency
+  changes. One existing CSS guard test was corrected at closure; no tests
+  added. `git diff --check` passed for every accepted increment.
+- First full gate: **1 failed, 2517 passed, 5 skipped in 2088.83s
+  (0:34:48)**. The row-hover prose guard falsely treated approved
+  individual-link hover/focus as whole-prose underlining. It now permits
+  exactly those two link selectors while continuing to reject row/ancestor
+  hover styling. Browser check: row hover underlines neither prose nor its
+  links; individual link hover/focus does underline. The focused suite
+  passed **22 tests in 32.87s**; a temporary stylesheet injection of the
+  old row-hover rule correctly failed the guard before the full rerun.
+- **Full gate requested explicitly at session close**, after all looks were
+  approved and the final image rebuilt/deployed. **2518 passed, 5 skipped in 2086.61s (0:34:46)**;
+  RUFF_CHECK_EXIT=0, RUFF_FORMAT_EXIT=0, MIGRATIONS_EXIT=0, PYTEST_EXIT=0.
+  Log `/tmp/inc6-gate.log`. Count matches the 2518/5 baseline; no new tests.
+- Save-button weight remains undecided. M6 public deployment remains done;
+  remaining artwork is owner-led, with no preselected next item.
+- Next-session handoff: `.qwen/tmp/m6-design-polish-handoff.md` (local,
+  gitignored operator artifact; no credentials). Gate/HEAD values filled
+  after the closing record commit and push.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -8189,3 +8166,6 @@ not an optimisation.
 - **R143 — Every outbound activity carries no `to` and no `cc`; recorded as a finding in increment 6 and deferred to increment 7 rather than fixed inside it (owner decision 2026-10-08).** No activity this project emits declares an audience: verified live that `Create(65)`, `Update(65)`, `Delete(65)`, `Review(70)` and `Review(69)` all carry `{"to": null, "cc": null}`. Delivery works because we POST directly to inboxes, which does not require addressing. What the missing audience costs is **anonymous resolvability on the receiving side**: measured against the peer on 2026-10-08, the ReelTalk account mirrors into Mastodon with `statuses_count: 18`, while `/api/v1/accounts/<id>/statuses` returns **0**, and `/api/v2/search` returns **0** both plain and with `resolve=true`. **Scope it precisely — the first reading here was too strong and the owner's live review corrected it.** The owner favourited and replied to the Noir list post from Mastodon and **both landed back here** (`like` on face 65 and a `reply` with `reply_parent_id=65`, both from `minnix@upallnight.minnix.dev`, ledger 9 → 11), so a follower sees and interacts with these posts normally. The finding is **"not publicly resolvable by a third party"**, not "not visible", and it is **not** a blocker for anything increment 6 claims. **Why deferred rather than fixed:** adding `to`/`cc` changes the envelope shape that increment 7's importer is built against, and the brief locks increment 6 to the object body with the shape declared stable — fixing it mid-increment would be exactly the unannounced shape change the brief forbids. **How to apply:** decide it at the top of increment 7, before the inbound mapping is written, since it bears directly on whether an importing instance can resolve a list it has been told about. Do not re-derive the evidence; it is measured above. The durable lesson is the asymmetry: **delivery**, **follower visibility**, and **anonymous resolvability** are three different questions on the wire, and "the POST returned 202" proves only the first of them.
 - **R144 — Increment 7's inbound-mirror decisions: an unresolvable film is dropped and not rolled back, nothing is fetched inside the inbox, the two mirror rows keep two different origin urls, and a missing `orderedItems` is not an empty one (owner policy decision plus build decisions 2026-10-08).** **(1) An item that will not resolve is dropped and logged; the list still mirrors (owner decision, taken from two options at the top of the increment).** The rejected alternative was to raise, which rolls the whole activity back. At fifty items that is one bad film losing a whole list **forever** — the peer has no reason to retry and we have no repair path for an inbound row. The drop is logged with the list's remote url, the item's position and its name, so a mirror that lost half its films is visible in the log rather than inferred from a short page. **How to apply:** never convert a list item miss into an exception inside the inbox. This is deliberately *different* from the single-film note path, where a missing film does raise — a one-item activity has nothing else to salvage, a fifty-item one does. Do not "unify" the two failure modes. **(2) Zero network inside a list import.** The pre-existing `_film_for_reference` fetches on a miss and raises `RemoteObjectError`, which would have meant one outbound connection per unresolved film inside a single signed POST — a neighbor's typo turned into a request storm aimed at whatever host their items name. `_known_film_for_reference` resolves same-host urls from the local row and foreign urls from `Film.remote_url`, returning `None` instead of fetching; `_resolve_list_item` then falls to `Film.find_match` (D7: exact tmdb → imdb → `sort_title`+`year`, and a title **without** a year deliberately does not match). `_film_for_reference` still calls the shared lookup first and still raises its old messages verbatim, so no existing test changed. **How to apply:** the inbox is not allowed to fan out. Any future inbound collection that resolves N references needs the same fetch-free resolver, and the test that pins this asserts `len(responses.calls) == 0` with 404 stubs registered — a test that merely omits the stubs would pass vacuously. **(3) The extension's *presence* makes the face a `LIST`; the two rows keep two different origin urls.** A ReelTalk list is `type: "Note"` plus `reeltalk:list`, so the branch sits **inside** the existing Note handling — no new activity type, no new object type, and the branch is taken before the content-shape mapping so a list never gets read as a review. The face is keyed on the Note's id (`…/status/14/`) and the `FilmList` on the extension's `url` (`…/list/2/`), which is what the partial unique `unique_remote_url_for_list_mirrors` requires. **How to apply:** keying both on one url is the obvious wrong move and it breaks the delete, because the `Delete` arrives for the **Note** — the list is only reachable through the face. Two conflict guards exist because of this shape: an extension whose `url` is already mirrored under a *different* face is left alone, and a face already fronting another `FilmList` returns that holder instead of tripping the required OneToOne. **(4) A missing or non-list `orderedItems` leaves existing rows untouched; `[]` empties them.** Conflating the two means one malformed update from a peer silently deletes a mirrored list. Ranks are applied as a **diff**, not an append: reorder reuses the same `ListItem` pks, removals delete, additions insert. A bogus or boolean rank falls back to the item's array position, and a duplicate resolution keeps the first row rather than violating `one_row_per_film_per_list`. **How to apply:** `rank` is an ordering key, not the printed ordinal — non-dense ranks (1, 2, 4) are valid and preserved. Never infer "clear the items" from an absent key. **(5) The delete reaches the `FilmList` through the local service.** `_tombstone_mirror` calls the same `soft_delete_list` that `POST /list/<id>/delete/` calls, so the two paths cannot drift, and R140 1 (the dismissible `.list-deleted-notice`) is proven on a **remote** row for the first time. A non-list status still hard-deletes as before. **How to apply:** if a future increment changes what deleting a list means, change `soft_delete_list` — do not add a second delete path for mirrors. **(6) R143 was checked, not assumed, and does not block this increment.** R143's own "decide it at the top of increment 7" instruction is discharged: the import is push-driven, with films identified inside the payload and resolved from rows already held, so no third party or anonymous requester ever needs to resolve anything to complete a mirror. R143 stays open on the **outbound and discovery** side, where it still bites, and is now explicitly *not* on the critical path of anything built. **(7) A mirror creates no notification.** Importing a neighbor's list is not an event in anyone's inbox UI — consistent with the standing "no new `Notification.Kind`" constraint, and pinned by test so a future notification feature cannot quietly start firing on every mirrored activity. **(8) The INFO-raised logger set widens from two modules to three: `delivery` + `inbox` + `statuses`.** `test_raising_the_federation_loggers_does_not_turn_on_info_everywhere` pinned the set at `delivery + inbox`, and increment 7's `settings.LOGGING` addition broke it. **The test was changed rather than the settings reverted**, because the policy in (1) is "drop and log" and a drop nobody can see is silent data loss, not a policy — that log line is the only record the operator gets. **How to apply:** the raised set is the list of modules where *one line per event is the whole record we keep*; add a module to `settings.LOGGING` on that basis, not for verbosity, and expect that test to be what makes you say it out loud. The reason `caplog` cannot catch this class of bug is that it forces the level itself — **only an assertion against the live `logging.getLogger(...).isEnabledFor(INFO)` and its `.handlers` can**, so assert both: being enabled for INFO and actually reaching a handler are two different failures, and the live bug was the second.
 - **R145 — The outbound audience: `to` is the public collection alone, `cc` is the followers collection plus mentioned actors, `Delete` gets `to` and no `cc`, and `Like` stays address-less because the peer's own `LikeSerializer` has no audience at all (owner ruling 2026-10-08, closing R143; the mapping itself read off the live peer's serializers rather than chosen).** **(1) The mapping is the peer's, not ours.** Mastodon 4.7.3's `StatusParser#visibility` derives a received status's visibility from `to`/`cc` and nothing else: public collection in `to` → `public`; public collection in `cc` alone → `unlisted`; `to` naming only our followers collection → `private`; **neither → `direct`**. We emitted neither, so every status this project ever sent arrived filed as a direct message — counted on the account, returned by no endpoint. That single fall-through is the whole of R143's `statuses_count: 18` against a profile endpoint answering `0`. **How to apply:** treat `to`/`cc` as the visibility field on the wire, not as routing metadata. Any new outbound object that a human is meant to see needs `to: [Public]`. **(2) The obvious mapping is the wrong one.** "Mentions in `to`, followers-and-public in `cc`" reads plausibly and lands every post in `unlisted`, one rung short of the goal. The peer's `TagManager.to`/`.cc` for a public status is `to = [Public]` alone and `cc = [followers collection] + mentioned actor URIs`. Kept as a test (`test_public_in_cc_alone_would_only_be_unlisted`) because it is the mistake this increment came closest to making. **(3) `Like` staying address-less is matching the idiom, not missing it.** The peer's `LikeSerializer` emits `id`/`type`/`actor`/`object` and nothing else; adding a public audience there would be the one place we *diverge* from Mastodon and would push favourites into public timelines, contradicting why `broadcast_like` targets the author alone. **How to apply:** the scope was three builders, not four. `like_activity` is pinned address-less so a future "address everything" pass cannot pass through it quietly. **(4) `cc` holds the followers *collection* URI, not one entry per follower, and the mentions in it are load-bearing.** A peer that finds a tagged account absent from the audience marks the mention *silent* — recorded, no notification, not in a timeline. An addressed mention is what makes naming someone on the wire reach them. **(5) The audience is not the delivery list and is deliberately not derived from it.** `_status_targets` answers "who gets a POST" and holds local `User` rows to sign for; `cc` answers "who may see this" and holds URIs. They agree on every remote member and differ on every local one, because a local member is addressable and has no inbox. **(6) `Delete` gets `to: [Public]` and no `cc`,** matching `DeleteNoteSerializer` — everyone who could see the post needs to learn it is gone, which is what a public audience says and what a follower collection does not. **(7) The audience rides on both the activity and the Note,** because the peer reads `@object['to'] || @json['to']` — object first, activity as fallback — and receivers are not uniform. **(8) `Flag` stays unaddressed,** checked rather than assumed: a report whose recipients are moderation targets must never be public-addressed. **(9) We are not a relay (owner ruling, closing the relay question rather than leaving it open).** Instance A does not propagate a neighbor's content to its own followers. The forcing function that made it a question: we cannot sign as the origin (`_deliver_signed` signs as the actor handed to it, and we hold no private key for another instance's identity), so relay could only ever mean `Announce` — a boost, i.e. a product decision wearing a protocol costume. **Consequence: the two tests asserting `Announce` is ignored (`test_activitypub_inbox.py:353`, `:577`) stand unchanged. No decision was reversed.** **How to apply:** do not re-open relay as a protocol gap; it was considered and answered on product grounds. Reopening it needs a stated reason as a new R. **(10) The fix is forward-only.** `ProcessStatusUpdateService` on the peer has no reference to `visibility` at all — visibility is assigned at Create and never re-derived on Update — and `Update` additionally drops unknown objects older than one day. Measured: 4 lists re-sent as `Update` with the corrected envelope, 202s, 0 failures, and the pre-existing statuses did not change classification. **How to apply:** do not promise a repaired backlog from a rebroadcast; repairing it means re-*creating* under fresh ids, which is a separate and much larger decision.
+
+- **R146 — Main-feed and home-rail polish accepted (session opened 2026-10-08).** Larger avatars and posters; film poster beneath and left-aligned with username, title/review alongside. Clean continuous rows. Archivo across username/action/date; white dates, bold cream names; author, film and prose links underline only on hover or keyboard focus. Compact 32px section heading, tight title/prose grouping, closer rail spacing, rectangular genre tags, filled rank discs with owner-requested cream borders, decorative search icon. See §2M for commit/dimension details. Far-right posters and mixed-font metadata were rejected. Home-feed prose link polish does not settle global mentions; Save weight remains open.
+- **R147 — Gate and record cadence is owner-controlled.** "From now on, let's not run the full gate until I say so." Pixel approval and "lock it in" do not authorize the long gate. Commit accepted items locally during the session; consolidate PROGRESS.md and rewrite NOW at session end. Run the gate only on explicit request; short deployment/browser checks remain appropriate. Ask before pushing unless the current request authorizes it. The session-close request explicitly authorized commit, full gate, record, push and handoff; that does not authorize future sessions' pushes. Browser URLs are the owner review surface because the owner uses SSH.

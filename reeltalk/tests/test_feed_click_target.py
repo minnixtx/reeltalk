@@ -395,16 +395,25 @@ def test_nothing_underlines_the_prose_when_the_row_is_hovered():
     # light up as followable text merely because the row opens. The overlay keeps
     # ``cursor: pointer`` (pinned above), so the row still reads as clickable.
     #
-    # This is written as an absence check over *any* hover/focus rule that names
-    # the prose, not just the one selector that used to exist — a re-introduced
-    # underline under a different selector is the same regression. Against the
-    # stylesheet as it stood before this change it fails on
+    # Individual feed links now underline on their own hover/keyboard focus
+    # (owner-approved M6 polish). Those two selectors do not underline the
+    # surrounding prose when the row opens. Keep the absence check for every
+    # other hover/focus rule naming the prose, including ancestor interactions
+    # and selectors that would underline all links merely on row hover.
+    # Against the stylesheet before the original change it fails on
     # ``.review-open:hover ~ .review-body``, which is what makes it real.
+    individual_link_interactions = {
+        ".feed .review-body a:hover",
+        ".feed .review-body a:focus-visible",
+    }
     offenders = [
         selectors
         for selectors, declarations in _css_rules()
         if any(
-            "review-body" in s and (":hover" in s or ":focus" in s) for s in selectors
+            "review-body" in s
+            and (":hover" in s or ":focus" in s)
+            and s not in individual_link_interactions
+            for s in selectors
         )
         and re.search(r"text-decoration:\s*underline", declarations)
     ]
