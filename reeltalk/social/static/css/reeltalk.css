@@ -2631,3 +2631,14 @@ form.inline button,
     row-gap: 8px;
   }
 }
+/* Home feed section heading: compact display type and a restrained red rule. */
+.feed .pane-title {
+  font-size: 2rem;
+  gap: 18px;
+}
+
+.feed .pane-title::after {
+  max-width: 350px;
+  background: linear-gradient(90deg, var(--red-bright), rgba(255, 65, 56, 0));
+  box-shadow: none;
+}
