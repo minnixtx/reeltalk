@@ -2660,3 +2660,8 @@ form.inline button,
 .rail-banner {
   filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.4));
 }
+/* Genre tags: compact rectangular labels beside the ticket artwork. */
+.genre-pill {
+  border-radius: 4px;
+  background: #100e0c;
+}
