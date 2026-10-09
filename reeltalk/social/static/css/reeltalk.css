@@ -2642,3 +2642,13 @@ form.inline button,
   background: linear-gradient(90deg, var(--red-bright), rgba(255, 65, 56, 0));
   box-shadow: none;
 }
+/* Feed prose links, including mentions: consistent with author/film links. */
+.feed .review-body a {
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+
+.feed .review-body a:hover,
+.feed .review-body a:focus-visible {
+  text-decoration: underline;
+}
