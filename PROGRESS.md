@@ -8,15 +8,17 @@
 
 **Rewritten at each increment. This block is current; later entries are history.**
 
-- **M6 desktop paper-edge polish approved and DEPLOYED, §2N / R148.**
+- **M6 desktop paper-edge polish approved, DEPLOYED and gate-verified, §2N / R148.**
   Review `https://reeltalk.minnix.dev/`. Owner-supplied
   `distressed-vintage-black-film-texture.png`, rendered at native 1536×1024
   scale in independent left/right edge layers. 100% opacity; fade width
   16–72px (72px at 1440px). Solid centre, no duplicate texture. Scrolls
   with the page. Texture hidden at widths ≤1024px; mobile stays clean.
-- **This session's full gate explicitly authorized; pending.** Previous
-  verified baseline: 2518 passed, 5 skipped, all four markers 0 (§2M).
-  Log `/tmp/inc6-gate.log`. Push authorized only after a successful gate.
+- **Latest full gate:** 2519 passed, 5 skipped in 2148.94s (0:35:48);
+  RUFF_CHECK_EXIT=0, RUFF_FORMAT_EXIT=0, MIGRATIONS_EXIT=0, PYTEST_EXIT=0.
+  Baseline 2518/5 plus one existing clean-room scan parameter for the PNG;
+  no test code changed. Log `/tmp/inc6-gate.log`. Full gate and push on
+  success explicitly authorized at this session's close.
 - **Prior §2M feed/home-rail polish remains accepted:** larger avatars and
   posters aligned beneath usernames, continuous rows, Archivo metadata,
   interaction-only link underlines, compact heading, tighter text grouping,
@@ -7842,7 +7844,7 @@ artwork pass. Decisions: R146–R147.
 
 ## 2N. M6 artwork polish — desktop worn-paper edges
 
-**Session 2026-10-09. Owner-approved and deployed; full gate pending.**
+**Session 2026-10-09. Owner-approved, deployed and full-gate verified.**
 Decision: R148. This closes one visual item, not the full M6 artwork pass.
 
 ### Accepted result
@@ -7889,8 +7891,16 @@ Decision: R148. This closes one visual item, not the full M6 artwork pass.
   a footer/rail CSS guard failed: its helper reads the first 64rem media
   block, and the new texture-only block preceded the existing rail block.
   Merged texture hiding into the existing 64rem block; visual behavior and
-  test unchanged. Rebuild and full rerun pending. Initial log preserved at
+  test unchanged. Focused footer/rail suite: **21 passed in 17.78s**.
+  Rebuilt all services and reran the full gate: **2519 passed, 5 skipped in
+  2148.94s (0:35:48)**; all four markers 0. Count is baseline 2518/5 plus
+  one existing clean-room scan parameter for the new PNG; no test code changed.
+  Final log `/tmp/inc6-gate.log`; initial stopped-run log preserved at
   `/tmp/reeltalk-polish/texture-gate-first-attempt.log`.
+- Commits: `45a5425` approved texture/initial record; `6c33d32` consolidated
+  mobile media block. Closing record commit contains the successful gate
+  and current NOW. Push authorized after success; final HEAD recorded in
+  the local handoff.
 - Full M6 artwork is unfinished; no next visual item selected. Save weight
   and mention treatment beyond home-feed links remain open. Handoff stays
   local at `.qwen/tmp/m6-design-polish-handoff.md`; no credentials in it.
