@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-08
+**Last updated:** 2026-10-09
 
 ---
 
@@ -8,17 +8,19 @@
 
 **Rewritten at each increment. This block is current; later entries are history.**
 
-- **M6 main-feed/home-rail polish session closed: approved, DEPLOYED and
-  gate-verified, §2M / R146.** Review `https://reeltalk.minnix.dev/`.
-  Larger avatars; film posters under and aligned with usernames; clean
-  continuous rows; unified Archivo metadata; hover/focus-only link
-  underlines; compact heading, tighter text grouping; closer rail gaps,
-  rectangular genre tags, cream-bordered rank discs and search magnifier.
-  Far-right posters and mixed-font metadata were rejected.
-- **Latest full gate:** 2518 passed, 5 skipped in 2086.61s (0:34:46); all four markers 0.
-  Same 2518 passed / 5 skipped count as §2L; CSS design changes plus one
-  corrected guard test; no new tests.
-  Log `/tmp/inc6-gate.log`. Final image rebuilt before gate.
+- **M6 desktop paper-edge polish approved and DEPLOYED, §2N / R148.**
+  Review `https://reeltalk.minnix.dev/`. Owner-supplied
+  `distressed-vintage-black-film-texture.png`, rendered at native 1536×1024
+  scale in independent left/right edge layers. 100% opacity; fade width
+  16–72px (72px at 1440px). Solid centre, no duplicate texture. Scrolls
+  with the page. Texture hidden at widths ≤1024px; mobile stays clean.
+- **This session's full gate explicitly authorized; pending.** Previous
+  verified baseline: 2518 passed, 5 skipped, all four markers 0 (§2M).
+  Log `/tmp/inc6-gate.log`. Push authorized only after a successful gate.
+- **Prior §2M feed/home-rail polish remains accepted:** larger avatars and
+  posters aligned beneath usernames, continuous rows, Archivo metadata,
+  interaction-only link underlines, compact heading, tighter text grouping,
+  closer rail gaps, rectangular genre tags, bordered ranks and search icon.
 - **R147 process:** full gate only on explicit owner request; approved
   items may be committed during the session; consolidate record and
   rewrite NOW at session end. Owner reviews browser URLs (SSH access).
@@ -42,7 +44,9 @@
   updates; TMDB primary/manual fallback. R85: routes refuse what controls
   withhold. Anonymous rail text stays unlinked and header search absent;
   hover rules apply to anchors only. Clean content/body/forms; original
-  grindhouse styling, reference artwork not copied. Deployer-agnostic.
+  grindhouse styling. Mockup remains reference-only except the explicitly
+  authorized edge-reuse experiment; final texture is owner-supplied, not
+  extracted from the mockup. Deployer-agnostic.
 - Lists remain in scope (R137–R140). No new Notification.Kind; mirrors
   notify nobody (R144); saved remote-list changes have no signal. Stop and
   raise any backend need during design polish.
@@ -7836,6 +7840,57 @@ artwork pass. Decisions: R146–R147.
   gitignored operator artifact; no credentials). Gate/HEAD values filled
   after the closing record commit and push.
 
+## 2N. M6 artwork polish — desktop worn-paper edges
+
+**Session 2026-10-09. Owner-approved and deployed; full gate pending.**
+Decision: R148. This closes one visual item, not the full M6 artwork pass.
+
+### Accepted result
+
+- Replace the old all-page weathered tile with the owner-supplied
+  `distressed-vintage-black-film-texture.png` (1536×1024), copied unchanged
+  from `/home/minnix/design-elements/` into `social/static/images/`.
+- `body::before` and `body::after` anchor the original left and right edges
+  independently, at native pixel size (`background-size: auto`). No
+  viewport scaling, centred duplicate image, or black scrim over the asset.
+- Opacity 1, inward gradient masks, width
+  `clamp(16px, calc((100vw - 1152px) / 4), 72px)`. At 1440px, fade narrowed
+  from 144px to 72px at the owner's approval. Solid near-black centre.
+- Texture hidden at ≤64rem / 1024px, matching the stacked home-layout
+  breakpoint; mobile and tablet retain a clean dark background. Desktop
+  edges scroll with the page; fixed-background behavior was considered and
+  left unchanged by owner agreement.
+- Pseudo-elements are behind content and `pointer-events: none`. Existing
+  content, tickets, chrome strips and controls retain their styling.
+- Only CSS plus the supplied PNG; no backend, templates, dependencies,
+  migrations or tests changed. Unrelated header-shadow drift was restored
+  in the closing audit.
+
+### Review and verification
+
+- Reviewed on `https://reeltalk.minnix.dev/`, never a LAN preview. Candidates
+  inspected in Chromium and deployed for owner evaluation. Browser-only
+  CSS previews must use `bypassCSP: true` and verify computed values; an
+  earlier inline preview was blocked by CSP. Do not change production CSP.
+- AI-generated candidates were rejected for chipped-paint appearance,
+  heavy uniform borders, and dirt-like grain. Mockup crops `edge1.png` and
+  `edge2.png` clarified fine worn/folded paper. Owner explicitly allowed
+  actual mockup-edge reuse as an experiment, superseding reference-only for
+  that experiment; final delivered asset is the later owner-supplied image.
+- Mockup reuse revealed scaling blur: 1122px source enlarged ~28% at a
+  1440px viewport. Native-size edge layers solved it. Supplied texture's
+  dimmed centred copy created doubled marks and was removed. Opacity was
+  reviewed at 40%, 70%, then 100%; final narrower 100% fade accepted.
+- Browser checks at 1440, 1025, 1024, 768 and 390px: texture displays only
+  above 1024px; native sizing and opacity 1 confirmed; no horizontal
+  overflow. Mobile and footer inspected. A fresh iPhone-profile check
+  served the correct supplied asset; there was no separate mobile texture.
+- Full gate explicitly requested at session closure; rebuild all services
+  before running `.qwen/tmp/run-gate.sh`. Result pending in this record.
+- Full M6 artwork is unfinished; no next visual item selected. Save weight
+  and mention treatment beyond home-feed links remain open. Handoff stays
+  local at `.qwen/tmp/m6-design-polish-handoff.md`; no credentials in it.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -8169,3 +8224,5 @@ not an optimisation.
 
 - **R146 — Main-feed and home-rail polish accepted (session opened 2026-10-08).** Larger avatars and posters; film poster beneath and left-aligned with username, title/review alongside. Clean continuous rows. Archivo across username/action/date; white dates, bold cream names; author, film and prose links underline only on hover or keyboard focus. Compact 32px section heading, tight title/prose grouping, closer rail spacing, rectangular genre tags, filled rank discs with owner-requested cream borders, decorative search icon. See §2M for commit/dimension details. Far-right posters and mixed-font metadata were rejected. Home-feed prose link polish does not settle global mentions; Save weight remains open.
 - **R147 — Gate and record cadence is owner-controlled.** "From now on, let's not run the full gate until I say so." Pixel approval and "lock it in" do not authorize the long gate. Commit accepted items locally during the session; consolidate PROGRESS.md and rewrite NOW at session end. Run the gate only on explicit request; short deployment/browser checks remain appropriate. Ask before pushing unless the current request authorizes it. The session-close request explicitly authorized commit, full gate, record, push and handoff; that does not authorize future sessions' pushes. Browser URLs are the owner review surface because the owner uses SSH.
+
+- **R148 — Worn-paper background is desktop-only and rendered at native scale (2026-10-09).** Use the owner's supplied distressed vintage black film texture, not the rejected generated approximations. Independent left/right edges, 100% opacity and a narrow inward fade (16–72px); solid centre avoids duplicate texture. No viewport enlargement. Hide texture at ≤1024px. Scroll with the page. Owner authorized actual mockup-edge reuse as an intermediate experiment, but final artwork uses their supplied standalone texture. Preserve previously approved feed/rail styling.

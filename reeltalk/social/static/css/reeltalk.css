@@ -3,9 +3,9 @@
    theatrical lighting. Typography carries most of the identity — Bebas Neue for
    titles/section headings and the lit red controls, Oswald for metadata and
    small headings, Archivo for body/reviews and the header's own text, Monoton
-   only for the neon wordmark, Kaushan Script only for the footer sign-off. A
-   grunge tile sits behind the whole site under a heavy dark scrim; content
-   panels stay nearly opaque and body copy clean. */
+   only for the neon wordmark, Kaushan Script only for the footer sign-off. The
+   owner-supplied poster texture fades inward from the outer edges;
+   content panels and body copy stay clean. */
 
 :root {
   /* Palette — near-black browns + dirty cream + theatrical red. Values per the
@@ -33,18 +33,6 @@
      for this project) painted over a dark-to-darker red gradient, so the fill is
      uneven like lacquered metal instead of flat paint. */
   --neon-mottle: url("../images/button-mottle.png");
-
-  /* Grunge surface stack — dark scrim over the weathered plate; used by the body.
-     Pure black at .80 (owner pass, 2026-10-04: "the background is too brown").
-     The brown was never the plate's average — that measures lum 7.4, already
-     near-black — but its bright speckles: the top 1% sit at lum ~69, RGB 70/69/66.
-     Raising the alpha of the old warm 9/8/7 scrim only dims those (top-decile
-     warmth 2.4 -> 2.2); blackening it is what removes the cast (2.4 -> 0.6) while
-     the texture survives at p90 lum 2.7. .88 measured flatter still and was not
-     taken — the grain is the point of the plate. */
-  --grunge-stack: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.8)),
-    url("../images/grunge-weathered.png");
-  --grunge-size: auto, 1000px;
 
   /* Typography roles. */
   --display: "Bebas Neue", sans-serif;  /* film titles, section headings, lit red controls */
@@ -128,14 +116,47 @@ body {
   font-family: var(--body);
   line-height: 1.55;
   color: var(--fg);
-  /* Site-wide weathered plate under a dark scrim (owner pass, 2026-09-18; scrim
-     blackened to .80 on 2026-10-04, so ~20% of the plate now reads through).
-     The plate's near-black average keeps the page dark enough for the white post
-     prose above it. Raise the alpha if it ever fights text; see --grunge-stack. */
+  /* Owner-supplied paper wear at native scale, rendered once at each outer
+     edge. A solid centre avoids repeating the same texture behind content. */
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
   background-color: var(--black);
-  background-image: var(--grunge-stack);
-  background-size: var(--grunge-size);
-  background-repeat: repeat;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: clamp(16px, calc((100vw - 1152px) / 4), 72px);
+  z-index: -1;
+  opacity: 1;
+  pointer-events: none;
+  background-image: url("../images/distressed-vintage-black-film-texture.png");
+  background-size: auto;
+  background-repeat: repeat-y;
+}
+
+body::before {
+  left: 0;
+  background-position: left top;
+  mask-image: linear-gradient(to right, #000, transparent);
+}
+
+body::after {
+  right: 0;
+  background-position: right top;
+  mask-image: linear-gradient(to left, #000, transparent);
+}
+
+/* Match the home layout's desktop breakpoint: narrow screens stay clean. */
+@media (max-width: 64rem) {
+  body::before,
+  body::after {
+    display: none;
+  }
 }
 
 a {
@@ -1465,9 +1486,9 @@ table.results th {
 }
 
 /* --- Texture pass (M6 artwork, R60; site-wide grunge 2026-09-16) -----------
-   Site-wide grunge tile behind everything under a heavy dark scrim (see the
-   body rule); thin amber/brown trim + faint sheen on display surfaces;
-   content panels stay dark and nearly opaque so body copy stays clean. */
+   Owner-supplied worn paper now lives only at the desktop outer edges (see
+   body pseudo-elements). Thin amber/brown trim and dark content surfaces
+   keep body copy clean. */
 
 /* Header band: none since the owner texture pass (2026-09-16) — the halftone
    + red-glow marquee treatment was removed so the header carries the same
