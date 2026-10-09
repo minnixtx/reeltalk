@@ -2665,3 +2665,22 @@ form.inline button,
   border-radius: 4px;
   background: #100e0c;
 }
+/* Trending rank markers: filled discs with clearly weighted numerals. */
+.trending-list li {
+  grid-template-columns: 32px minmax(0, 1fr);
+  column-gap: 9px;
+}
+
+.trending-rank {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  background: #4b3b2c;
+  border: 1px solid var(--cream);
+  color: #f3e3c7;
+  font-family: var(--ui);
+  font-weight: 700;
+  font-size: 0.85rem;
+  line-height: 1;
+}
