@@ -2499,6 +2499,7 @@ form.inline button,
   column-gap: 16px;
   min-height: 164px;
   align-content: start;
+  grid-template-rows: auto auto 1fr;
 }
 
 .feed .review:has(> .feed-item) > .review-head {
