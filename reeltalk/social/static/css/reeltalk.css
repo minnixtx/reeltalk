@@ -2652,3 +2652,11 @@ form.inline button,
 .feed .review-body a:focus-visible {
   text-decoration: underline;
 }
+/* Home rail: closer grouping and a restrained shadow beneath ticket artwork. */
+.rail {
+  gap: 1rem;
+}
+
+.rail-banner {
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.4));
+}
