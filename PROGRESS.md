@@ -7885,8 +7885,12 @@ Decision: R148. This closes one visual item, not the full M6 artwork pass.
   above 1024px; native sizing and opacity 1 confirmed; no horizontal
   overflow. Mobile and footer inspected. A fresh iPhone-profile check
   served the correct supplied asset; there was no separate mobile texture.
-- Full gate explicitly requested at session closure; rebuild all services
-  before running `.qwen/tmp/run-gate.sh`. Result pending in this record.
+- Full gate explicitly requested at session closure. First run stopped after
+  a footer/rail CSS guard failed: its helper reads the first 64rem media
+  block, and the new texture-only block preceded the existing rail block.
+  Merged texture hiding into the existing 64rem block; visual behavior and
+  test unchanged. Rebuild and full rerun pending. Initial log preserved at
+  `/tmp/reeltalk-polish/texture-gate-first-attempt.log`.
 - Full M6 artwork is unfinished; no next visual item selected. Save weight
   and mention treatment beyond home-feed links remain open. Handoff stays
   local at `.qwen/tmp/m6-design-polish-handoff.md`; no credentials in it.

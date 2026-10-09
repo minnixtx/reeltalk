@@ -151,14 +151,6 @@ body::after {
   mask-image: linear-gradient(to left, #000, transparent);
 }
 
-/* Match the home layout's desktop breakpoint: narrow screens stay clean. */
-@media (max-width: 64rem) {
-  body::before,
-  body::after {
-    display: none;
-  }
-}
-
 a {
   color: var(--link);
 }
@@ -1870,6 +1862,12 @@ a.genre-pill:hover {
 }
 
 @media (max-width: 64rem) {
+  /* Narrow layouts keep a clean background at the same stack point. */
+  body::before,
+  body::after {
+    display: none;
+  }
+
   .home-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 2rem;
