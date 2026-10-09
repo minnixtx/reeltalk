@@ -2574,3 +2574,59 @@ form.inline button,
   }
 
 }
+/* Home-feed identity and metadata hierarchy. */
+.feed .review-author {
+  color: var(--cream);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.feed .feed-film a {
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+
+.feed .review-author:hover,
+.feed .review-author:focus-visible,
+.feed .feed-film a:hover,
+.feed .feed-film a:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.feed .review-head {
+  column-gap: 14px;
+  row-gap: 8px;
+  font-family: var(--body);
+  font-size: 0.95rem;
+}
+
+.feed .review-head .feed-verb {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 400;
+}
+
+.feed .post-date {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 400;
+  letter-spacing: normal;
+  color: var(--white);
+}
+
+.feed .feed-film {
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.feed .feed-film a {
+  font-weight: 650;
+}
+
+@media (max-width: 600px) {
+  .feed .review-head {
+    column-gap: 10px;
+    row-gap: 8px;
+  }
+}
