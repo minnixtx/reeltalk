@@ -23,9 +23,12 @@
   metrics and no overflow. Authenticated-only controls were inspected using actual
   template markup inserted in an anonymous browser, not a logged-in end-to-end
   session. Owner reviewed and accepted the deployed result.
-- **Latest full gate remains the 2026-10-09 baseline:** 2519 passed, 5 skipped;
-  all four markers 0. That gate predates these changes. Full gate NOT run this
-  session, per R147; closing request authorizes record, commit, push and handoff.
+- **Latest full gate passed against 42b506f (2026-10-13), explicitly requested
+  after the initial commit/push:** 2514 passed, 5 skipped in 2090.25s (34m50s).
+  RUFF_CHECK_EXIT=0, RUFF_FORMAT_EXIT=0, MIGRATIONS_EXIT=0, PYTEST_EXIT=0.
+  Log `/tmp/inc6-gate.log`. Count is five lower than prior 2519/5 because six
+  obsolete rail-scroll tests were replaced by one unified-scroll check.
+  Only this verification record changed after the passing gate.
 - **Prior §2M feed/home-rail polish remains accepted.** See R146. Background
   removal supersedes R148; unified scrolling supersedes the scrolling portion
   of R131. Footer placement in the rail remains.
@@ -7911,7 +7914,8 @@ Decision: R148. This closes one visual item, not the full M6 artwork pass.
 ## 2O. M6 artwork polish — clean background, unified scrolling and compact buttons
 
 **Accepted and deployed, session 2026-10-12–13.** Owner requested record, commit,
-push and handoff at close; no full gate requested (R147).
+push and handoff at close. Full gate was subsequently explicitly requested
+and passed against 42b506f (R147).
 
 - Tried the owner's `reeltalk-image-background.jpg` with existing edge fades,
   then 20% wider and 150px fades. Owner rejected texture entirely and approved
@@ -7945,7 +7949,14 @@ push and handoff at close; no full gate requested (R147).
   controls used template-derived DOM fixtures in an anonymous browser; no live
   writes or logged-in end-to-end checks. Owner provided live visual approval.
   Scripts/screenshots: `/tmp/reeltalk-polish/verify-background.mjs` and
-  `verify-film-actions.mjs`. Full gate deliberately not run.
+  `verify-film-actions.mjs`.
+- **Post-push full gate:** owner explicitly requested it after discussing gate
+  timing. Rebuilt all compose images, confirmed no concurrent pytest, then ran
+  `.qwen/tmp/run-gate.sh` against 42b506f. **2514 passed, 5 skipped in 2090.25s
+  (34m50s)**; lint, formatting, migrations and pytest markers all 0.
+  Log `/tmp/inc6-gate.log`. Exactly -5 from prior baseline: six obsolete sticky
+  rail tests replaced by one document-scroll test. No application/test changes
+  followed this gate; only the progress and handoff verification records.
 
 ## 3. Host facts (this box)
 
