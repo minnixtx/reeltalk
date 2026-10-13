@@ -10,6 +10,7 @@ from io import BytesIO
 import pytest
 import responses
 from django.contrib.auth import get_user_model
+from django.contrib.messages import get_messages
 from django.core.files.base import ContentFile
 from django.test import Client, override_settings
 from PIL import Image
@@ -262,8 +263,11 @@ def test_clickthrough_creates_new_film(login):
     assert film.title == "Blade Runner"
     assert film.year == 1982
     assert resp["Location"] == f"/film/{film.id}/"
+    # Landing is the only feedback. A new catalog row is shared-instance
+    # plumbing, not a personal act, so nothing is announced on the way.
+    assert [m.message for m in get_messages(resp)] == []
     detail = login.get(resp["Location"])
-    assert "Added “Blade Runner” to your library." in detail.content.decode()
+    assert "to your library" not in detail.content.decode()
 
 
 @responses.activate

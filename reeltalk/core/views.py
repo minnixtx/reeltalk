@@ -788,15 +788,21 @@ def film_search(request):
 
 @login_required
 def search_clickthrough(request, tmdb_id):
-    """D6 click-through: run D7 create-or-match and land on the film page."""
-    existed = Film.objects.filter(tmdb_id=tmdb_id).exists()
+    """D6 click-through: run D7 create-or-match and land on the film page.
+
+    Deliberately silent on success. Selecting a result only materialises the
+    shared ``Film`` catalog row — instance-wide plumbing, not a personal act
+    — so a "added to your library" toast claimed an ownership nothing here
+    grants, and its ``not existed`` guard made the same click report
+    differently depending on whether another member had added the film
+    first. Opening the page is the feedback; the watchlist control on it
+    carries the actual intent.
+    """
     try:
         film = create_or_match_film(tmdb_id)
     except TmdbError as exc:
         messages.error(request, str(exc))
         return redirect("film-search")
-    if not existed:
-        messages.success(request, f"Added “{film.title}” to your library.")
     return redirect("film", film_id=film.id)
 
 

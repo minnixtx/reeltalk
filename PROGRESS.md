@@ -6,29 +6,46 @@
 
 ## NOW — read this first
 
-**Rewritten at each increment. This block is current; later entries are history.**
+**Rewritten at the close of each increment. If anything else in this file
+disagrees with this block, this block is current and the other is history.**
 
-- **M6 clean background, unified page scroll and compact cinema buttons accepted and DEPLOYED, §2O / R149–R151.** Review `https://reeltalk.minnix.dev/`.
-  Background texture removed on all widths. Rail scrolls with the document;
-  no sticky rail, viewport height cap or separate brown scrollbar.
+- **Search click-through is now silent — R152 accepted and DEPLOYED (2026-10-13).**
+  The `Added "<film>" to your library.` toast is gone from
+  `reeltalk/core/views.py:search_clickthrough`, along with the `existed` lookup
+  that existed only to drive it. The owner asked "what library is it
+  referencing?" — and nothing owned by the member was being changed. What it
+  described is the shared, instance-wide `Film` catalog row that
+  `create_or_match_film` (D7) materialises so the film page can exist; no
+  `Shelf` and no `ShelfFilm` row is written on that path. Opening the page is
+  the feedback; the **+ Add to Watchlist** control on it carries the intent.
+  Review `https://reeltalk.minnix.dev/` → search a film → select it.
+- **M6 clean background, unified page scroll and compact cinema buttons remain
+  accepted and DEPLOYED, §2O / R149–R151.** Background texture removed on all
+  widths. Rail scrolls with the document; no sticky rail, viewport height cap
+  or separate brown scrollbar.
 - **Accepted button treatment:** Archivo semibold 14px, 38px desktop height,
   44px on narrow/coarse-pointer devices, 16px icons, 4px corners, tight padding.
   Secondary actions have cream outlines; primary actions have deep red gradients,
   a 1px red rim and restrained glow. Film watchlist uses plus/minus icons;
   watched/review action is primary. Shared `.cinema-button` styles cover New List,
   Dismiss, Find, Import, Export and Log In. Find field/button gap is 12px.
-- **Verification this session:** footer/rail 16 passed in 17.67s; focused film
-  watchlist/watched checks 14 passed, 32 deselected in 16.53s. Public browser
-  checks confirmed plain background, document/rail scroll together, compact button
-  metrics and no overflow. Authenticated-only controls were inspected using actual
-  template markup inserted in an anonymous browser, not a logged-in end-to-end
-  session. Owner reviewed and accepted the deployed result.
-- **Latest full gate passed against 42b506f (2026-10-13), explicitly requested
-  after the initial commit/push:** 2514 passed, 5 skipped in 2090.25s (34m50s).
+- **Verification for R152:** focused `reeltalk/tests/test_search.py` 29 passed;
+  `ruff check` and `ruff format --check` clean on both changed files; deployed
+  and confirmed inside the running container that the user-facing string is gone
+  (it survives only as docstring prose); `base.html` wraps the banner in
+  `{% if messages %}`, so the box disappears rather than leaving an empty `<ul>`;
+  headless Chromium at 1440px and 390px shows no `.messages` node and no
+  horizontal overflow. **The browser shots are anonymous** — the toast was
+  login-gated, so the logged-in proof is the Django test, which asserts
+  `get_messages(resp) == []` on the real route, not the screenshot.
+- **Latest full gate PASSED against this change (2026-10-13), explicitly
+  requested:** 2514 passed, 5 skipped in 2121.32s (35m21s).
   RUFF_CHECK_EXIT=0, RUFF_FORMAT_EXIT=0, MIGRATIONS_EXIT=0, PYTEST_EXIT=0.
-  Log `/tmp/inc6-gate.log`. Count is five lower than prior 2519/5 because six
-  obsolete rail-scroll tests were replaced by one unified-scroll check.
-  Only this verification record changed after the passing gate.
+  Log `/tmp/inc6-gate.log`. **Baseline unchanged from the prior 2514/5** —
+  2519 collected both times, because R152 flipped assertions inside one existing
+  test and added none. Freshness verified before the run: newest source 11:24:15,
+  image built 11:24:35, so pytest exercised current code, not the previous
+  increment.
 - **Prior §2M feed/home-rail polish remains accepted.** See R146. Background
   removal supersedes R148; unified scrolling supersedes the scrolling portion
   of R131. Footer placement in the rail remains.
@@ -8297,3 +8314,5 @@ not an optimisation.
 - **R149 — Plain dark background replaces the edge texture (2026-10-13).** Owner rejected the texture after wider fade trials and approved removal. Supersedes R148; keep the background clean on every width.
 - **R150 — The whole home page scrolls together (2026-10-13).** Owner rejected independent sidebar scrolling and its brown scrollbar. Rail uses normal document flow, no sticky position or viewport cap. Supersedes R131's scroll policy, retaining its footer placement.
 - **R151 — Compact cinema button treatment (2026-10-13).** Follow MOCKUP.png's cream outline and deep red rimmed primary treatment with Archivo labels. 38px desktop / 44px narrow or touch, 14px semibold labels, 16px icons, restrained glow. Applied to film actions and explicitly requested lists-index, Find, Import, Export and Log In buttons; other controls remain open. Find field/button gap is 12px.
+
+- **R152 — The search click-through announces nothing (2026-10-13, owner ruling after asking "what library is it referencing?").** `search_clickthrough` no longer emits `Added "<film>" to your library.` on a first-time add, and the `existed` lookup that existed only to drive it is gone. Four things were wrong with the message, and the fourth is the one the owner actually hit. **(1) "Your" was false.** What the toast described is the single shared `Film` catalog row that `create_or_match_film` (D7) materialises so the film page can exist at all. That row is instance-wide, not member-owned: picking a TMDB hit adds it for every member, permanently. There is no per-user library on this path — no `Shelf` and no `ShelfFilm` row is written. **(2) "Added" claimed a personal act.** The write is dedup plumbing, not shelving. The message told the member they had done something when the software had merely caught up with the page it was about to show them. **(3) It was shown inconsistently.** Guarded by `if not existed`, so the identical click reported nothing at all on a film another member had added first — same action, different feedback, and the member has no way to know why. **(4) It contradicted the control 200px below it.** The banner said "added" while the film page still read **+ Add to Watchlist**, which is the action the member actually meant. Opening the page is the feedback; the watchlist control carries the intent. **How to apply:** the removal is deliberate, and the docstring on `search_clickthrough` says so — do not restore a success message there as a "missing feedback" fix. If a future increment wants to announce something on this path, it must first name a thing the member actually owns, and that is a new R. The general rule this instantiates: **a success message has to describe a state change the actor caused in something of theirs.** Announcing internal materialisation as user-facing achievement reads as a lie even when every word is technically true. Note this is the mirror image of R144's "drop and log" policy — there, an invisible failure was the bug, so the log line became the record; here an invisible non-event was announced, so the announcement goes.
