@@ -64,7 +64,7 @@ page keeps its own three tabs untouched.
         <span class="list-deleted-text">{{ save.film_list.user.localname }} deleted this list.</span>
         <form class="inline" method="post" action="{% url 'list-save-dismiss' save.film_list_id %}">
           {% csrf_token %}
-          <button type="submit">Dismiss</button>
+          <button type="submit" class="btn cinema-button">Dismiss</button>
         </form>
       </p>
       {% endif %}
@@ -88,7 +88,7 @@ page keeps its own three tabs untouched.
   {# first thing a member with no lists sees is how to change that. #}
   {% if is_self %}
   <p class="list-toolbar">
-    <a class="btn" href="{% url 'list-create' %}">New list</a>
+    <a class="btn cinema-button cinema-button--primary" href="{% url 'list-create' %}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14M12 5v14"/></svg>New list</a>
   </p>
   {% endif %}
   {% if made %}

@@ -116,39 +116,8 @@ body {
   font-family: var(--body);
   line-height: 1.55;
   color: var(--fg);
-  /* Owner-supplied paper wear at native scale, rendered once at each outer
-     edge. A solid centre avoids repeating the same texture behind content. */
-  position: relative;
-  isolation: isolate;
   min-height: 100vh;
   background-color: var(--black);
-}
-
-body::before,
-body::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: clamp(16px, calc((100vw - 1152px) / 4), 72px);
-  z-index: -1;
-  opacity: 1;
-  pointer-events: none;
-  background-image: url("../images/distressed-vintage-black-film-texture.png");
-  background-size: auto;
-  background-repeat: repeat-y;
-}
-
-body::before {
-  left: 0;
-  background-position: left top;
-  mask-image: linear-gradient(to right, #000, transparent);
-}
-
-body::after {
-  right: 0;
-  background-position: right top;
-  mask-image: linear-gradient(to left, #000, transparent);
 }
 
 a {
@@ -363,6 +332,12 @@ form label {
   display: block;
   font-weight: 600;
   margin-bottom: 0.25rem;
+}
+
+.find-form {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
 }
 
 input[type="text"],
@@ -856,7 +831,7 @@ ul.errorlist {
 /* Shelve/edit controls under the film header. */
 .film-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.75rem;
   align-items: center;
   flex-wrap: wrap;
   margin-top: 1rem;
@@ -867,8 +842,85 @@ ul.errorlist {
 }
 
 .film-actions button,
-.film-actions .btn {
+.film-actions .btn,
+.btn.cinema-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 38px;
   margin-top: 0;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--cream-muted);
+  border-radius: 4px;
+  background: linear-gradient(180deg, #171410, #090807);
+  color: var(--cream);
+  box-shadow: inset 0 0 0 1px rgba(233, 223, 203, 0.08);
+  font-family: var(--body);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: normal;
+  text-transform: none;
+  transition: background-color 150ms ease, border-color 150ms ease;
+  text-shadow: none;
+}
+
+.film-actions button:hover,
+.film-actions .btn:hover,
+.btn.cinema-button:hover {
+  background: linear-gradient(180deg, #282118, #15110d);
+  border-color: var(--cream);
+  color: var(--cream);
+  box-shadow: inset 0 0 0 1px rgba(233, 223, 203, 0.12);
+  filter: none;
+}
+
+.film-actions .film-watched,
+.btn.cinema-button--primary {
+  background: linear-gradient(180deg, #891c18, #60100e);
+  border: 1px solid #df5a50;
+  color: #fff2e4;
+  box-shadow:
+    inset 0 0 6px rgba(255, 74, 52, 0.14),
+    0 0 3px rgba(255, 45, 32, 0.22);
+}
+
+.film-actions .film-watched:hover,
+.btn.cinema-button--primary:hover {
+  background: linear-gradient(180deg, #a42620, #761411);
+  border-color: #ef7368;
+  color: #fff2e4;
+  box-shadow:
+    inset 0 0 6px rgba(255, 74, 52, 0.2),
+    0 0 5px rgba(255, 45, 32, 0.3);
+}
+
+.film-actions button:focus-visible,
+.film-actions .btn:focus-visible,
+.btn.cinema-button:focus-visible {
+  outline: 2px solid var(--cream);
+  outline-offset: 3px;
+}
+
+.film-actions svg,
+.cinema-button svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (max-width: 600px), (pointer: coarse) {
+  .film-actions button,
+  .film-actions .btn,
+  .btn.cinema-button {
+    min-height: 44px;
+  }
 }
 
 /* Interactive star rating: the read-only .stars fill plus a layer of ten
@@ -1607,50 +1659,10 @@ button:disabled {
 .rail {
   display: grid;
   gap: 1.5rem;
-  /* R131: the rail scrolls on its own. The height cap is what makes sticky a
-     fix rather than a bug — sticky with no `max-height` pins the rail's top and
-     leaves its bottom 270-450px below the fold forever, which is exactly where
-     the footer now lives. `overscroll-behavior: contain` stops the rail hitting
-     its end and chaining the scroll into the document, which would yank the
-     feed sideways mid-read. Needs `.home-grid`'s `align-items: start`: a
-     stretched grid item has nowhere to travel and sticky does nothing. */
-  position: sticky;
-  top: 0;
-  max-height: 100vh;
-  overflow-y: auto;
-  /* Required once the rail scrolls: with one axis non-visible, `visible` on the
-     other is not allowed and computes to `auto`, and the rotated rail banners
-     overhang their column by ~1px on each side — enough to raise a horizontal
-     scrollbar inside the rail. Hidden clips that overhang, which the rotation
-     makes invisible anyway. */
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  /* Mastodon's thin themed scrollbar (copied outright, per R131). The thumb is
-     --line (90,67,44) at .55 and the track --black (9,8,7) at .35, so on this
-     palette it reads as the panel's own edge rather than as a second scrollbar
-     competing with the feed's. */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(90, 67, 44, 0.55) rgba(9, 8, 7, 0.35);
-}
-
-/* WebKit/Blink ignores scrollbar-color and needs its own set. 8px, same two
-   colours, brightening while the pointer is over the rail so the control is
-   there when you are using it and quiet when you are not. */
-.rail::-webkit-scrollbar {
-  width: 8px;
-}
-
-.rail::-webkit-scrollbar-track {
-  background: rgba(9, 8, 7, 0.35);
-}
-
-.rail::-webkit-scrollbar-thumb {
-  background: rgba(90, 67, 44, 0.55);
-  border-radius: 4px;
-}
-
-.rail:hover::-webkit-scrollbar-thumb {
-  background: rgba(90, 67, 44, 0.85);
+  /* The rail and feed share the document scroll. */
+  position: static;
+  max-height: none;
+  overflow: visible;
 }
 
 /* The footer's second home (R131): the same partial the wide band uses,
@@ -1862,12 +1874,6 @@ a.genre-pill:hover {
 }
 
 @media (max-width: 64rem) {
-  /* Narrow layouts keep a clean background at the same stack point. */
-  body::before,
-  body::after {
-    display: none;
-  }
-
   .home-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 2rem;

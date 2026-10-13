@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-09
+**Last updated:** 2026-10-13
 
 ---
 
@@ -8,30 +8,33 @@
 
 **Rewritten at each increment. This block is current; later entries are history.**
 
-- **M6 desktop paper-edge polish approved, DEPLOYED and gate-verified, §2N / R148.**
-  Review `https://reeltalk.minnix.dev/`. Owner-supplied
-  `distressed-vintage-black-film-texture.png`, rendered at native 1536×1024
-  scale in independent left/right edge layers. 100% opacity; fade width
-  16–72px (72px at 1440px). Solid centre, no duplicate texture. Scrolls
-  with the page. Texture hidden at widths ≤1024px; mobile stays clean.
-- **Latest full gate:** 2519 passed, 5 skipped in 2148.94s (0:35:48);
-  RUFF_CHECK_EXIT=0, RUFF_FORMAT_EXIT=0, MIGRATIONS_EXIT=0, PYTEST_EXIT=0.
-  Baseline 2518/5 plus one existing clean-room scan parameter for the PNG;
-  no test code changed. Log `/tmp/inc6-gate.log`. Full gate and push on
-  success explicitly authorized at this session's close.
-- **Prior §2M feed/home-rail polish remains accepted:** larger avatars and
-  posters aligned beneath usernames, continuous rows, Archivo metadata,
-  interaction-only link underlines, compact heading, tighter text grouping,
-  closer rail gaps, rectangular genre tags, bordered ranks and search icon.
-- **R147 process:** full gate only on explicit owner request; approved
-  items may be committed during the session; consolidate record and
-  rewrite NOW at session end. Owner reviews browser URLs (SSH access).
-  Ask before pushing unless the current request explicitly authorizes it.
-  This session-close request did authorize push. No AI co-author trailer.
-- **Next session:** `.qwen/tmp/m6-design-polish-handoff.md`, local
-  gitignored handoff. No next item preselected; ask the owner or give one
-  measured suggestion if requested. Full M6 artwork is not declared done.
-  Save weight and mention treatment beyond feed links remain undecided.
+- **M6 clean background, unified page scroll and compact cinema buttons accepted and DEPLOYED, §2O / R149–R151.** Review `https://reeltalk.minnix.dev/`.
+  Background texture removed on all widths. Rail scrolls with the document;
+  no sticky rail, viewport height cap or separate brown scrollbar.
+- **Accepted button treatment:** Archivo semibold 14px, 38px desktop height,
+  44px on narrow/coarse-pointer devices, 16px icons, 4px corners, tight padding.
+  Secondary actions have cream outlines; primary actions have deep red gradients,
+  a 1px red rim and restrained glow. Film watchlist uses plus/minus icons;
+  watched/review action is primary. Shared `.cinema-button` styles cover New List,
+  Dismiss, Find, Import, Export and Log In. Find field/button gap is 12px.
+- **Verification this session:** footer/rail 16 passed in 17.67s; focused film
+  watchlist/watched checks 14 passed, 32 deselected in 16.53s. Public browser
+  checks confirmed plain background, document/rail scroll together, compact button
+  metrics and no overflow. Authenticated-only controls were inspected using actual
+  template markup inserted in an anonymous browser, not a logged-in end-to-end
+  session. Owner reviewed and accepted the deployed result.
+- **Latest full gate remains the 2026-10-09 baseline:** 2519 passed, 5 skipped;
+  all four markers 0. That gate predates these changes. Full gate NOT run this
+  session, per R147; closing request authorizes record, commit, push and handoff.
+- **Prior §2M feed/home-rail polish remains accepted.** See R146. Background
+  removal supersedes R148; unified scrolling supersedes the scrolling portion
+  of R131. Footer placement in the rail remains.
+- **R147 process:** full gate only on explicit owner request; approved items may
+  be committed locally. Consolidate record and rewrite NOW at session end.
+  Ask before pushing unless currently authorized. No AI co-author trailer.
+- **Next session:** `.qwen/tmp/m6-design-polish-handoff.md`. No next item selected.
+  M6 artwork is unfinished. Feed/list Save weight and global mention treatment
+  remain undecided; the user chose film/button work instead of the suggested Save pass.
 - **§2L outbound audience remains deployed and peer-proven (R145).**
   Public in to; followers/mentions in cc; Delete public with no cc; Like
   unaddressed. Peer anonymous statuses 0 → 1 after a fresh Create;
@@ -47,8 +50,8 @@
   withhold. Anonymous rail text stays unlinked and header search absent;
   hover rules apply to anchors only. Clean content/body/forms; original
   grindhouse styling. Mockup remains reference-only except the explicitly
-  authorized edge-reuse experiment; final texture is owner-supplied, not
-  extracted from the mockup. Deployer-agnostic.
+  authorized edge-reuse experiment. Current background is plain dark.
+  Deployer-agnostic.
 - Lists remain in scope (R137–R140). No new Notification.Kind; mirrors
   notify nobody (R144); saved remote-list changes have no signal. Stop and
   raise any backend need during design polish.
@@ -7905,6 +7908,45 @@ Decision: R148. This closes one visual item, not the full M6 artwork pass.
   and mention treatment beyond home-feed links remain open. Handoff stays
   local at `.qwen/tmp/m6-design-polish-handoff.md`; no credentials in it.
 
+## 2O. M6 artwork polish — clean background, unified scrolling and compact buttons
+
+**Accepted and deployed, session 2026-10-12–13.** Owner requested record, commit,
+push and handoff at close; no full gate requested (R147).
+
+- Tried the owner's `reeltalk-image-background.jpg` with existing edge fades,
+  then 20% wider and 150px fades. Owner rejected texture entirely and approved
+  plain dark. Removed body pseudo-elements and texture-specific stacking rules;
+  retained the original tracked PNG as an unused asset. Owner's JPG is preserved
+  in `/home/minnix/design-elements/` (also `/tmp/reeltalk-polish/`), not committed.
+- Owner requested the whole page scroll in unison. Removed the sticky rail,
+  viewport cap, overflow containment and themed scrollbar introduced October 3
+  (`78951fe`). Footer stays in the rail; narrow layout and two-column desktop
+  remain. Updated existing footer tests to the new document-scroll contract,
+  removing obsolete sticky/scrollbar assertions and unused colour helpers.
+- Reworked film actions, then corrected the initially generic flat treatment
+  toward `MOCKUP.png`: cream outlined secondary button, plus/minus watchlist
+  icons, deep red gradient primary button with a tight rim/glow, Archivo labels.
+  Extended shared `.btn.cinema-button` / `.cinema-button--primary` styling to
+  New List, Dismiss, Find, Import, Export and Log In. Does not apply globally to
+  every button: list detail Save, list create/edit, signup and modal submits
+  retain their previous styling unless separately requested.
+- Owner found buttons too large. Final accepted dimensions: 38px desktop,
+  14px Archivo 600, 16px SVG icons, 1px border, 4px corners, padding
+  `.45rem .9rem`; narrow widths ≤600px or coarse pointer retain 44px height.
+  Primary glow reduced to a 3px outer bloom, slightly brighter on hover.
+  Keyboard focus remains visible. Find form uses grid with a 12px field/button gap.
+- Rebuilt all compose services and redeployed after each visual revision.
+  Focused tests: footer/rail **16 passed / 17.67s**; film action checks
+  **14 passed, 32 deselected / 16.53s**. Public Playwright checked background
+  and overflow at 1440/1025/1024/768/390; rail moved 400px with page scroll and
+  wheel over rail advanced document from 400 to 700 with rail scrollTop 0.
+  Final buttons checked at 1440/768/390, shared buttons at 1440/390 and actual
+  anonymous Log In page. Find gap measured 12px at 1440 and 390. Signed-in
+  controls used template-derived DOM fixtures in an anonymous browser; no live
+  writes or logged-in end-to-end checks. Owner provided live visual approval.
+  Scripts/screenshots: `/tmp/reeltalk-polish/verify-background.mjs` and
+  `verify-film-actions.mjs`. Full gate deliberately not run.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -8240,3 +8282,7 @@ not an optimisation.
 - **R147 — Gate and record cadence is owner-controlled.** "From now on, let's not run the full gate until I say so." Pixel approval and "lock it in" do not authorize the long gate. Commit accepted items locally during the session; consolidate PROGRESS.md and rewrite NOW at session end. Run the gate only on explicit request; short deployment/browser checks remain appropriate. Ask before pushing unless the current request authorizes it. The session-close request explicitly authorized commit, full gate, record, push and handoff; that does not authorize future sessions' pushes. Browser URLs are the owner review surface because the owner uses SSH.
 
 - **R148 — Worn-paper background is desktop-only and rendered at native scale (2026-10-09).** Use the owner's supplied distressed vintage black film texture, not the rejected generated approximations. Independent left/right edges, 100% opacity and a narrow inward fade (16–72px); solid centre avoids duplicate texture. No viewport enlargement. Hide texture at ≤1024px. Scroll with the page. Owner authorized actual mockup-edge reuse as an intermediate experiment, but final artwork uses their supplied standalone texture. Preserve previously approved feed/rail styling.
+
+- **R149 — Plain dark background replaces the edge texture (2026-10-13).** Owner rejected the texture after wider fade trials and approved removal. Supersedes R148; keep the background clean on every width.
+- **R150 — The whole home page scrolls together (2026-10-13).** Owner rejected independent sidebar scrolling and its brown scrollbar. Rail uses normal document flow, no sticky position or viewport cap. Supersedes R131's scroll policy, retaining its footer placement.
+- **R151 — Compact cinema button treatment (2026-10-13).** Follow MOCKUP.png's cream outline and deep red rimmed primary treatment with Archivo labels. 38px desktop / 44px narrow or touch, 14px semibold labels, 16px icons, restrained glow. Applied to film actions and explicitly requested lists-index, Find, Import, Export and Log In buttons; other controls remain open. Find field/button gap is 12px.

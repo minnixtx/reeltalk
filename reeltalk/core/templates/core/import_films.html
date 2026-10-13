@@ -35,6 +35,6 @@
 <form method="post" enctype="multipart/form-data">
   {% csrf_token %}
   <input type="file" name="csv_file" accept=".csv,text/csv" required>
-  <button type="submit">Import</button>
+  <button type="submit" class="btn cinema-button cinema-button--primary">Import</button>
 </form>
 {% endblock %}

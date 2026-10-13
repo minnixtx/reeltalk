@@ -8,16 +8,13 @@ guarantee: the test asserting both placements render identical inner markup
 fails the moment anyone edits one copy of the footer text into something the
 other is not.
 
-The rail rules are the R131 set — ``position: sticky`` with a ``max-height``
-cap and its own ``overflow-y``, plus Mastodon's thin themed scrollbar. The cap
-is load-bearing: sticky without it pins the rail's top and never brings its
-bottom — 270-450px down, where the footer now lives — into view. That is worse
-than no sticky at all, because it looks like it worked.
+The rail follows normal document flow and scrolls with the feed. Its footer
+remains reachable through the page scroll, without a separate scrollbar.
 
 Two standing constraints are asserted here so they cannot be drifted past by
 accident later: the home stays 2-pane (R64) and nothing in this increment is a
-control (R82). The behaviour these rules actually produce — a rail that stays
-pinned while the feed scrolls, a footer reachable at the rail's own bottom,
+control (R82). The behaviour these rules actually produce — a rail that scrolls
+with the feed, a footer reachable through the document scroll,
 exactly one footer per document — is proven in a real browser, because a
 string test cannot observe a stationary column.
 """
@@ -167,21 +164,6 @@ def _media_block(max_width: str) -> str:
     return CSS[start : pos - 1]
 
 
-def _rgba(declarations: str) -> tuple[int, int, int, float] | None:
-    """The first ``rgba(...)`` in a declaration block, as numbers."""
-    match = re.search(r"rgba\(([^)]*)\)", declarations)
-    if not match:
-        return None
-    parts = [float(p.strip()) for p in match.group(1).split(",")]
-    return (int(parts[0]), int(parts[1]), int(parts[2]), parts[3])
-
-
-def _brightness(color: tuple[int, int, int, float]) -> float:
-    """Luminance weighted by opacity — what actually reaches the eye."""
-    red, green, blue, alpha = color
-    return (0.2126 * red + 0.7152 * green + 0.0722 * blue) * alpha
-
-
 # --- The two placements ---------------------------------------------------
 
 
@@ -273,74 +255,17 @@ def test_both_placements_render_the_same_footer_body(admin, alice):
     assert "footer-brand" in home and "footer-signoff" in home
 
 
-# --- The rail as its own scroll container (R131) --------------------------
+# --- The rail shares the document scroll ---------------------------------
 
 
 @pytest.mark.django_db
-def test_the_rail_is_a_sticky_scroller_of_its_own():
+def test_the_rail_scrolls_with_the_document():
     decls = _decl_map(_rule_for(".rail"))
-    assert decls["position"] == "sticky"
-    assert decls["top"] == "0"
-    assert decls["max-height"] == "100vh"
-    assert decls["overflow-y"] == "auto"
-    assert decls["overscroll-behavior"] == "contain"
-
-
-@pytest.mark.django_db
-def test_the_rail_has_a_height_cap_beyond_which_it_scrolls():
-    """The cap is what separates the fix from the bug.
-
-    Sticky with no ``max-height`` pins the top and leaves the bottom — where
-    the footer now lives — off-screen for good. So the cap must be no larger
-    than the viewport: a cap of ``200vh`` would satisfy the string
-    ``max-height`` while restoring exactly the broken behaviour.
-    """
-    decls = _decl_map(_rule_for(".rail"))
-    cap = decls["max-height"]
-    assert cap.endswith("vh"), f"rail cap {cap!r} is not viewport-relative"
-    assert float(cap[:-2]) <= 100
-
-
-@pytest.mark.django_db
-def test_the_grid_gives_the_rail_room_to_travel():
-    """``position: sticky`` on a grid item does nothing if the item is
-    stretched to the row height, which is the default. R64's two-pane grid
-    already sets ``align-items: start``; this pins the prerequisite."""
-    decls = _decl_map(_rule_for(".home-grid"))
-    assert decls["align-items"] == "start"
-
-
-@pytest.mark.django_db
-def test_the_rail_scrollbar_is_thin_and_themed():
-    decls = _decl_map(_rule_for(".rail"))
-    assert decls["scrollbar-width"] == "thin"
-    assert decls["scrollbar-color"] == "rgba(90, 67, 44, 0.55) rgba(9, 8, 7, 0.35)", (
-        "rail scrollbar must be --line over --black, per R131"
-    )
-
-
-@pytest.mark.django_db
-def test_the_webkit_scrollbar_is_eight_pixels():
-    decls = _decl_map(_rule_for(".rail::-webkit-scrollbar"))
-    assert decls["width"] == "8px"
-    # The track and thumb must carry the same two colours the standard
-    # scrollbar-color pair names, or the two engines render different rails.
-    track = _decl_map(_rule_for(".rail::-webkit-scrollbar-track"))
-    thumb = _decl_map(_rule_for(".rail::-webkit-scrollbar-thumb"))
-    assert _rgba(track["background"]) == (9, 8, 7, 0.35)
-    assert _rgba(thumb["background"]) == (90, 67, 44, 0.55)
-
-
-@pytest.mark.django_db
-def test_the_scrollbar_brightens_on_rail_hover():
-    thumb = _decl_map(_rule_for(".rail::-webkit-scrollbar-thumb"))["background"]
-    hover = _decl_map(_rule_for(".rail:hover::-webkit-scrollbar-thumb"))["background"]
-    base_color = _rgba(thumb)
-    hover_color = _rgba(hover)
-    assert hover_color != base_color, "no brightening rule on rail hover"
-    assert _brightness(hover_color) > _brightness(base_color), (
-        f"hover thumb {hover} is not brighter than {thumb}"
-    )
+    assert decls["position"] == "static"
+    assert decls["max-height"] == "none"
+    assert decls["overflow"] == "visible"
+    assert "scrollbar-color" not in decls
+    assert ".rail::-webkit-scrollbar" not in CSS
 
 
 @pytest.mark.django_db
