@@ -17,7 +17,7 @@
   <form class="list-text-form" method="post" action="{% url 'list-create' %}">
     {% csrf_token %}
     {{ form.as_p }}
-    <button type="submit" class="btn">Create list</button>
+    <button type="submit" class="btn cinema-button cinema-button--primary">Create list</button>
     <a class="list-cancel" href="{% url 'user-lists' user.localname %}">Cancel</a>
   </form>
 </article>

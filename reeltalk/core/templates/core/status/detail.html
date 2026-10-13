@@ -153,7 +153,7 @@
     {% csrf_token %}
     <label for="id_reply_content">Reply to {{ status.user.localname }}</label>
     <textarea name="content" id="id_reply_content" rows="3" placeholder="Say something about this post…" autofocus></textarea>
-    <button type="submit">Reply</button>
+    <button type="submit" class="btn cinema-button cinema-button--primary">Reply</button>
   </form>
 {% endif %}
 {% if user.is_authenticated %}

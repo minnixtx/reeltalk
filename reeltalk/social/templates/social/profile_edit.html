@@ -7,6 +7,6 @@
 <form method="post" enctype="multipart/form-data">
   {% csrf_token %}
   {{ form.as_p }}
-  <button type="submit">Save changes</button>
+  <button type="submit" class="btn cinema-button cinema-button--primary">Save changes</button>
 </form>
 {% endblock %}

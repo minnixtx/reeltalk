@@ -31,7 +31,7 @@
           {% if row.year %}<span class="muted">({{ row.year }})</span>{% endif %}
         </div>
         {% if user.is_authenticated and row.tmdb_id is not None %}
-          <button type="button" class="watchlist-btn" data-url="{% url 'search-watchlist' row.tmdb_id %}">Add to watchlist</button>
+          <button type="button" class="watchlist-btn btn cinema-button" data-url="{% url 'search-watchlist' row.tmdb_id %}">Add to watchlist</button>
         {% endif %}
       </li>
     {% endfor %}

@@ -9,6 +9,6 @@ admin) to get started.</p>
 <form method="post">
   {% csrf_token %}
   {{ form.as_p }}
-  <button type="submit">Create admin account</button>
+  <button type="submit" class="btn cinema-button cinema-button--primary">Create admin account</button>
 </form>
 {% endblock %}

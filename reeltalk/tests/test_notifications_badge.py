@@ -194,7 +194,11 @@ def test_the_badge_carries_no_btn_class(member, alice, bob, post):
     # points at really is a .btn, so this negative is specific to the
     # badge and not to a site that never uses the class.
     content = member.get(NOTIFICATIONS_URL).content.decode()
-    assert 'class="btn"' in content
+    control = re.search(
+        r'<button[^>]*class="([^"]*)"[^>]*>Mark all read</button>', content
+    )
+    assert control is not None
+    assert "btn" in control.group(1).split()
 
 
 # --- What it costs ----------------------------------------------------------

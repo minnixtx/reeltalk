@@ -74,7 +74,7 @@
         {# one: the template owns the routing, and the JS only ever swaps #}
         {# between two addresses it was handed. #}
         <span class="list-save">
-          <button type="button" class="btn list-save-btn" data-save-url="{% url 'list-save' film_list.id %}" data-unsave-url="{% url 'list-unsave' film_list.id %}" data-state="{% if saved_by_viewer %}saved{% else %}unsaved{% endif %}" aria-pressed="{% if saved_by_viewer %}true{% else %}false{% endif %}" title="{% if saved_by_viewer %}Saved — click to remove{% else %}Save this list{% endif %}" aria-label="{% if saved_by_viewer %}Saved — click to remove this list{% else %}Save this list to your saved lists{% endif %}">{% if saved_by_viewer %}Saved{% else %}Save{% endif %}</button>
+          <button type="button" class="btn list-save-btn cinema-button cinema-button--primary" data-save-url="{% url 'list-save' film_list.id %}" data-unsave-url="{% url 'list-unsave' film_list.id %}" data-state="{% if saved_by_viewer %}saved{% else %}unsaved{% endif %}" aria-pressed="{% if saved_by_viewer %}true{% else %}false{% endif %}" title="{% if saved_by_viewer %}Saved — click to remove{% else %}Save this list{% endif %}" aria-label="{% if saved_by_viewer %}Saved — click to remove this list{% else %}Save this list to your saved lists{% endif %}">{% if saved_by_viewer %}Saved{% else %}Save{% endif %}</button>
         </span>
         {% endif %}
       {% endif %}
@@ -136,7 +136,7 @@
     {% csrf_token %}
     <label for="id_reply_content">Reply to “{{ film_list.title }}”</label>
     <textarea name="content" id="id_reply_content" rows="3" placeholder="Say something about this list…" autofocus></textarea>
-    <button type="submit">Reply</button>
+    <button type="submit" class="btn cinema-button cinema-button--primary">Reply</button>
   </form>
 {% endif %}
 {% if user.is_authenticated %}

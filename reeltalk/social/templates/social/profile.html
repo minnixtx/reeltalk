@@ -16,28 +16,28 @@
   </div>
   <div class="profile-actions">
     {% if is_self %}
-      <a class="btn" href="{% url 'profile-edit' %}">Edit profile</a>
+      <a class="btn cinema-button" href="{% url 'profile-edit' %}">Edit profile</a>
     {% elif user.is_authenticated %}
       {% if is_following %}
         <form method="post" action="{% url 'user-unfollow' profile_user.localname %}" class="inline">
           {% csrf_token %}
-          <button type="submit" class="btn">Following</button>
+          <button type="submit" class="btn cinema-button">Following</button>
         </form>
       {% else %}
         <form method="post" action="{% url 'user-follow' profile_user.localname %}" class="inline">
           {% csrf_token %}
-          <button type="submit" class="btn">Follow</button>
+          <button type="submit" class="btn cinema-button">Follow</button>
         </form>
       {% endif %}
       {% if is_blocked %}
         <form method="post" action="{% url 'user-unblock' profile_user.localname %}" class="inline">
           {% csrf_token %}
-          <button type="submit" class="btn">Blocked</button>
+          <button type="submit" class="btn cinema-button">Blocked</button>
         </form>
       {% else %}
         <form method="post" action="{% url 'user-block' profile_user.localname %}" class="inline">
           {% csrf_token %}
-          <button type="submit" class="btn">Block</button>
+          <button type="submit" class="btn cinema-button">Block</button>
         </form>
       {% endif %}
       {% comment %}
@@ -70,13 +70,13 @@
   <p class="invite-pitch" id="invite-pitch">Invite a fellow movie freak to ReelTalk</p>
   <form method="post" action="{% url 'invite-create' %}" class="invite-form">
     {% csrf_token %}
-    <button type="submit" class="btn">Invite</button>
+    <button type="submit" class="btn cinema-button cinema-button--primary">Invite</button>
   </form>
   {% if invite_link %}
   <div class="invite-result">
     <label class="visually-hidden" for="invite-url">Your invite link</label>
     <input type="text" id="invite-url" class="invite-url" readonly value="{{ invite_link }}">
-    <button type="button" class="btn invite-copy" data-copy-target="invite-url">Copy link</button>
+    <button type="button" class="btn invite-copy cinema-button" data-copy-target="invite-url">Copy link</button>
     <p class="invite-note">
       {% if invite.used_at %}
         Used — {{ invite.used_by.get_full_name }} joined on {{ invite.used_at|date:"F j, Y" }}.

@@ -119,9 +119,9 @@
           {% csrf_token %}
           <label for="note-{{ card.latest.id }}">Note (kept on the record)</label>
           <input type="text" id="note-{{ card.latest.id }}" name="note" maxlength="500">
-          <button type="submit">Dismiss</button>
+          <button type="submit" class="btn cinema-button">Dismiss</button>
           {% if card.can_delete %}
-            <button type="submit" class="btn" formaction="{% url 'moderation-delete-status' card.latest.id %}">Delete post</button>
+            <button type="submit" class="btn cinema-button" formaction="{% url 'moderation-delete-status' card.latest.id %}">Delete post</button>
             {% if not card.target_user.local %}
               {# Said plainly because it is the difference between a #}
               {# moderator thinking they removed a post from the network #}
@@ -166,7 +166,7 @@
                 anything — the account and its content are still here, and a
                 moderator can restore them later.
               </p>
-              <button type="submit" class="btn" formaction="{% url 'moderation-suspend' card.latest.id %}">Suspend account</button>
+              <button type="submit" class="btn cinema-button" formaction="{% url 'moderation-suspend' card.latest.id %}">Suspend account</button>
             </details>
           {% endif %}
 
@@ -205,7 +205,7 @@
                 in again, but the posts stay removed — they are gone the same
                 way an author's own delete is gone.
               </p>
-              <button type="submit" class="btn" formaction="{% url 'moderation-ban' card.latest.id %}">Ban account</button>
+              <button type="submit" class="btn cinema-button" formaction="{% url 'moderation-ban' card.latest.id %}">Ban account</button>
             </details>
           {% endif %}
 
@@ -247,7 +247,7 @@
                 report and decides for itself — accepting is not the same as
                 acting, and nothing coming back will tell us which it was.
               </p>
-              <button type="submit" class="btn" formaction="{% url 'moderation-forward' card.latest.id %}">Forward this report</button>
+              <button type="submit" class="btn cinema-button cinema-button--primary" formaction="{% url 'moderation-forward' card.latest.id %}">Forward this report</button>
             </details>
           {% endif %}
 
@@ -282,7 +282,7 @@
                 <strong>{{ card.target_user.actor_url }}</strong> should go,
                 block the server below instead.
               </p>
-              <button type="submit" class="btn" formaction="{% url 'moderation-refuse' card.latest.id %}">Refuse here</button>
+              <button type="submit" class="btn cinema-button" formaction="{% url 'moderation-refuse' card.latest.id %}">Refuse here</button>
             </details>
           {% endif %}
         </form>
@@ -349,7 +349,7 @@
           {% endif %}
           <form method="post" action="{% url 'moderation-unban' banned_user.localname %}">
             {% csrf_token %}
-            <button type="submit">Lift this ban</button>
+            <button type="submit" class="btn cinema-button">Lift this ban</button>
           </form>
         </li>
       {% endfor %}
@@ -392,7 +392,7 @@
       <input type="text" id="block-domain" name="domain" placeholder="bad.example" maxlength="255">
       <label for="block-domain-note">Why (kept on the record)</label>
       <input type="text" id="block-domain-note" name="note" maxlength="500">
-      <button type="submit">Block this server</button>
+      <button type="submit" class="btn cinema-button">Block this server</button>
     </form>
 
     {% if blocked_domains %}
@@ -411,7 +411,7 @@
           {% endif %}
           <form method="post" action="{% url 'moderation-unblock-domain' block.id %}">
             {% csrf_token %}
-            <button type="submit">Lift this block</button>
+            <button type="submit" class="btn cinema-button">Lift this block</button>
           </form>
         </li>
       {% endfor %}

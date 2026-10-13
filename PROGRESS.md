@@ -9,75 +9,64 @@
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
 
-- **Search click-through is now silent — R152 accepted and DEPLOYED (2026-10-13).**
-  The `Added "<film>" to your library.` toast is gone from
-  `reeltalk/core/views.py:search_clickthrough`, along with the `existed` lookup
-  that existed only to drive it. The owner asked "what library is it
-  referencing?" — and nothing owned by the member was being changed. What it
-  described is the shared, instance-wide `Film` catalog row that
-  `create_or_match_film` (D7) materialises so the film page can exist; no
-  `Shelf` and no `ShelfFilm` row is written on that path. Opening the page is
-  the feedback; the **+ Add to Watchlist** control on it carries the intent.
-  Review `https://reeltalk.minnix.dev/` → search a film → select it.
-- **M6 clean background, unified page scroll and compact cinema buttons remain
-  accepted and DEPLOYED, §2O / R149–R151.** Background texture removed on all
-  widths. Rail scrolls with the document; no sticky rail, viewport height cap
-  or separate brown scrollbar.
-- **Accepted button treatment:** Archivo semibold 14px, 38px desktop height,
-  44px on narrow/coarse-pointer devices, 16px icons, 4px corners, tight padding.
-  Secondary actions have cream outlines; primary actions have deep red gradients,
-  a 1px red rim and restrained glow. Film watchlist uses plus/minus icons;
-  watched/review action is primary. Shared `.cinema-button` styles cover New List,
-  Dismiss, Find, Import, Export and Log In. Find field/button gap is 12px.
-- **Verification for R152:** focused `reeltalk/tests/test_search.py` 29 passed;
-  `ruff check` and `ruff format --check` clean on both changed files; deployed
-  and confirmed inside the running container that the user-facing string is gone
-  (it survives only as docstring prose); `base.html` wraps the banner in
-  `{% if messages %}`, so the box disappears rather than leaving an empty `<ul>`;
-  headless Chromium at 1440px and 390px shows no `.messages` node and no
-  horizontal overflow. **The browser shots are anonymous** — the toast was
-  login-gated, so the logged-in proof is the Django test, which asserts
-  `get_messages(resp) == []` on the real route, not the screenshot.
-- **Latest full gate PASSED against this change (2026-10-13), explicitly
-  requested:** 2514 passed, 5 skipped in 2121.32s (35m21s).
-  RUFF_CHECK_EXIT=0, RUFF_FORMAT_EXIT=0, MIGRATIONS_EXIT=0, PYTEST_EXIT=0.
-  Log `/tmp/inc6-gate.log`. **Baseline unchanged from the prior 2514/5** —
-  2519 collected both times, because R152 flipped assertions inside one existing
-  test and added none. Freshness verified before the run: newest source 11:24:15,
-  image built 11:24:35, so pytest exercised current code, not the previous
-  increment.
-- **Prior §2M feed/home-rail polish remains accepted.** See R146. Background
-  removal supersedes R148; unified scrolling supersedes the scrolling portion
-  of R131. Footer placement in the rail remains.
-- **R147 process:** full gate only on explicit owner request; approved items may
-  be committed locally. Consolidate record and rewrite NOW at session end.
-  Ask before pushing unless currently authorized. No AI co-author trailer.
-- **Next session:** `.qwen/tmp/m6-design-polish-handoff.md`. No next item selected.
-  M6 artwork is unfinished. Feed/list Save weight and global mention treatment
-  remain undecided; the user chose film/button work instead of the suggested Save pass.
-- **§2L outbound audience remains deployed and peer-proven (R145).**
-  Public in to; followers/mentions in cc; Delete public with no cc; Like
-  unaddressed. Peer anonymous statuses 0 → 1 after a fresh Create;
-  historical 18 remain direct because visibility is assigned at Create,
-  never re-derived by Update. No repaired-backlog implication. Mirrored
-  list like/reply proven on B: likes 0 → 1, statuses 11 → 12 with parent
-  14, inbound ledger 22 → 24. discoverable/indexable deliberately absent;
-  we are not a relay.
-- **Standing constraints:** no third home column; numbered 20-per-page
-  genre feed deliberately distinct from endless home feed; no
-  virtualisation, scroll restoration, mid-scroll deep links or live home
-  updates; TMDB primary/manual fallback. R85: routes refuse what controls
-  withhold. Anonymous rail text stays unlinked and header search absent;
-  hover rules apply to anchors only. Clean content/body/forms; original
-  grindhouse styling. Mockup remains reference-only except the explicitly
-  authorized edge-reuse experiment. Current background is plain dark.
-  Deployer-agnostic.
-- Lists remain in scope (R137–R140). No new Notification.Kind; mirrors
-  notify nobody (R144); saved remote-list changes have no signal. Stop and
-  raise any backend need during design polish.
-- **Gate mechanics:** rebuild all compose services after source edits;
-  pytest uses baked source; markers, not wrapper exit, determine success.
-  Never run concurrent pytest sessions against test_reeltalk.
+- **Design polish is complete — owner accepted (2026-10-13).** R153 completes
+  the standard-button audit, including both list/review Reply composers, list
+  forms/save/reorder/add/delete, signup, review modal submits, profile actions,
+  recovery/verification, notifications, moderation and button-style links.
+  Shared cinema rules follow legacy component rules so the treatment applies
+  consistently. Disabled controls have no glow. All services rebuilt/deployed.
+- **Accepted design:** plain dark background at every width; the whole document
+  scrolls together, with no sticky/contained rail scroller. Existing two-column
+  home, footer-in-rail and R146 feed/rail artwork remain. Cinema buttons use
+  Archivo 14px/600, 38px desktop / 44px narrow or coarse pointer, 16px icons,
+  4px corners and 1px rims. Secondary/destructive controls have cream outlines;
+  primary actions use deep red gradients and restrained 3px/5px glow.
+  Applause artwork, generated suggestion rows, header text Log out and Django
+  admin retain their purpose-specific designs. Find field/button gap is 12px.
+- **R153 full gate PASSED, explicitly authorized (2026-10-13):** 2514 passed,
+  5 skipped in 2096.35s (34m56s); RUFF_CHECK_EXIT=0, RUFF_FORMAT_EXIT=0,
+  MIGRATIONS_EXIT=0, PYTEST_EXIT=0. Log `/tmp/inc6-gate.log`. Baseline remains
+  2519 collected. The five skips are intentional clean-room file exceptions.
+  Seven existing markup assertions across four test files were updated for
+  additional styling classes and outlined destructive controls; focused run
+  7 passed. The initial run found one obsolete exact-class assertion and was
+  interrupted (1136 passed); log `/tmp/r153-gate-interrupted.log`. Fresh full
+  gate ran after formatting, rebuilding all images and refreshing services.
+- **Other R153 checks:** 53 template buttons audited; all 38 templates compile;
+  Chromium at 1440/390 verifies nine component contexts, hover, keyboard focus,
+  disabled states and no horizontal overflow. Signed-in controls were style
+  fixtures, not authenticated action submissions. Browser script:
+  `/tmp/reeltalk-polish/verify-all-buttons.mjs`. Live review:
+  https://reeltalk.minnix.dev/.
+- **R152 stays accepted:** search click-through is silent. It materializes a
+  shared Film catalog row, not anything in the member's library. No success
+  toast is appropriate there; no Shelf/ShelfFilm write happens on that path.
+- **Next session: prepare and publish the first release.** Owner wants both
+  (1) clone the repo, configure `.env`, run Compose with `--build`, and
+  (2) configure `.env`, pull a prebuilt `minnixtx/reeltalk` Docker Hub image
+  instead of building. Repository created by owner:
+  https://hub.docker.com/repository/docker/minnixtx/reeltalk/general.
+  Handoff: `.qwen/tmp/m6-design-polish-handoff.md`. Ask clarifying questions
+  before publication: release version/tags, CPU architectures, publication
+  workflow/access, and how prebuilt users obtain Compose/config files. Prepare
+  general installation docs and verify fresh installs of both paths; web,
+  worker and backup must use the same release image. No release/image has
+  been published. This session authorizes the design completion commit/push;
+  settle release publication details with the owner next session.
+- **Workflow:** no AI co-author trailers. Full gate only on explicit request;
+  owner authorized this gate, record/commit on success and push. Consolidate
+  PROGRESS.md and rewrite NOW as the final tracked edit in the same commit.
+- **Standing product constraints:** no third home column; genre feeds remain
+  numbered 20/page, distinct from endless home. No virtualisation, scroll
+  restoration, mid-scroll deep links or live home updates. TMDB primary/manual
+  fallback; R85 routes refuse what controls withhold. Anonymous rail unlinked;
+  hover rules apply to anchors only. No new Notification.Kind; mirrors notify
+  nobody and saved remote-list changes have no signal. Federation fix-forward,
+  historical direct posts stay direct, discoverable/indexable absent; not a
+  relay. Keep deployment independent of the owner's proxy.
+- **Gate mechanics:** rebuild all Compose services after source changes;
+  pytest uses baked source, ruff can mount host. Read all four gate markers,
+  not the wrapper exit. Never run concurrent pytest against test_reeltalk.
 
 ## 1. Current state
 
@@ -8316,3 +8305,5 @@ not an optimisation.
 - **R151 — Compact cinema button treatment (2026-10-13).** Follow MOCKUP.png's cream outline and deep red rimmed primary treatment with Archivo labels. 38px desktop / 44px narrow or touch, 14px semibold labels, 16px icons, restrained glow. Applied to film actions and explicitly requested lists-index, Find, Import, Export and Log In buttons; other controls remain open. Find field/button gap is 12px.
 
 - **R152 — The search click-through announces nothing (2026-10-13, owner ruling after asking "what library is it referencing?").** `search_clickthrough` no longer emits `Added "<film>" to your library.` on a first-time add, and the `existed` lookup that existed only to drive it is gone. Four things were wrong with the message, and the fourth is the one the owner actually hit. **(1) "Your" was false.** What the toast described is the single shared `Film` catalog row that `create_or_match_film` (D7) materialises so the film page can exist at all. That row is instance-wide, not member-owned: picking a TMDB hit adds it for every member, permanently. There is no per-user library on this path — no `Shelf` and no `ShelfFilm` row is written. **(2) "Added" claimed a personal act.** The write is dedup plumbing, not shelving. The message told the member they had done something when the software had merely caught up with the page it was about to show them. **(3) It was shown inconsistently.** Guarded by `if not existed`, so the identical click reported nothing at all on a film another member had added first — same action, different feedback, and the member has no way to know why. **(4) It contradicted the control 200px below it.** The banner said "added" while the film page still read **+ Add to Watchlist**, which is the action the member actually meant. Opening the page is the feedback; the watchlist control carries the intent. **How to apply:** the removal is deliberate, and the docstring on `search_clickthrough` says so — do not restore a success message there as a "missing feedback" fix. If a future increment wants to announce something on this path, it must first name a thing the member actually owns, and that is a new R. The general rule this instantiates: **a success message has to describe a state change the actor caused in something of theirs.** Announcing internal materialisation as user-facing achievement reads as a lie even when every word is technically true. Note this is the mirror image of R144's "drop and log" policy — there, an invisible failure was the bug, so the log line became the record; here an invisible non-event was announced, so the announcement goes.
+
+- **R153 — All standard buttons share the compact cinema treatment (2026-10-13).** Owner identified the missed list/review Reply submit and requested an audit of all buttons. Applied the existing R151 recipe across first-party action controls and button-style links, preserving primary/secondary roles and specialized applause, suggestions, header text and admin controls. Moved the shared CSS after legacy component rules to prevent per-component typography and chrome from overriding it; disabled controls lose their glow. Rebuilt all services and deployed. Audit: 53 template buttons covered; 38 templates compile; isolated component fixtures pass Chromium checks at 1440px and 390px (Archivo 14px/600, 38/44px height, 1px border, 4px corners, hover, focus, disabled and no overflow). Fixtures cover authenticated control styling, not authenticated submissions. No backend changes. Owner subsequently accepted design polish as complete and authorized the full gate, record/commit on success and push. Seven existing markup assertions across four test files were updated for additional styling classes and outlined destructive controls; focused run 7 passed. Fresh full gate PASSED: 2514 passed, 5 skipped in 2096.35s (34m56s), all four markers zero in `/tmp/inc6-gate.log`; 2519 collected unchanged. Initial interrupted run found one obsolete exact-class assertion (1136 passed); preserved at `/tmp/r153-gate-interrupted.log`. Next session prepares the first release with both source-build Compose and prebuilt `minnixtx/reeltalk` Docker Hub installation paths; clarify release version/tags, architectures, publication workflow/access and downloadable Compose/config files before publishing.

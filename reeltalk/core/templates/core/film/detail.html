@@ -39,11 +39,11 @@
     {% else %}
       <button type="button" class="film-watched" data-open-modal="mark-watched-modal">Edit review</button>
     {% endif %}
-    {% if not film.tmdb_id %}<a class="btn" href="{% url 'film-edit' film.id %}">Edit</a>{% endif %}
+    {% if not film.tmdb_id %}<a class="btn cinema-button cinema-button--primary" href="{% url 'film-edit' film.id %}">Edit</a>{% endif %}
     {% if is_film_blocked %}
-      <form method="post" action="{% url 'film-unblock' film.id %}" class="inline">{% csrf_token %}<button type="submit">Blocked</button></form>
+      <form method="post" action="{% url 'film-unblock' film.id %}" class="inline">{% csrf_token %}<button type="submit" class="btn cinema-button">Blocked</button></form>
     {% else %}
-      <form method="post" action="{% url 'film-block' film.id %}" class="inline">{% csrf_token %}<button type="submit">Block</button></form>
+      <form method="post" action="{% url 'film-block' film.id %}" class="inline">{% csrf_token %}<button type="submit" class="btn cinema-button">Block</button></form>
     {% endif %}
   </div>
 {% endif %}
@@ -73,7 +73,7 @@
             {% if user.is_authenticated and review.user_id == user.id %}
               <form method="post" action="{% url 'status-delete' review.id %}" class="inline review-delete">
                 {% csrf_token %}
-                <button type="submit">Delete</button>
+                <button type="submit" class="btn cinema-button">Delete</button>
               </form>
             {% endif %}
           </div>
@@ -101,7 +101,7 @@
       </div>
       <label for="id_review_content">Review <span class="muted">(optional)</span></label>
       <textarea name="content" id="id_review_content" rows="4" placeholder="What did you think?">{% if user_review %}{{ user_review.raw_content }}{% endif %}</textarea>
-      <button type="submit" disabled>{% if user_review %}Save changes{% else %}Mark as watched{% endif %}</button>
+      <button type="submit" disabled class="btn cinema-button cinema-button--primary">{% if user_review %}Save changes{% else %}Mark as watched{% endif %}</button>
     </form>
   </div>
 </div>

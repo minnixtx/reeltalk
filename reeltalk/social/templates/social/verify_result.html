@@ -6,7 +6,7 @@
 {% if ok %}
 <h1>Email verified</h1>
 <p>Your address is confirmed. You can sign in now.</p>
-<p><a class="btn" href="{% url 'login' %}">Log in</a></p>
+<p><a class="btn cinema-button cinema-button--primary" href="{% url 'login' %}">Log in</a></p>
 {% else %}
 <h1>That link did not work</h1>
 <p>{{ reason }}</p>
@@ -29,7 +29,7 @@ page explains that a scanner can do it and offers the way out.
 <p>Use the most recent link we sent you rather than this one.</p>
 {% endif %}
 
-<p><a class="btn" href="{% url 'verify-resend' %}">Send me a new link</a></p>
+<p><a class="btn cinema-button cinema-button--primary" href="{% url 'verify-resend' %}">Send me a new link</a></p>
 <p><a href="{% url 'login' %}">Back to log in</a></p>
 {% endif %}
 {% endblock %}

@@ -20,7 +20,7 @@
   {# increment-4 badge, which must be an <a> because it only navigates. #}
   <form method="post" action="{% url 'notifications-mark-read' %}" class="inline">
     {% csrf_token %}
-    <button type="submit" class="btn">Mark all read</button>
+    <button type="submit" class="btn cinema-button cinema-button--primary">Mark all read</button>
   </form>
   {% endif %}
 

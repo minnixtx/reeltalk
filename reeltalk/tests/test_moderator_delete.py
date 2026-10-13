@@ -31,6 +31,7 @@ carries a ``sessionid`` check, and the login POST takes ``username``.
 """
 
 import json
+import re
 
 import pytest
 import requests
@@ -790,15 +791,16 @@ def test_the_delete_button_renders_for_a_moderator(bob, review, mod):
     assert "Delete post" in body
 
 
-def test_the_destructive_action_takes_the_lit_control_and_dismiss_the_plain_one(
-    bob, review, mod
-):
-    # §2D's .btn trap: two severities must not render identically.
+def test_delete_and_dismiss_use_secondary_controls(bob, review, mod):
+    # Destructive actions now use the shared outlined treatment (R153).
     report_a_post(bob, review)
     body = logged_in(mod).get(reverse("moderation")).content.decode()
-    assert '<button type="submit">Dismiss</button>' in body
-    assert '<button type="submit" class="btn">Dismiss</button>' not in body
-    assert 'class="btn" formaction=' in body
+    for label in ("Dismiss", "Delete post"):
+        control = re.search(rf'<button[^>]*class="([^"]*)"[^>]*>{label}</button>', body)
+        assert control is not None
+        classes = set(control.group(1).split())
+        assert {"btn", "cinema-button"} <= classes
+        assert "cinema-button--primary" not in classes
 
 
 def test_no_delete_button_for_a_post_the_moderator_may_not_touch(
@@ -816,7 +818,7 @@ def test_no_delete_button_for_a_post_the_moderator_may_not_touch(
     # The card is still there and still dismissible; only the delete is gone.
     assert "@root" in body
     assert "delete-status" not in body
-    assert '<button type="submit">Dismiss</button>' in body
+    assert re.search(r"<button\b[^>]*>Dismiss</button>", body)
 
 
 def test_no_delete_button_for_a_peer_moderators_post(bob, mod2, dune, mod):
@@ -834,7 +836,7 @@ def test_no_delete_button_for_a_peer_moderators_post(bob, mod2, dune, mod):
     body = logged_in(mod).get(reverse("moderation")).content.decode()
     assert "@mod2" in body
     assert "delete-status" not in body
-    assert '<button type="submit">Dismiss</button>' in body
+    assert re.search(r"<button\b[^>]*>Dismiss</button>", body)
 
 
 def test_no_delete_button_for_an_account_holding_the_admin_doors_post(
@@ -853,7 +855,7 @@ def test_no_delete_button_for_an_account_holding_the_admin_doors_post(
     body = logged_in(mod).get(reverse("moderation")).content.decode()
     assert "@doorkeeper" in body
     assert "delete-status" not in body
-    assert '<button type="submit">Dismiss</button>' in body
+    assert re.search(r"<button\b[^>]*>Dismiss</button>", body)
 
 
 def test_no_delete_button_when_the_post_is_already_gone(bob, review, mod):

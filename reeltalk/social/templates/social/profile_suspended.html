@@ -41,7 +41,7 @@
     {% endcomment %}
     <form method="post" action="{% url 'user-unsuspend' profile_user.localname %}">
       {% csrf_token %}
-      <button type="submit">Unsuspend this account</button>
+      <button type="submit" class="btn cinema-button">Unsuspend this account</button>
     </form>
     <p class="muted">
       Visible to moderators and the site admin only. Unsuspending restores

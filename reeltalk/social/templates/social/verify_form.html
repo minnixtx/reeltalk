@@ -17,7 +17,7 @@
 <form method="post" action="{% url 'verify-resend' %}">
   {% csrf_token %}
   {{ form.as_p }}
-  <button type="submit">Send me a verification link</button>
+  <button type="submit" class="btn cinema-button cinema-button--primary">Send me a verification link</button>
 </form>
 
 <p><a href="{% url 'login' %}">Back to log in</a></p>

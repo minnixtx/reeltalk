@@ -26,7 +26,7 @@
     <form class="list-text-form" method="post" action="{% url 'list-edit' film_list.id %}">
       {% csrf_token %}
       {{ form.as_p }}
-      <button type="submit" class="btn">Save</button>
+      <button type="submit" class="btn cinema-button cinema-button--primary">Save</button>
     </form>
   </section>
 
@@ -50,18 +50,18 @@
             {% csrf_token %}
             <input type="hidden" name="item_id" value="{{ item.id }}">
             <input type="hidden" name="direction" value="up">
-            <button type="submit" class="rank-btn"{% if forloop.first %} disabled{% endif %} aria-label="Move {{ item.film.title }} up">↑</button>
+            <button type="submit" class="rank-btn btn cinema-button"{% if forloop.first %} disabled{% endif %} aria-label="Move {{ item.film.title }} up">↑</button>
           </form>
           <form method="post" action="{% url 'list-move' film_list.id %}" class="inline rank-control-form">
             {% csrf_token %}
             <input type="hidden" name="item_id" value="{{ item.id }}">
             <input type="hidden" name="direction" value="down">
-            <button type="submit" class="rank-btn"{% if forloop.last %} disabled{% endif %} aria-label="Move {{ item.film.title }} down">↓</button>
+            <button type="submit" class="rank-btn btn cinema-button"{% if forloop.last %} disabled{% endif %} aria-label="Move {{ item.film.title }} down">↓</button>
           </form>
           <form method="post" action="{% url 'list-remove-film' film_list.id %}" class="inline rank-control-form">
             {% csrf_token %}
             <input type="hidden" name="film_id" value="{{ item.film.id }}">
-            <button type="submit" class="rank-btn rank-btn-remove" aria-label="Remove {{ item.film.title }} from this list">Remove</button>
+            <button type="submit" class="rank-btn rank-btn-remove btn cinema-button" aria-label="Remove {{ item.film.title }} from this list">Remove</button>
           </form>
         </span>
       </li>
@@ -84,7 +84,7 @@
         <input type="search" name="q" value="{{ search.query }}" placeholder="Search for a film to add…" autocomplete="off" aria-label="Search for a film to add" aria-expanded="false" aria-autocomplete="list">
         <ul class="suggest-list" hidden></ul>
       </div>
-      <button type="submit">Search</button>
+      <button type="submit" class="btn cinema-button cinema-button--primary">Search</button>
     </form>
     {# The picker's target. Both id fields exist empty and the script fills #}
     {# exactly one, which is what the add route expects: it refuses a post #}
@@ -133,7 +133,7 @@
                 {% endif %}
                 <input type="hidden" name="q" value="{{ search.query }}">
                 {% if search.page > 1 %}<input type="hidden" name="page" value="{{ search.page }}">{% endif %}
-                <button type="submit" class="add-btn">Add to list</button>
+                <button type="submit" class="add-btn btn cinema-button">Add to list</button>
               </form>
             {% endif %}
           </li>
@@ -156,7 +156,7 @@
   <section class="list-edit-section list-delete-section">
     <form method="post" action="{% url 'list-delete' film_list.id %}" class="inline">
       {% csrf_token %}
-      <button type="submit" class="btn btn-danger">Delete this list</button>
+      <button type="submit" class="btn btn-danger cinema-button">Delete this list</button>
     </form>
   </section>
 </article>

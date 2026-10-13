@@ -16,7 +16,7 @@
 <form method="post">
   {% csrf_token %}
   {{ form.as_p }}
-  <button type="submit">Create account</button>
+  <button type="submit" class="btn cinema-button cinema-button--primary">Create account</button>
 </form>
 {% endif %}
 {% endblock %}

@@ -309,7 +309,9 @@ def test_saving_does_not_edit_the_lists_post_face(alice, bob, dune):
 def test_a_non_owner_is_offered_the_save_control(alice, bob, dune):
     theirs = create_list(bob, title="Bob Picks", films=[dune])
     body = _login("alice").get(f"/list/{theirs.pk}/").content.decode()
-    assert 'class="btn list-save-btn"' in body
+    control = re.search(r'<button[^>]*class="([^"]*\blist-save-btn\b[^"]*)"', body)
+    assert control is not None
+    assert {"btn", "list-save-btn"} <= set(control.group(1).split())
     assert f'data-save-url="/list/{theirs.pk}/save/"' in body
     assert f'data-unsave-url="/list/{theirs.pk}/unsave/"' in body
     assert ">Save<" in body

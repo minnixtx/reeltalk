@@ -25,6 +25,7 @@ Ordered by how each failure would bite:
 """
 
 import json
+import re
 
 import pytest
 import responses
@@ -400,11 +401,17 @@ def test_the_disclosure_is_collapsed_by_default(alice, bob, review, mod):
     assert "open" not in page.split("suspend-disclosure")[1][:40]
 
 
-def test_the_suspend_button_takes_the_lit_control(alice, bob, review, mod):
+def test_the_suspend_button_takes_the_secondary_control(alice, bob, review, mod):
     report_a_post(bob, review)
     page = body(logged_in(mod).get(reverse("moderation")))
     disclosure = page.split("suspend-disclosure")[1]
-    assert 'class="btn"' in disclosure
+    control = re.search(
+        r'<button[^>]*class="([^"]*)"[^>]*>Suspend account</button>', disclosure
+    )
+    assert control is not None
+    classes = set(control.group(1).split())
+    assert {"btn", "cinema-button"} <= classes
+    assert "cinema-button--primary" not in classes
 
 
 def test_no_disclosure_for_a_target_the_moderator_cannot_reach(
