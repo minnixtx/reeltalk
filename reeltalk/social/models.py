@@ -747,8 +747,16 @@ class SiteSettings(models.Model):
 
     name = models.CharField(max_length=100, default="ReelTalk")
     description = models.TextField(blank=True, default="")
+    # New instances start invite-only. A freshly deployed instance is usually
+    # not ready for the public to walk in: the admin has to finish the proxy,
+    # check the mail config and decide who the community is before strangers
+    # can claim accounts on it. Closing by default makes the safe state the
+    # one you get by doing nothing, and opening it is a deliberate act in
+    # the admin rather than a footgun discovered after the fact. Existing
+    # rows are untouched by the default, so an instance that already chose
+    # open keeps it.
     signup_policy = models.CharField(
-        max_length=20, choices=SIGNUP_POLICIES, default=OPEN
+        max_length=20, choices=SIGNUP_POLICIES, default=INVITE
     )
     # Who may hand out an invite link (R82). Orthogonal to signup_policy:
     # this decides who can mint a link, that one decides whether a link is

@@ -14,6 +14,7 @@ from django.test import Client, RequestFactory
 from reeltalk.core.utils import render_markdown
 from reeltalk.social.context_processors import signup_open
 from reeltalk.social.models import LinkDomain, SiteSettings
+from reeltalk.tests.signup import open_signup
 
 User = get_user_model()
 
@@ -37,7 +38,10 @@ def test_site_settings_defaults(db):
     site = SiteSettings.get_instance()
     assert site.name == "ReelTalk"
     assert site.description == ""
-    assert site.signup_policy == SiteSettings.OPEN
+    # A brand-new instance is invite-only. Deploying should not put an open
+    # registration form on the public internet until the admin has looked at
+    # the instance and decided otherwise.
+    assert site.signup_policy == SiteSettings.INVITE
 
 
 @pytest.mark.django_db
@@ -136,7 +140,7 @@ def signup_post(client, localname="newbie"):
 
 @pytest.mark.django_db
 def test_signup_open_policy_creates_an_account(client, admin):
-    assert SiteSettings.get_instance().signup_policy == SiteSettings.OPEN
+    open_signup()
     resp = signup_post(client)
     assert resp.status_code == 302
     assert User.objects.filter(localname="newbie").exists()
@@ -161,6 +165,7 @@ def test_signup_invite_policy_closes_the_form(client, admin):
 def test_signup_stays_open_when_policy_is_open_after_editing_other_fields(
     client, admin
 ):
+    open_signup()
     site = SiteSettings.get_instance()
     site.name = "Renamed"
     site.save()
@@ -183,6 +188,7 @@ CTA_SURFACES = ["/", "/welcome/", "/login/", "/about/"]
 @pytest.mark.parametrize("path", CTA_SURFACES)
 @pytest.mark.django_db
 def test_open_policy_shows_the_signup_cta(client, admin, path):
+    open_signup()
     body = client.get(path).content.decode()
     assert 'href="/signup/"' in body, f"missing signup CTA on {path}"
 
@@ -210,7 +216,11 @@ def test_signup_open_processor_is_registered():
 def test_signup_open_processor_exposes_only_the_boolean(db):
     ctx = signup_open(RequestFactory().get("/"))
     assert set(ctx) == {"signup_open"}
-    assert ctx["signup_open"] is True
+    # Ships invite-only, so the flag starts closed rather than open.
+    assert ctx["signup_open"] is False
+
+    open_signup()
+    assert signup_open(RequestFactory().get("/"))["signup_open"] is True
 
     site = SiteSettings.get_instance()
     site.signup_policy = SiteSettings.INVITE

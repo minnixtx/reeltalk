@@ -71,4 +71,5 @@ echo "  Then: curl -4 http://localhost:3030   (IPv6 docker-proxy quirk on this h
 echo
 echo "The site is plain HTTP; terminate TLS with your own reverse proxy."
 echo "A brand-new instance redirects to /setup/ to create the first admin."
-echo "See INSTALL.md for both paths, the optional settings, and upgrades."
+echo "See the Deployment section of README.md for both paths, the optional"
+echo "settings, SMTP, and upgrades."

@@ -6,6 +6,7 @@ from django.urls import reverse
 
 from reeltalk.social.models import EmailVerificationToken
 from reeltalk.tests.members import site_admin
+from reeltalk.tests.signup import open_signup
 
 User = get_user_model()
 
@@ -90,6 +91,7 @@ def test_signup_blocked_before_setup(client):
 
 @pytest.mark.django_db
 def test_signup_creates_local_user_but_does_not_log_it_in(client, admin_user):
+    open_signup()
     # R119: signup stops logging you in. The account exists and is fully
     # created; what it does not have is proof it can receive mail, which is
     # now the price of a session.
@@ -108,6 +110,7 @@ def test_signup_creates_local_user_but_does_not_log_it_in(client, admin_user):
 
 @pytest.mark.django_db
 def test_signup_requires_an_email_address(client, admin_user):
+    open_signup()
     # R118, and the reason it is not optional any more: an account with no
     # address can never be verified, so an optional field here would be
     # manufacturing members who can never sign in.
@@ -119,6 +122,7 @@ def test_signup_requires_an_email_address(client, admin_user):
 
 @pytest.mark.django_db
 def test_signup_rejects_an_address_another_account_already_has(client, admin_user):
+    open_signup()
     # Told at the form rather than as a database error. The partial unique
     # index is still the real guard; this is the human-facing half.
     User.objects.create_user(
@@ -134,6 +138,7 @@ def test_signup_rejects_an_address_another_account_already_has(client, admin_use
 
 @pytest.mark.django_db
 def test_signup_rejects_password_mismatch(client, admin_user):
+    open_signup()
     data = {**VALID_SIGNUP, "password2": "different-password-1"}
     response = client.post(reverse("signup"), data)
     assert response.status_code == 200
@@ -143,6 +148,7 @@ def test_signup_rejects_password_mismatch(client, admin_user):
 
 @pytest.mark.django_db
 def test_signup_rejects_weak_password(client, admin_user):
+    open_signup()
     data = {**VALID_SIGNUP, "password1": "abc", "password2": "abc"}
     response = client.post(reverse("signup"), data)
     assert response.status_code == 200
@@ -151,6 +157,7 @@ def test_signup_rejects_weak_password(client, admin_user):
 
 @pytest.mark.django_db
 def test_signup_rejects_taken_localname_case_insensitively(client, admin_user):
+    open_signup()
     data = {**VALID_SIGNUP, "localname": "Admin"}
     response = client.post(reverse("signup"), data)
     assert response.status_code == 200
@@ -160,6 +167,7 @@ def test_signup_rejects_taken_localname_case_insensitively(client, admin_user):
 @pytest.mark.parametrize("localname", ["bad name!", "-leading", ".dotfirst"])
 @pytest.mark.django_db
 def test_signup_rejects_bad_localname(client, admin_user, localname):
+    open_signup()
     data = {**VALID_SIGNUP, "localname": localname}
     response = client.post(reverse("signup"), data)
     assert response.status_code == 200

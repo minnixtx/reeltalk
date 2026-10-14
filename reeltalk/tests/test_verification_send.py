@@ -54,6 +54,7 @@ from reeltalk.social.verify import (
     verification_url,
 )
 from reeltalk.tests.members import site_admin as create_site_admin
+from reeltalk.tests.signup import open_signup
 
 VERIFY_LOGGER = "reeltalk.social.verify"
 
@@ -118,6 +119,7 @@ def _queued_funcs():
 @pytest.mark.django_db
 def test_signup_queues_a_verification_email_for_the_new_account(client):
     _admin()
+    open_signup()
     with TestCase.captureOnCommitCallbacks(execute=True):
         resp = client.post("/signup/", SIGNUP)
     assert resp.status_code == 302
@@ -164,6 +166,7 @@ def test_nothing_leaves_the_box_inside_the_signup_request(client):
     # here is the whole D-e property: the request that created the account
     # is not the request that talks to a mail server.
     _admin()
+    open_signup()
     client.post("/signup/", SIGNUP)
     assert mail.outbox == []
     assert OrmQ.objects.count() == 0
@@ -191,6 +194,10 @@ def test_an_addressless_signup_is_refused_rather_than_built_unverifiable(client)
     # signup would be manufacturing a brick one row at a time and charging the
     # member for it later.
     _admin()
+    # Open the door first: with signup closed the POST is refused by policy,
+    # which also leaves no user and no token, and the test would pass without
+    # ever reaching the form's required-email check.
+    open_signup()
     resp = client.post("/signup/", dict(SIGNUP, email=""))
     assert resp.status_code == 200  # re-rendered with the field error
     assert not User.objects.filter(localname="joiner").exists()
@@ -221,6 +228,7 @@ def test_the_console_backend_guard_fires_in_the_signup_request(client, caplog):
     # The guard is in the request, not only in the worker, and this asserts
     # *where* it fired: no task has run, yet the warning is already logged.
     _admin()
+    open_signup()
     with caplog.at_level(logging.WARNING, logger=VERIFY_LOGGER):
         with override_settings(MAILERS=CONSOLE_MAILERS):
             client.post("/signup/", SIGNUP)
@@ -233,6 +241,7 @@ def test_the_console_backend_guard_fires_in_the_signup_request(client, caplog):
 @pytest.mark.django_db
 def test_the_guard_stays_quiet_when_a_real_smtp_backend_is_configured(client, caplog):
     _admin()
+    open_signup()
     with caplog.at_level(logging.WARNING, logger=VERIFY_LOGGER):
         with override_settings(MAILERS=SMTP_MAILERS):
             client.post("/signup/", SIGNUP)
@@ -280,6 +289,7 @@ def test_the_link_is_minted_from_the_canonical_origin_not_the_request(client):
     # ``testserver``, the canonical origin is set to something else, and
     # the mail that comes out must carry the canonical one.
     _admin()
+    open_signup()
     with TestCase.captureOnCommitCallbacks(execute=True):
         client.post("/signup/", SIGNUP)
     joiner = User.objects.get(localname="joiner")

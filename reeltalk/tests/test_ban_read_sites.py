@@ -38,6 +38,7 @@ from reeltalk.moderation.models import Report
 from reeltalk.social.models import AdminImmunityError
 from reeltalk.social.views import has_admin
 from reeltalk.tests.members import member, site_admin
+from reeltalk.tests.signup import open_signup
 
 User = get_user_model()
 PASSWORD = "s3cretpass"
@@ -310,6 +311,11 @@ def test_status_mention_rows_survive_the_ban_without_breaking_anything(
 
 
 def test_a_banned_localname_cannot_be_re_registered_exactly(client, siteadmin, banned):
+    # Signup must be open for this to mean anything: with the door shut the
+    # POST is refused by the policy and no row appears either, which reads
+    # identical to the reservation holding. Open it so the only thing
+    # standing between a registrant and this name is the reserved row.
+    open_signup()
     resp = client.post(
         reverse("signup"),
         {
@@ -335,6 +341,7 @@ def test_a_banned_localname_cannot_be_re_registered_as_a_case_variant(
     as the same actor. This is the test that makes the case-insensitivity a
     requirement rather than an intention.
     """
+    open_signup()
     resp = client.post(
         reverse("signup"),
         {
@@ -359,6 +366,7 @@ def test_the_reservation_holds_because_the_row_is_kept(client, siteadmin, banned
     case-insensitive check sees it. Delete the row and the name is free
     again — which is why R102 keeps it.
     """
+    open_signup()
     assert User.objects.filter(localname="alice").exists()
     resp = client.post(
         reverse("signup"),
@@ -375,6 +383,7 @@ def test_the_reservation_holds_because_the_row_is_kept(client, siteadmin, banned
 
 
 def test_an_unrelated_name_still_signs_up_fine(client, siteadmin, banned):
+    open_signup()
     resp = client.post(
         reverse("signup"),
         {

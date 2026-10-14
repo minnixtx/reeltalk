@@ -35,6 +35,7 @@ from reeltalk.core.models import (
 )
 from reeltalk.tests.feed import unpaged
 from reeltalk.tests.members import member, site_admin
+from reeltalk.tests.signup import open_signup
 
 User = get_user_model()
 
@@ -349,6 +350,10 @@ def test_home_feed_excludes_strangers(login, user, film, admin):
 
 @pytest.mark.django_db
 def test_home_anonymous_has_no_feed(client, admin):
+    # Opened explicitly: the shipped default is invite-only, which hides the
+    # CTA, so without this the "Sign up" assertion below would be testing
+    # nothing and the no-feed half would pass against a page with no door.
+    open_signup()
     resp = client.get("/")
     assert resp.status_code == 200
     body = resp.content.decode()

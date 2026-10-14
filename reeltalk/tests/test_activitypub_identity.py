@@ -16,7 +16,7 @@ from PIL import Image
 
 from reeltalk.activitypub import crypto
 from reeltalk.activitypub.identity import person_document
-from reeltalk.social.models import SiteSettings
+from reeltalk.tests.signup import open_signup
 
 User = get_user_model()
 
@@ -449,17 +449,19 @@ def test_nodeinfo_2_0_document(client):
     assert doc["software"]["name"] == "reeltalk"
     assert doc["software"]["version"] == __version__
     assert doc["protocols"] == ["activitypub"]
-    # The default signup policy is open.
-    assert doc["openRegistration"] is True
+    # A fresh instance is invite-only, so nodeinfo reports registration
+    # closed. A peer or directory reading this must not see an open door that
+    # the instance's own /signup/ page refuses to open.
+    assert doc["openRegistration"] is False
 
 
 @pytest.mark.django_db
 def test_nodeinfo_open_registration_follows_signup_policy(client):
-    site = SiteSettings.get_instance()
-    site.signup_policy = SiteSettings.INVITE
-    site.save()
+    # The other half: the reported flag tracks the setting rather than being
+    # hardcoded to the shipped default.
+    open_signup()
     response = client.get("/nodeinfo/2.0")
-    assert response.json()["openRegistration"] is False
+    assert response.json()["openRegistration"] is True
 
 
 # --- Key backfill (users created before the key fields) -------------------------

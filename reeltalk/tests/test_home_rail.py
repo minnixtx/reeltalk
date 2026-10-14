@@ -25,6 +25,7 @@ from reeltalk.core.models import (
 )
 from reeltalk.social.models import SiteSettings
 from reeltalk.tests.members import member, site_admin
+from reeltalk.tests.signup import open_signup
 
 User = get_user_model()
 
@@ -173,6 +174,7 @@ def test_genres_empty_without_reviews(alice):
 
 @pytest.mark.django_db
 def test_anonymous_home_shows_the_rail_and_a_cta(client, admin):
+    open_signup()
     site = SiteSettings.get_instance()
     site.name = "My Film Club"
     site.save()

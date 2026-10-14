@@ -25,8 +25,9 @@ from reeltalk.social.attempts import (
     LOGIN_IP_WINDOW_MINUTES,
     SIGNUP_IP_LIMIT,
 )
-from reeltalk.social.models import CredentialAttempt, SiteSettings
+from reeltalk.social.models import CredentialAttempt
 from reeltalk.tests.members import PASSWORD, member, site_admin, unverified_member
+from reeltalk.tests.signup import open_signup
 
 REVEAL = "Too many attempts from this address"
 
@@ -230,8 +231,11 @@ def test_a_correct_password_on_a_non_staff_account_neither_counts_nor_clears(cli
 
 @pytest.mark.django_db
 def test_signup_throttles_attempts_that_reach_the_checks(client):
-    site_admin(localname="root", password=PASSWORD)  # satisfies has_admin; OPEN
-    assert SiteSettings.get_instance().signup_policy == SiteSettings.OPEN
+    site_admin(localname="root", password=PASSWORD)  # satisfies has_admin
+    # The shipped default is invite-only, which returns before the throttle
+    # is ever reached. Open the door explicitly so this exercises the budget
+    # rather than the closed-page short circuit.
+    open_signup()
     ip = "203.0.113.41"
     for i in range(SIGNUP_IP_LIMIT):
         resp = _signup(client, ip, name=f"newbie{i}", email=f"newbie{i}@e.test")
@@ -247,6 +251,7 @@ def test_signup_throttles_attempts_that_reach_the_checks(client):
 def test_a_blocked_signup_does_not_leak_that_a_name_is_taken(client):
     site_admin(localname="root2", password=PASSWORD)
     member(localname="existing", password=PASSWORD)  # occupies the name
+    open_signup()
     ip = "203.0.113.42"
     for i in range(SIGNUP_IP_LIMIT):
         _signup(client, ip, name=f"free{i}", email=f"free{i}@e.test")
@@ -259,6 +264,10 @@ def test_a_blocked_signup_does_not_leak_that_a_name_is_taken(client):
 @pytest.mark.django_db
 def test_a_signup_that_reaches_no_uniqueness_check_is_not_counted(client):
     site_admin(localname="root3", password=PASSWORD)
+    # Open the door deliberately: with it shut this test would pass on the
+    # policy short circuit instead of on the property it names, and the
+    # "not counted" assertion would stop meaning anything.
+    open_signup()
     ip = "203.0.113.43"
     # Malformed name (fails the format regex before any lookup) and a
     # malformed email (fails field validation, so clean_email never runs):
@@ -281,6 +290,7 @@ def test_a_signup_that_reaches_no_uniqueness_check_is_not_counted(client):
 @pytest.mark.django_db
 def test_a_signup_that_reached_the_checks_but_failed_password_still_counts(client):
     site_admin(localname="root4", password=PASSWORD)
+    open_signup()
     ip = "203.0.113.44"
     resp = client.post(
         reverse("signup"),
@@ -302,6 +312,7 @@ def test_a_signup_that_reached_the_checks_but_failed_password_still_counts(clien
 @pytest.mark.django_db
 def test_a_successful_signup_does_not_clear_the_signup_counter(client):
     site_admin(localname="root6", password=PASSWORD)
+    open_signup()
     ip = "203.0.113.45"
     _signup(client, ip, name="one", email="one@e.test")
     assert _count(CredentialAttempt.SIGNUP, ip) == 1
@@ -337,6 +348,7 @@ def test_exhausting_signup_does_not_starve_login_or_admin(client):
     # An admin must exist or /signup/ redirects to the setup wizard and
     # never reaches the throttle at all.
     site_admin(localname="root7", password=PASSWORD)
+    open_signup()
     ip = "203.0.113.52"
     for i in range(SIGNUP_IP_LIMIT):
         _signup(client, ip, name=f"reg{i}", email=f"reg{i}@e.test")

@@ -11,6 +11,7 @@ from django.test import Client
 
 from reeltalk.social.models import SiteSettings
 from reeltalk.tests.members import member, site_admin
+from reeltalk.tests.signup import open_signup
 
 User = get_user_model()
 
@@ -28,6 +29,7 @@ def admin(db):
 
 @pytest.mark.django_db
 def test_landing_shows_instance_name_and_description(client, admin):
+    open_signup()
     site = SiteSettings.get_instance()
     site.name = "My Film Club"
     site.description = "A corner of the fed for frame-by-frame people."

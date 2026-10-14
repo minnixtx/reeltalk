@@ -9,63 +9,77 @@
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
 
-- **First release is prepared, not yet published (2026-10-13).** Version
-  **v0.1.0**, to be marked GitHub **Latest**. Both install paths ship from the
-  same clone and differ only in which Compose file you run — see
-  **`INSTALL.md`**, the new deployer-agnostic guide.
-- **Publication blocker: the Docker Hub secrets do not exist yet.**
-  `gh secret list --repo minnixtx/reeltalk` returns **empty**. The release
-  workflow needs `DOCKERHUB_USERNAME` and `DOCKERHUB_ACCESS_TOKEN` created by
-  the owner under Settings → Secrets and variables → Actions. Until then CI
-  cannot push. Nothing is on Docker Hub: `minnixtx/reeltalk` is public with
-  **0 tags, 0 pulls** — verified against the registry API, not assumed.
-- **Publishing is authorised only on the owner's explicit go-ahead.** The
-  design-completion push (`b79e7da`) is not a release authorisation. A tag
+- **First release is prepared and unblocked, not yet published (2026-10-14).**
+  Version **v0.1.0**, to be marked GitHub **Latest**. The secrets blocker
+  recorded yesterday is **closed**: the owner has set `DOCKERHUB_USERNAME`
+  and `DOCKERHUB_ACCESS_TOKEN`, confirmed present via `gh secret list`.
+  Nothing is on Docker Hub yet — `minnixtx/reeltalk` still has **0 tags,
+  0 pulls**.
+- **Publishing is authorised only on the owner's explicit go-ahead.** A tag
   and a public image are effectively permanent; do not create them unprompted.
-- **Tags the workflow mints for `v0.1.0`:** `0.1.0`, `0.1`, `0`, `latest`.
-  `latest` tracks stable only — a prerelease publishes its own exact tag and
-  deliberately does not move `latest`.
-- **Architectures: amd64 + arm64 on GitHub Actions.** Checked against
-  `uv.lock`: 44 pure-python packages and 11 platform-specific ones, and
-  every platform-specific package carries a cp313/abi3/py3 **aarch64**
-  wheel — nothing compiles from source under emulation. This box cannot build
-  arm64 itself (buildx default driver is `docker`, amd64 only; no QEMU
-  binfmt handler registered), a second reason CI is the right place.
-- **`docker-compose.prebuilt.yml` is pull-only, and that is proven.** With no
-  local image present, `up -d` went to the registry
-  (`Image minnixtx/reeltalk:v0.1.0 Pulling`) and never attempted a build.
-  The handoff's warning was right and is now measured: a Compose *override*
-  that only adds `image:` **cannot** remove a base `build:` key — the merged
-  config kept `build:`, which is why this is a standalone file. All three
-  app roles pin the same `REELTALK_VERSION` tag.
-- **Secret-leak fix in `.dockerignore` (was live, now closed).** It excluded
-  `.env` and `.env.dev`, but this tree also holds **`.env.b`** — the
-  second-instance federation env — and `COPY . /app/` would have baked it
-  into every published image. Now `.env` + `.env.*` with `!.env.example`,
-  plus `.coverage`. Rebuilt and verified: the image holds only
-  `.env.example`.
-- **Fresh install of the prebuilt path exercised end to end** on an isolated
-  stack (project `rt-fresh`, throwaway volumes, host port 3999):
-  migrations, collectstatic, worker and backup all ran from the pulled
-  image, the first-run `/setup/` wizard created the admin, and login works.
+  When it does go out, verify the multi-arch manifest actually landed
+  (`docker buildx imagetools inspect`) rather than trusting a green check.
+- **New instances now ship invite-only** (owner decision, 2026-10-14).
+  `SiteSettings.signup_policy` default flipped `open` → `invite`, with
+  migration `social/0020_alter_sitesettings_signup_policy` (an `AlterField`;
+  existing rows keep whatever they chose). The safe state is the one you get
+  by doing nothing, and opening signup becomes a deliberate act in the admin.
+  **Verified safe before flipping:** `setup()` gates only on `has_admin()`,
+  never on `signup_policy`, so a closed default cannot lock out the
+  first admin.
+- **The default change moved 11 test files, and the interesting ones were the
+  tests that would have gone quietly vacuous.** Tests that rode the old open
+  default now call `reeltalk/tests/signup.py::open_signup()` by name. Four
+  throttle tests failed outright; but `test_a_signup_that_reaches_no_uniqueness_check_is_not_counted`
+  and `test_an_addressless_signup_is_refused_rather_than_built_unverifiable`
+  were passing on the **closed door** rather than on the property their names
+  claim, and `test_a_banned_localname_cannot_be_re_registered_*` would have
+  proven the reservation while actually proving the lockout. All opened
+  explicitly. Two more surfaced late by asserting the visible text `"Sign up"`
+  instead of `href="/signup/"` (`test_home_rail`, `test_user_films`) — a
+  substring sweep on the href alone misses them.
+- **README.md is now the single source of truth for deployment.** New
+  `## Deployment` section covers both install paths, every `.env` parameter,
+  SMTP, the first-run admin, volumes, upgrades, backup/restore, image tags
+  and troubleshooting. `INSTALL.md` is a redirect stub, so there is one
+  document to update rather than two that can drift.
+- **Release-blocking tag bug caught before publishing, not after.** The
+  workflow's `type=semver,pattern={{version}}` publishes the **bare**
+  version (`0.1.0`), but `docker-compose.prebuilt.yml` defaulted to
+  `REELTALK_VERSION:-v0.1.0`. Every pull-path install would have died with
+  `failed to resolve reference ... not found` — the exact symptom my own
+  install doc lists as a troubleshooting item. Default corrected to `0.1.0`.
+- **Gate is green: 2519 passed, 5 skipped**, all four markers `0`
+  (`RUFF_CHECK`, `RUFF_FORMAT`, `MIGRATIONS`, `PYTEST`). Baseline was
+  2514 passed + 5 skipped; the delta is the new signup coverage. Log
+  `/tmp/inc6-gate.log`.
+- **Em dashes: release-facing text only** (owner instruction). README.md is
+  at 0 and the release notes follow the same rule. `DEPLOYING.md`,
+  `PLAN.md`, `PROGRESS.md` and `REWRITE.md` keep theirs as internal history,
+  and **no code, template or user-visible string was touched for this.**
+- **Secret-leak fix in `.dockerignore` (closed).** It excluded `.env` and
+  `.env.dev` but this tree also holds **`.env.b`**, and `COPY . /app/` would
+  have baked it into every published image. Now `.env` + `.env.*` with
+  `!.env.example`, plus `.coverage`. Rebuilt and verified: the image holds
+  only `.env.example`.
 - **Real SMTP delivery proven** against `mail.minnix.dev` on 587/STARTTLS,
-  receipt confirmed over IMAPS with a before/after baseline
-  (1025 → 1026). From `minnix@minnix.dev` equals `EMAIL_HOST_USER`, so the
-  server's anti-spoof rule is satisfied by the shipped defaults. This sent
-  one genuine message to the owner's inbox.
-- **Two gotchas confirmed on a real install, both now documented.** Reaching
-  the instance by raw IP returns **HTTP 400** unless `ALLOWED_HOSTS` names
-  it, and forms then need `CSRF_TRUSTED_ORIGINS`. The emailed verify link is
-  minted from `CANONICAL_ORIGIN` = `https://DOMAIN`, so it is
-  dead-on-arrival until TLS actually answers.
-- **Signup policy is a database setting, not an env var** — `SiteSettings`
-  (pk=1), `signup_policy` default `open`, `invite_scope` default `admins`.
-  `.env.example` says nothing about it; new instances start **open**.
+  receipt confirmed over IMAPS with a before/after baseline (1025 → 1026).
+  From `minnix@minnix.dev` equals `EMAIL_HOST_USER`, so the anti-spoof rule
+  is satisfied by the shipped defaults.
+- **Two install gotchas confirmed on a real install, both documented.** Raw
+  IP returns **HTTP 400** unless `ALLOWED_HOSTS` names it, and forms then
+  need `CSRF_TRUSTED_ORIGINS`. The emailed verify link is minted from
+  `CANONICAL_ORIGIN` = `https://DOMAIN`, so it is dead-on-arrival until TLS
+  actually answers.
 - **The published image ships the Python dev toolchain** (`pytest`, `ruff`,
   `mypy`, `coverage` — ~26MB of 165MB site-packages) because the gate runs
   pytest *inside the baked image*. Owner chose to ship as-is for v0.1.0
   rather than change the build path the gate rests on. A slim runtime stage
   is deferred, not forgotten.
+- **Architectures: amd64 + arm64 on GitHub Actions.** Every platform-specific
+  dependency in `uv.lock` carries an aarch64 wheel, so nothing compiles from
+  source under emulation. This box cannot build arm64 itself (buildx default
+  driver is `docker`, amd64 only, no QEMU binfmt handler).
 - **Standing product constraints unchanged:** no third home column; genre
   feeds stay 20/page; no virtualisation, scroll restoration, mid-scroll deep
   links or live home updates; TMDB primary with manual fallback; no new
@@ -74,8 +88,12 @@ disagrees with this block, this block is current and the other is history.**
 - **Gate mechanics unchanged:** rebuild all Compose services after source
   changes; pytest uses baked source, ruff can mount host; read all four gate
   markers, not the wrapper exit; never run concurrent pytest against
-  `test_reeltalk`. **No gate was run for this increment** — it changes
-  `.dockerignore`, docs, a Compose file and a CI workflow, and no Python.
+  `test_reeltalk`. **One trap hit this session:** killing a gate run at a
+  timeout orphans its `docker compose run` container, which holds
+  `test_reeltalk` and makes every fixture in the rerun die with
+  `DuplicateDatabase`. Clear the orphan and drop the DB before rerunning.
+  Also: `pgrep -f run-gate.sh` self-matches the checking command, so it
+  reports a false "still running".
 
 ## 1. Current state
 

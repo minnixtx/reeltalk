@@ -12,6 +12,7 @@ from django.test import Client
 from django.urls import reverse
 
 from reeltalk.tests.members import member, site_admin
+from reeltalk.tests.signup import open_signup
 
 User = get_user_model()
 
@@ -30,6 +31,7 @@ def admin(db):
 
 @pytest.mark.django_db
 def test_welcome_renders_anonymous_with_signup_cta(client, admin):
+    open_signup()
     resp = client.get(reverse("welcome"))
     assert resp.status_code == 200
     body = resp.content.decode()

@@ -30,7 +30,10 @@ x-logging:
     max-file: "2"
 
 x-image: &default-image
-  image: minnixtx/reeltalk:${REELTALK_VERSION:-v0.1.0}
+  # No `v` prefix: docker/metadata-action's semver patterns publish the bare
+  # version (`0.1.0`), so a default of `v0.1.0` would point at a tag that
+  # does not exist and every pull would fail to resolve.
+  image: minnixtx/reeltalk:${REELTALK_VERSION:-0.1.0}
   restart: unless-stopped
   env_file: ${ENV_FILE:-.env}
   logging: *default-logging
