@@ -32,7 +32,7 @@ disagrees with this block, this block is current and the other is history.**
   open door where a test needs it. Two surfaced late by asserting the
   visible text `"Sign up"` rather than `href="/signup/"`, which a
   substring sweep on the href alone misses.
-- **README.md is the single source of truth for deployment**, and its `## Deployment` section now runs **1-9**: Configure, the `.env` parameters, Start, Mail, first-run admin, signup policy, volumes, upgrading, troubleshooting. **The backup section is gone and Troubleshooting was renumbered 10 → 9.** The volumes section now states plainly that backups are the operator's, so nobody reads the missing feature as an accident. `INSTALL.md` is a redirect stub and no longer advertises a backups section.
+- **README.md is the single source of truth for deployment**, and its `## Deployment` section now runs **1-9**: Configure, the `.env` parameters, Start, Mail, first-run admin, signup policy, volumes, upgrading, troubleshooting. **The backup section is gone and Troubleshooting was renumbered 10 → 9.** The owner then trimmed the README hard (2026-10-14): the mail section keeps only the From-pair rule plus the two labelled configs (`Gmail setup:`, `Domain mail server:`) with no explanatory prose around them, the volumes note no longer editorialises about who owns backups, the "build all services" warning is out of Upgrading, and **the whole `## Status` block is deleted** — release status lives in this NOW block only, not in the README. `INSTALL.md` is a redirect stub.
 - **Em dashes: release-facing text only** (standing owner instruction).
   `README.md` is at **0**. `DEPLOYING.md`, `PLAN.md`, `PROGRESS.md` and
   `REWRITE.md` keep theirs as internal history, and **no code, template or

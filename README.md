@@ -123,30 +123,15 @@ docker logs.
 
 Set the five `EMAIL_*` keys in `.env`.
 
-One rule breaks more installs than everything else combined. Many mail servers
-refuse to send a message whose envelope sender is not the account you
-authenticated as. ReelTalk builds its From address from
-`EMAIL_SENDER_NAME@EMAIL_SENDER_DOMAIN`, so that pair has to add up to
-`EMAIL_HOST_USER`. Get the two to match and the rule never fires.
-
-It bites by default because `EMAIL_SENDER_NAME` and `EMAIL_SENDER_DOMAIN`
-fall back to `admin@<your instance host>`, and that is almost never a real
-mailbox on your mail server. A mismatch also does not fail at startup: it
-fails on every individual send inside the worker, so it reads as a broken
-feature rather than a bad setting. Check the pair before you create the first
-account:
+ReelTalk builds its From address from `EMAIL_SENDER_NAME@EMAIL_SENDER_DOMAIN`,
+so that pair has to add up to `EMAIL_HOST_USER`. Check the pair before you
+create the first account:
 
 ```bash
 grep -E 'EMAIL_HOST_USER|EMAIL_SENDER_NAME|EMAIL_SENDER_DOMAIN' .env
 ```
 
-Two worked examples.
-
-A mailbox on a provider you sign up for, Gmail for instance. Google will not
-accept your normal account password over SMTP, so turn on two-step
-verification first and then generate a 16-character app password at
-myaccount.google.com/apppasswords. Gmail enforces the sender rule too, so the
-From pair has to be your Gmail address and not your instance domain:
+Gmail setup:
 
 ```
 EMAIL_HOST=smtp.gmail.com
@@ -158,14 +143,7 @@ EMAIL_SENDER_NAME=you
 EMAIL_SENDER_DOMAIN=gmail.com
 ```
 
-Yahoo works the same way: `smtp.mail.yahoo.com`, port 587, and an app password
-from your Yahoo account security page. A free mailbox is a good fit for a
-private single-user instance, which is what most people want here. It is a poor
-fit for an open one, because a free mailbox caps how many messages you can send
-a day and every verification mail arrives from a personal address.
-
-A mail server on your own domain, which is what you want once the instance has
-a few people on it:
+Domain mail server:
 
 ```
 EMAIL_HOST=mail.example.com
@@ -176,10 +154,6 @@ EMAIL_HOST_PASSWORD=...
 EMAIL_SENDER_NAME=reeltalk
 EMAIL_SENDER_DOMAIN=example.com
 ```
-
-Notice that in both examples the From pair is just `EMAIL_HOST_USER` split at
-the `@`. That is the whole rule. If you can say the two halves out loud and
-they reassemble into the account you log in with, your mail will go out.
 
 If you have not configured mail at all, the console backend prints each
 message to the worker log instead of sending it. During setup that log is
@@ -226,10 +200,7 @@ Named volumes, created automatically:
 | `media_volume` | Uploaded images and posters fetched from TMDB. |
 
 Both Compose files declare the same three, so the volumes follow you across
-either install path. Backups are yours: ReelTalk ships no backup or restore
-feature, so `pgdata` is protected by whatever you do outside the app, the
-same way TLS termination is. If you back up the host but not that volume,
-you have no backups.
+either install path.
 
 ### 8. Upgrading
 
@@ -259,10 +230,6 @@ docker compose build
 docker compose up -d
 ```
 
-Build all services, not just `web`. The worker role runs from its own image
-tag built from the same Dockerfile, and a half rebuilt stack is how you end
-up with two code versions against one database.
-
 ### 9. Troubleshooting
 
 | Symptom | Cause |
@@ -275,15 +242,6 @@ up with two code versions against one database.
 | A verification link you pasted says it did not work | You used a truncated token. The full token is in the mail body. |
 | `failed to resolve reference ... not found` | The pinned `REELTALK_VERSION` tag does not exist on Docker Hub. Tags carry no `v` prefix. |
 | Everyone shares one throttle bucket | A CDN sits in front and its ranges are not in `TRUSTED_PROXIES`. `python manage.py check_client_ip` shows why. |
-
-## Status
-The first release is **v0.1.0**. The feature set is complete and the app runs a
-full test gate of 2500+ tests, but it is a young project with a single
-maintainer: expect rough edges, and read the release notes before upgrading.
-
-ReelTalk was originally built as a fork of BookWyrm under the Anti-Capitalist Software License v1.4. Because ACRL is not an OSI-approved free/open-source license, the project is being rewritten from scratch under the AGPLv3, using the original codebase purely as a functional reference. See REWRITE.md for the rationale and the rules that govern the rewrite.
-
-The frozen original lives at minnixtx/reeltalk-legacy (archived, reference-only - feature inventory, behavior, design decisions; no code is carried over).
 
 ## What Is ReelTalk?
 
