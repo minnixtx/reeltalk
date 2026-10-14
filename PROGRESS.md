@@ -9,64 +9,73 @@
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
 
-- **Design polish is complete — owner accepted (2026-10-13).** R153 completes
-  the standard-button audit, including both list/review Reply composers, list
-  forms/save/reorder/add/delete, signup, review modal submits, profile actions,
-  recovery/verification, notifications, moderation and button-style links.
-  Shared cinema rules follow legacy component rules so the treatment applies
-  consistently. Disabled controls have no glow. All services rebuilt/deployed.
-- **Accepted design:** plain dark background at every width; the whole document
-  scrolls together, with no sticky/contained rail scroller. Existing two-column
-  home, footer-in-rail and R146 feed/rail artwork remain. Cinema buttons use
-  Archivo 14px/600, 38px desktop / 44px narrow or coarse pointer, 16px icons,
-  4px corners and 1px rims. Secondary/destructive controls have cream outlines;
-  primary actions use deep red gradients and restrained 3px/5px glow.
-  Applause artwork, generated suggestion rows, header text Log out and Django
-  admin retain their purpose-specific designs. Find field/button gap is 12px.
-- **R153 full gate PASSED, explicitly authorized (2026-10-13):** 2514 passed,
-  5 skipped in 2096.35s (34m56s); RUFF_CHECK_EXIT=0, RUFF_FORMAT_EXIT=0,
-  MIGRATIONS_EXIT=0, PYTEST_EXIT=0. Log `/tmp/inc6-gate.log`. Baseline remains
-  2519 collected. The five skips are intentional clean-room file exceptions.
-  Seven existing markup assertions across four test files were updated for
-  additional styling classes and outlined destructive controls; focused run
-  7 passed. The initial run found one obsolete exact-class assertion and was
-  interrupted (1136 passed); log `/tmp/r153-gate-interrupted.log`. Fresh full
-  gate ran after formatting, rebuilding all images and refreshing services.
-- **Other R153 checks:** 53 template buttons audited; all 38 templates compile;
-  Chromium at 1440/390 verifies nine component contexts, hover, keyboard focus,
-  disabled states and no horizontal overflow. Signed-in controls were style
-  fixtures, not authenticated action submissions. Browser script:
-  `/tmp/reeltalk-polish/verify-all-buttons.mjs`. Live review:
-  https://reeltalk.minnix.dev/.
-- **R152 stays accepted:** search click-through is silent. It materializes a
-  shared Film catalog row, not anything in the member's library. No success
-  toast is appropriate there; no Shelf/ShelfFilm write happens on that path.
-- **Next session: prepare and publish the first release.** Owner wants both
-  (1) clone the repo, configure `.env`, run Compose with `--build`, and
-  (2) configure `.env`, pull a prebuilt `minnixtx/reeltalk` Docker Hub image
-  instead of building. Repository created by owner:
-  https://hub.docker.com/repository/docker/minnixtx/reeltalk/general.
-  Handoff: `.qwen/tmp/m6-design-polish-handoff.md`. Ask clarifying questions
-  before publication: release version/tags, CPU architectures, publication
-  workflow/access, and how prebuilt users obtain Compose/config files. Prepare
-  general installation docs and verify fresh installs of both paths; web,
-  worker and backup must use the same release image. No release/image has
-  been published. This session authorizes the design completion commit/push;
-  settle release publication details with the owner next session.
-- **Workflow:** no AI co-author trailers. Full gate only on explicit request;
-  owner authorized this gate, record/commit on success and push. Consolidate
-  PROGRESS.md and rewrite NOW as the final tracked edit in the same commit.
-- **Standing product constraints:** no third home column; genre feeds remain
-  numbered 20/page, distinct from endless home. No virtualisation, scroll
-  restoration, mid-scroll deep links or live home updates. TMDB primary/manual
-  fallback; R85 routes refuse what controls withhold. Anonymous rail unlinked;
-  hover rules apply to anchors only. No new Notification.Kind; mirrors notify
-  nobody and saved remote-list changes have no signal. Federation fix-forward,
-  historical direct posts stay direct, discoverable/indexable absent; not a
-  relay. Keep deployment independent of the owner's proxy.
-- **Gate mechanics:** rebuild all Compose services after source changes;
-  pytest uses baked source, ruff can mount host. Read all four gate markers,
-  not the wrapper exit. Never run concurrent pytest against test_reeltalk.
+- **First release is prepared, not yet published (2026-10-13).** Version
+  **v0.1.0**, to be marked GitHub **Latest**. Both install paths ship from the
+  same clone and differ only in which Compose file you run — see
+  **`INSTALL.md`**, the new deployer-agnostic guide.
+- **Publication blocker: the Docker Hub secrets do not exist yet.**
+  `gh secret list --repo minnixtx/reeltalk` returns **empty**. The release
+  workflow needs `DOCKERHUB_USERNAME` and `DOCKERHUB_ACCESS_TOKEN` created by
+  the owner under Settings → Secrets and variables → Actions. Until then CI
+  cannot push. Nothing is on Docker Hub: `minnixtx/reeltalk` is public with
+  **0 tags, 0 pulls** — verified against the registry API, not assumed.
+- **Publishing is authorised only on the owner's explicit go-ahead.** The
+  design-completion push (`b79e7da`) is not a release authorisation. A tag
+  and a public image are effectively permanent; do not create them unprompted.
+- **Tags the workflow mints for `v0.1.0`:** `0.1.0`, `0.1`, `0`, `latest`.
+  `latest` tracks stable only — a prerelease publishes its own exact tag and
+  deliberately does not move `latest`.
+- **Architectures: amd64 + arm64 on GitHub Actions.** Checked against
+  `uv.lock`: 44 pure-python packages and 11 platform-specific ones, and
+  every platform-specific package carries a cp313/abi3/py3 **aarch64**
+  wheel — nothing compiles from source under emulation. This box cannot build
+  arm64 itself (buildx default driver is `docker`, amd64 only; no QEMU
+  binfmt handler registered), a second reason CI is the right place.
+- **`docker-compose.prebuilt.yml` is pull-only, and that is proven.** With no
+  local image present, `up -d` went to the registry
+  (`Image minnixtx/reeltalk:v0.1.0 Pulling`) and never attempted a build.
+  The handoff's warning was right and is now measured: a Compose *override*
+  that only adds `image:` **cannot** remove a base `build:` key — the merged
+  config kept `build:`, which is why this is a standalone file. All three
+  app roles pin the same `REELTALK_VERSION` tag.
+- **Secret-leak fix in `.dockerignore` (was live, now closed).** It excluded
+  `.env` and `.env.dev`, but this tree also holds **`.env.b`** — the
+  second-instance federation env — and `COPY . /app/` would have baked it
+  into every published image. Now `.env` + `.env.*` with `!.env.example`,
+  plus `.coverage`. Rebuilt and verified: the image holds only
+  `.env.example`.
+- **Fresh install of the prebuilt path exercised end to end** on an isolated
+  stack (project `rt-fresh`, throwaway volumes, host port 3999):
+  migrations, collectstatic, worker and backup all ran from the pulled
+  image, the first-run `/setup/` wizard created the admin, and login works.
+- **Real SMTP delivery proven** against `mail.minnix.dev` on 587/STARTTLS,
+  receipt confirmed over IMAPS with a before/after baseline
+  (1025 → 1026). From `minnix@minnix.dev` equals `EMAIL_HOST_USER`, so the
+  server's anti-spoof rule is satisfied by the shipped defaults. This sent
+  one genuine message to the owner's inbox.
+- **Two gotchas confirmed on a real install, both now documented.** Reaching
+  the instance by raw IP returns **HTTP 400** unless `ALLOWED_HOSTS` names
+  it, and forms then need `CSRF_TRUSTED_ORIGINS`. The emailed verify link is
+  minted from `CANONICAL_ORIGIN` = `https://DOMAIN`, so it is
+  dead-on-arrival until TLS actually answers.
+- **Signup policy is a database setting, not an env var** — `SiteSettings`
+  (pk=1), `signup_policy` default `open`, `invite_scope` default `admins`.
+  `.env.example` says nothing about it; new instances start **open**.
+- **The published image ships the Python dev toolchain** (`pytest`, `ruff`,
+  `mypy`, `coverage` — ~26MB of 165MB site-packages) because the gate runs
+  pytest *inside the baked image*. Owner chose to ship as-is for v0.1.0
+  rather than change the build path the gate rests on. A slim runtime stage
+  is deferred, not forgotten.
+- **Standing product constraints unchanged:** no third home column; genre
+  feeds stay 20/page; no virtualisation, scroll restoration, mid-scroll deep
+  links or live home updates; TMDB primary with manual fallback; no new
+  `Notification.Kind`; mirrors notify nobody; federation is fix-forward,
+  not a relay; deployment stays independent of the owner's proxy.
+- **Gate mechanics unchanged:** rebuild all Compose services after source
+  changes; pytest uses baked source, ruff can mount host; read all four gate
+  markers, not the wrapper exit; never run concurrent pytest against
+  `test_reeltalk`. **No gate was run for this increment** — it changes
+  `.dockerignore`, docs, a Compose file and a CI workflow, and no Python.
 
 ## 1. Current state
 

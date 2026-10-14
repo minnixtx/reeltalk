@@ -1,5 +1,13 @@
 # Deploying ReelTalk
 
+> **Installing ReelTalk on your own server? Read
+> [INSTALL.md](INSTALL.md) instead.** This document is the owner's operational
+> runbook for one specific deployment — `reeltalk.minnix.dev`, on a known box,
+> behind a named nginx proxy manager at a fixed LAN address. The addresses,
+> certificate, firewall rules and topology below describe *that* installation.
+> They are not requirements for yours, and nothing here should be read as
+> "this is how you install ReelTalk".
+
 Operational guide for running a public ReelTalk instance. Written against the
 `reeltalk.minnix.dev` target and verified on the real stack — the numbers and
 behaviours below were measured, not assumed.

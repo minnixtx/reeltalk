@@ -1,0 +1,92 @@
+name: release-images
+
+# Builds and publishes the multi-arch ReelTalk image when a GitHub release is
+# published. Triggered by the release event rather than by every tag so that
+# drafting the release notes is the thing that gates publication — a tag pushed
+# by mistake should not put an image on Docker Hub.
+#
+# Requires two repository secrets, created by the repo owner in
+# Settings → Secrets and variables → Actions. Never put either value in a
+# commit, a workflow log, or a chat message:
+#   DOCKERHUB_USERNAME     Docker Hub username (the "minnixtx" namespace owner)
+#   DOCKERHUB_ACCESS_TOKEN Docker Hub access token, scoped to Read & Write on
+#                          the minnixtx/reeltalk repository only. Prefer a
+#   fine-grained token over the account password.
+#
+# Image tags produced for a release tagged v0.1.0:
+#   minnixtx/reeltalk:0.1.0   exact version — pin this in production
+#   minnixtx/reeltalk:0.1     minor line
+#   minnixtx/reeltalk:0       major line
+#   minnixtx/reeltalk:latest  newest stable
+#
+# `latest` deliberately tracks stable releases only. A prerelease publishes its
+# own exact tag but does not move `latest`, so nobody following the default tag
+# gets a pre-release by accident.
+
+on:
+  release:
+    types: [published]
+
+# The job reads the repo and pushes to Docker Hub. It needs no write access to
+# repository contents, so none is granted.
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    name: build and publish multi-arch image
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # arm64 layers are built under QEMU emulation. Every dependency in
+      # uv.lock resolves to an aarch64 wheel, so nothing compiles from source
+      # here; the emulation cost is install-time only, not a toolchain build.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_ACCESS_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: minnixtx/reeltalk
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !github.event.release.prerelease }}
+
+      # The release tag is the source of truth for what gets published, so the
+      # checkout is pinned to the exact commit the release points at.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # GHA cache keeps a cross-arch rebuild from re-downloading the whole
+          # dependency set on every release.
+          cache-from: type=gha,scope=reeltalk-release
+          cache-to: type=gha,scope=reeltalk-release,mode=max
+
+      - name: Show published manifest
+        run: |
+          echo "Published tags:"
+          echo "${{ steps.meta.outputs.tags }}"
+          echo
+          echo "Digest manifest:"
+          docker buildx imagetools inspect minnixtx/reeltalk:${GITHUB_REF_NAME#v} \
+            --format '{{json .Manifest}}'

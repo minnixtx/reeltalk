@@ -1,0 +1,102 @@
+# ReelTalk — prebuilt image stack.
+#
+# Same topology as docker-compose.yml (db + web + worker + backup, same named
+# volumes), but no service builds anything: every app role names the SAME
+# published image tag, so the whole stack is pulled rather than compiled.
+#
+#   cp .env.example .env && ./setup.sh
+#   docker compose -f docker-compose.prebuilt.yml up -d
+#
+# Why a separate file instead of an override: Compose merges keys, so an
+# override that only adds `image:` cannot remove the `build: .` in the base
+# file. A user with no source tree would still be sent down a build path.
+# This file has no `build:` key anywhere, which is what makes it pull-only.
+#
+# Upgrades: change REELTALK_VERSION in .env and run `up -d` again. Data lives
+# in the named volumes below, not in the image, so a version change recreates
+# containers and keeps everything. Pinning the tag this way (rather than
+# tracking `latest`) means an upgrade is a deliberate edit you can roll back.
+#
+# The project name matches docker-compose.yml on purpose: switching between the
+# source-build and prebuilt paths reuses the same volumes and network instead
+# of orphaning them.
+name: reeltalk
+
+x-logging:
+  &default-logging
+  driver: "json-file"
+  options:
+    max-size: "150m"
+    max-file: "2"
+
+x-image: &default-image
+  image: minnixtx/reeltalk:${REELTALK_VERSION:-v0.1.0}
+  restart: unless-stopped
+  env_file: ${ENV_FILE:-.env}
+  logging: *default-logging
+  networks:
+    - main
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    shm_size: ${POSTGRES_SHM_SIZE:-128mb}
+    env_file: ${ENV_FILE:-.env}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+      timeout: 10s
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - main
+
+  web:
+    <<: *default-image
+    command: uvicorn reeltalk.asgi:application --host 0.0.0.0 --port 3030
+    ports:
+      - "${WEB_PORT:-3030}:3030"
+    volumes:
+      - static_volume:/app/static
+      - media_volume:/app/images
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3030"]
+      interval: 3s
+      timeout: 1s
+      start_period: 3s
+      retries: 25
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    <<: *default-image
+    command: python manage.py qcluster
+    volumes:
+      - media_volume:/app/images
+    depends_on:
+      web:
+        condition: service_healthy
+
+  # Daily database backup. Shares the image tag with web and worker so a
+  # restore can never be run by a different code version than wrote the dump.
+  backup:
+    <<: *default-image
+    command: bash /app/backup-loop.sh
+    volumes:
+      - backups_volume:/app/backups
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  static_volume:
+  media_volume:
+  backups_volume:
+
+networks:
+  main:

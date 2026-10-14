@@ -1,7 +1,11 @@
 .git
 .qwen
+# Never bake an instance's secrets into a published image. `.env.example` is the
+# template and stays; every real env file is excluded, whatever it is named.
 .env
-.env.dev
+.env.*
+!.env.example
+.coverage
 __pycache__/
 *.pyc
 .mypy_cache/

@@ -1,8 +1,22 @@
 # ReelTalk
 A federated social network for tracking, reviewing, and discovering films. Free yourself from corporate social media and join a close community of film fans who value being free from spyware and data collection by gathering on a free and open source platform.
 
+## Install
+Two supported paths, both starting from this repo — see **[INSTALL.md](INSTALL.md)**:
+
+- **Build from source:** `cp .env.example .env && ./setup.sh && docker compose up -d --build`
+- **Prebuilt image:** `cp .env.example .env && ./setup.sh && docker compose -f docker-compose.prebuilt.yml up -d`, pulling `minnixtx/reeltalk` from Docker Hub instead of building.
+
+Either way the site comes up on plain HTTP and you terminate TLS with your own
+reverse proxy. A brand-new instance redirects to `/setup/` to create the first
+admin account.
+
 ## Status
-This project is currently still in pre-alpha status. ReelTalk was originally built as a fork of BookWyrm under the Anti-Capitalist Software License v1.4. Because ACRL is not an OSI-approved free/open-source license, the project is being rewritten from scratch under the AGPLv3, using the original codebase purely as a functional reference. See REWRITE.md for the rationale and the rules that govern the rewrite.
+The first release is **v0.1.0**. The feature set is complete and the app runs a
+full test gate of 2500+ tests, but it is a young project with a single
+maintainer: expect rough edges, and read the release notes before upgrading.
+
+ReelTalk was originally built as a fork of BookWyrm under the Anti-Capitalist Software License v1.4. Because ACRL is not an OSI-approved free/open-source license, the project is being rewritten from scratch under the AGPLv3, using the original codebase purely as a functional reference. See REWRITE.md for the rationale and the rules that govern the rewrite.
 
 The frozen original lives at minnixtx/reeltalk-legacy (archived, reference-only - feature inventory, behavior, design decisions; no code is carried over).
 
