@@ -9,32 +9,9 @@
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
 
-- **THE NEXT JOB IS REMOVING THE BACKUP FEATURE (owner decision 2026-10-14).**
-  The daily `pg_dump` backup service, `backup-loop.sh`, `backup_database`,
-  `restore_database`, `BACKUP_DIR`/`BACKUP_RETENTION`, `backups_volume` and
-  the `postgresql-client` apt line all come out. **Why:** the owner wants
-  ReelTalk lean and scoped to what it is for; backups are the operator's
-  job, "the same reason I didn't include any TLS termination in the project
-  and left that up to the user." It is a deliberate repeat of the D14
-  no-in-project-proxy call, not an oversight. Full removal inventory, the
-  ordering trap, and the docs that have to change are in
-  `.qwen/tmp/reeltalk-backup-removal-handoff.md`. **This is a real code
-  removal and needs a full gate before it ships.**
-- **The research behind that call, done 2026-10-14 (the split, not a
-  majority).** **BookWyrm** ships it built-in and automatic: a
-  `db-backup-job` service in `docker-compose.yml` built from a local
-  `postgres-docker` dir, dumping daily at midnight UTC into a `backups`
-  volume. **Pixelfed** ships `php artisan backup:run` (spatie/laravel-backup)
-  but does **not** schedule it: all 23 entries in
-  `bootstrap/scheduledtasks.php` are gc/maintenance tasks, no backup among
-  them, so the operator wires the cron. **Mastodon** has no built-in backup
-  at all; `docs.joinmastodon.org/admin/backups/` makes it the operator's
-  job (`pg_dump`, save `.env.production`, copy `public/system`, copy Redis
-  `dump.rdb`), and `tootctl accounts backup` is a per-user GDPR export,
-  not an instance backup. **Lemmy** likewise hands the operator a
-  `pg_dumpall | gzip` command and a sample rsync script. So one of four has
-  it automatic, one ships the tool without the schedule, two leave it out.
-  The owner read that as support for removal.
+- **THE BACKUP FEATURE IS REMOVED (owner decision 2026-10-14, landed this increment; recorded as R154, reversing R58).** Out: `backup-loop.sh`, `backup_database`, `restore_database`, `test_backup.py` (7 defs) and `test_restore.py` (17 defs), the `backup` service in **both** Compose files, `backups_volume`, `BACKUP_DIR`/`BACKUP_RETENTION` in `settings.py`, `BACKUP_TIME` in `.env.example`, and `postgresql-client` from the image. **`libpq5` stays** — a different package, the runtime library psycopg needs. The stack is now **two app roles (`web`, `worker`) and three named volumes (`pgdata`, `static_volume`, `media_volume`)**, confirmed with `docker compose config --services` and `--volumes` on both files. **Why:** the owner wants ReelTalk lean and scoped to what it is for; backups are the operator's job, "the same reason I didn't include any TLS termination in the project and left that up to the user." A deliberate repeat of D14, not an oversight, and not open to re-litigation. The decision text and the research behind it are preserved in **§2P**, and the superseded docs bullets from the previous NOW block in **§2Q** — nothing was deleted.
+- **Gate for the removal: 2489 passed, 5 skipped, all four markers `0`** (`RUFF_CHECK`, `RUFF_FORMAT`, `MIGRATIONS`, `PYTEST`), 36:07, after a full `docker compose build`. **No new migration** — removing Python files and settings touches no schema. **The count is 2489, not the 2495 the handoff predicted, and the gap is fully accounted for:** HEAD collected **2524** items; the two deleted files collected **25**, not the 24 you get by counting `def test` lines, because `test_restore.py:91` is `@pytest.mark.parametrize("bad", ["", "   "])`; and the clean-room guard `test_clean_room.py::test_no_bookwyrm_telltale_strings` is itself parametrized over **every file in the repo**, so deleting 5 files removed 5 more cases. 2524 − 25 − 5 = **2494 collected = 2489 passed + 5 skipped**. **Count collected items, not `def test` lines**, in any future handoff.
+- **Left for the owner, deliberately not done here: `reeltalk-backup-1` is still running.** It was up (25h) when the Compose edit landed, so it is now an **orphan** and every `docker compose run` prints the orphan warning. Touching the live stack was outside this session's scope, which was the code removal. Clear it with `docker compose up -d --remove-orphans` or `docker rm -f reeltalk-backup-1` when you choose; the now-unused `reeltalk-backup:latest` image tag is still on disk too.
 - **First release is prepared and unblocked, not yet published (2026-10-14).**
   Version **v0.1.0**, to be marked GitHub **Latest**. Both Docker Hub
   secrets are set (`DOCKERHUB_USERNAME`, `DOCKERHUB_ACCESS_TOKEN`). Nothing
@@ -55,42 +32,7 @@ disagrees with this block, this block is current and the other is history.**
   open door where a test needs it. Two surfaced late by asserting the
   visible text `"Sign up"` rather than `href="/signup/"`, which a
   substring sweep on the href alone misses.
-- **README.md is the single source of truth for deployment**, and this
-  session reshaped its prose on the owner's review. `INSTALL.md` is a
-  redirect stub. The `## Deployment` section now runs 1-10: Configure, the
-  `.env` parameters, Start, Mail, first-run admin, signup policy, volumes,
-  upgrading, backups, troubleshooting. **The `Image tags` section was
-  deleted** and `Troubleshooting` renumbered into its place.
-- **The mail section was rewritten around one plain statement of the rule**,
-  because the owner's questions showed the old phrasing hid it: the From
-  pair is just `EMAIL_HOST_USER` split at the `@`, so matching the two
-  means the rule never fires. Added **two worked examples** — a Gmail
-  app-password setup and a same-domain mail server setup — because a
-  private single-user instance fed by a free mailbox is a real and wanted
-  shape. Both examples put `EMAIL_SENDER_NAME`/`EMAIL_SENDER_DOMAIN` on the
-  mail account, not the instance host.
-- **A factual error of mine is corrected in the tree.** A code comment in
-  `settings.py` attributed the anti-spoof rejection to **YunoHost**. The
-  owner runs **iRedMail on a Debian VM**. The comment now names the actual
-  mechanism instead of a guessed product: Postfix's
-  `reject_sender_login_mismatch`. **The mechanism was always right** — the
-  `554 5.7.1 ... Sender is not same as SMTP authenticate username`
-  rejection is real, was thrown at us, and is what `EMAIL_SENDER_NAME`/
-  `EMAIL_SENDER_DOMAIN` exist for. Only the product label was invented.
-  iRedMail ships Postfix, so nothing downstream changes.
-- **`CSRF_TRUSTED_ORIGINS` is now explained as what it is**: a
-  comma-separated list of full origins including scheme, host and port,
-  not a yes/no switch, left unset for a normal single-domain https install,
-  with a worked value. The old one-liner ("needed if you reach the instance
-  by a hostname other than DOMAIN") read like a boolean.
-- **Verification this session was scoped to what changed.** The tree moved
-  only `README.md` (docs) and one **comment-only** change in
-  `settings.py`, confirmed comment-only by diffing and filtering out `#`
-  lines. `ruff check` and `ruff format --check` both exit `0` on
-  `settings.py`, and it parses. **The full pytest gate was not re-run**,
-  because nothing executable changed. The last full gate stands at **2519
-  passed, 5 skipped**, all four markers `0`. Treat that as the baseline the
-  backup removal has to return to.
+- **README.md is the single source of truth for deployment**, and its `## Deployment` section now runs **1-9**: Configure, the `.env` parameters, Start, Mail, first-run admin, signup policy, volumes, upgrading, troubleshooting. **The backup section is gone and Troubleshooting was renumbered 10 → 9.** The volumes section now states plainly that backups are the operator's, so nobody reads the missing feature as an accident. `INSTALL.md` is a redirect stub and no longer advertises a backups section.
 - **Em dashes: release-facing text only** (standing owner instruction).
   `README.md` is at **0**. `DEPLOYING.md`, `PLAN.md`, `PROGRESS.md` and
   `REWRITE.md` keep theirs as internal history, and **no code, template or
@@ -8012,6 +7954,79 @@ and passed against 42b506f (R147).
   rail tests replaced by one document-scroll test. No application/test changes
   followed this gate; only the progress and handoff verification records.
 
+## 2P. The backup feature removal (owner decision 2026-10-14, R154)
+
+Moved out of the NOW block when the removal landed. The removal itself is recorded in NOW and as R154 below; this section keeps the original decision text and the research that informed it, verbatim.
+
+- **THE NEXT JOB IS REMOVING THE BACKUP FEATURE (owner decision 2026-10-14).**
+  The daily `pg_dump` backup service, `backup-loop.sh`, `backup_database`,
+  `restore_database`, `BACKUP_DIR`/`BACKUP_RETENTION`, `backups_volume` and
+  the `postgresql-client` apt line all come out. **Why:** the owner wants
+  ReelTalk lean and scoped to what it is for; backups are the operator's
+  job, "the same reason I didn't include any TLS termination in the project
+  and left that up to the user." It is a deliberate repeat of the D14
+  no-in-project-proxy call, not an oversight. Full removal inventory, the
+  ordering trap, and the docs that have to change are in
+  `.qwen/tmp/reeltalk-backup-removal-handoff.md`. **This is a real code
+  removal and needs a full gate before it ships.**
+
+- **The research behind that call, done 2026-10-14 (the split, not a
+  majority).** **BookWyrm** ships it built-in and automatic: a
+  `db-backup-job` service in `docker-compose.yml` built from a local
+  `postgres-docker` dir, dumping daily at midnight UTC into a `backups`
+  volume. **Pixelfed** ships `php artisan backup:run` (spatie/laravel-backup)
+  but does **not** schedule it: all 23 entries in
+  `bootstrap/scheduledtasks.php` are gc/maintenance tasks, no backup among
+  them, so the operator wires the cron. **Mastodon** has no built-in backup
+  at all; `docs.joinmastodon.org/admin/backups/` makes it the operator's
+  job (`pg_dump`, save `.env.production`, copy `public/system`, copy Redis
+  `dump.rdb`), and `tootctl accounts backup` is a per-user GDPR export,
+  not an instance backup. **Lemmy** likewise hands the operator a
+  `pg_dumpall | gzip` command and a sample rsync script. So one of four has
+  it automatic, one ships the tool without the schedule, two leave it out.
+  The owner read that as support for removal.
+
+## 2Q. Docs reshaping, the mail rewrite and the CSRF explanation (2026-10-13/14)
+
+Moved out of the NOW block on 2026-10-14 so the block could be rewritten for the backup removal. Content unchanged from what that increment recorded.
+
+- **README.md is the single source of truth for deployment**, and this
+  session reshaped its prose on the owner's review. `INSTALL.md` is a
+  redirect stub. The `## Deployment` section now runs 1-10: Configure, the
+  `.env` parameters, Start, Mail, first-run admin, signup policy, volumes,
+  upgrading, backups, troubleshooting. **The `Image tags` section was
+  deleted** and `Troubleshooting` renumbered into its place.
+- **The mail section was rewritten around one plain statement of the rule**,
+  because the owner's questions showed the old phrasing hid it: the From
+  pair is just `EMAIL_HOST_USER` split at the `@`, so matching the two
+  means the rule never fires. Added **two worked examples** — a Gmail
+  app-password setup and a same-domain mail server setup — because a
+  private single-user instance fed by a free mailbox is a real and wanted
+  shape. Both examples put `EMAIL_SENDER_NAME`/`EMAIL_SENDER_DOMAIN` on the
+  mail account, not the instance host.
+- **A factual error of mine is corrected in the tree.** A code comment in
+  `settings.py` attributed the anti-spoof rejection to **YunoHost**. The
+  owner runs **iRedMail on a Debian VM**. The comment now names the actual
+  mechanism instead of a guessed product: Postfix's
+  `reject_sender_login_mismatch`. **The mechanism was always right** — the
+  `554 5.7.1 ... Sender is not same as SMTP authenticate username`
+  rejection is real, was thrown at us, and is what `EMAIL_SENDER_NAME`/
+  `EMAIL_SENDER_DOMAIN` exist for. Only the product label was invented.
+  iRedMail ships Postfix, so nothing downstream changes.
+- **`CSRF_TRUSTED_ORIGINS` is now explained as what it is**: a
+  comma-separated list of full origins including scheme, host and port,
+  not a yes/no switch, left unset for a normal single-domain https install,
+  with a worked value. The old one-liner ("needed if you reach the instance
+  by a hostname other than DOMAIN") read like a boolean.
+- **Verification this session was scoped to what changed.** The tree moved
+  only `README.md` (docs) and one **comment-only** change in
+  `settings.py`, confirmed comment-only by diffing and filtering out `#`
+  lines. `ruff check` and `ruff format --check` both exit `0` on
+  `settings.py`, and it parses. **The full pytest gate was not re-run**,
+  because nothing executable changed. The last full gate stands at **2519
+  passed, 5 skipped**, all four markers `0`. Treat that as the baseline the
+  backup removal has to return to.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -8355,3 +8370,5 @@ not an optimisation.
 - **R152 — The search click-through announces nothing (2026-10-13, owner ruling after asking "what library is it referencing?").** `search_clickthrough` no longer emits `Added "<film>" to your library.` on a first-time add, and the `existed` lookup that existed only to drive it is gone. Four things were wrong with the message, and the fourth is the one the owner actually hit. **(1) "Your" was false.** What the toast described is the single shared `Film` catalog row that `create_or_match_film` (D7) materialises so the film page can exist at all. That row is instance-wide, not member-owned: picking a TMDB hit adds it for every member, permanently. There is no per-user library on this path — no `Shelf` and no `ShelfFilm` row is written. **(2) "Added" claimed a personal act.** The write is dedup plumbing, not shelving. The message told the member they had done something when the software had merely caught up with the page it was about to show them. **(3) It was shown inconsistently.** Guarded by `if not existed`, so the identical click reported nothing at all on a film another member had added first — same action, different feedback, and the member has no way to know why. **(4) It contradicted the control 200px below it.** The banner said "added" while the film page still read **+ Add to Watchlist**, which is the action the member actually meant. Opening the page is the feedback; the watchlist control carries the intent. **How to apply:** the removal is deliberate, and the docstring on `search_clickthrough` says so — do not restore a success message there as a "missing feedback" fix. If a future increment wants to announce something on this path, it must first name a thing the member actually owns, and that is a new R. The general rule this instantiates: **a success message has to describe a state change the actor caused in something of theirs.** Announcing internal materialisation as user-facing achievement reads as a lie even when every word is technically true. Note this is the mirror image of R144's "drop and log" policy — there, an invisible failure was the bug, so the log line became the record; here an invisible non-event was announced, so the announcement goes.
 
 - **R153 — All standard buttons share the compact cinema treatment (2026-10-13).** Owner identified the missed list/review Reply submit and requested an audit of all buttons. Applied the existing R151 recipe across first-party action controls and button-style links, preserving primary/secondary roles and specialized applause, suggestions, header text and admin controls. Moved the shared CSS after legacy component rules to prevent per-component typography and chrome from overriding it; disabled controls lose their glow. Rebuilt all services and deployed. Audit: 53 template buttons covered; 38 templates compile; isolated component fixtures pass Chromium checks at 1440px and 390px (Archivo 14px/600, 38/44px height, 1px border, 4px corners, hover, focus, disabled and no overflow). Fixtures cover authenticated control styling, not authenticated submissions. No backend changes. Owner subsequently accepted design polish as complete and authorized the full gate, record/commit on success and push. Seven existing markup assertions across four test files were updated for additional styling classes and outlined destructive controls; focused run 7 passed. Fresh full gate PASSED: 2514 passed, 5 skipped in 2096.35s (34m56s), all four markers zero in `/tmp/inc6-gate.log`; 2519 collected unchanged. Initial interrupted run found one obsolete exact-class assertion (1136 passed); preserved at `/tmp/r153-gate-interrupted.log`. Next session prepares the first release with both source-build Compose and prebuilt `minnixtx/reeltalk` Docker Hub installation paths; clarify release version/tags, architectures, publication workflow/access and downloadable Compose/config files before publishing.
+
+- **R154 — The built-in backup feature is removed (reverses R58).** The daily `pg_dump` service, `backup-loop.sh`, `backup_database`, `restore_database`, the `BACKUP_DIR`/`BACKUP_RETENTION`/`BACKUP_TIME` settings, `backups_volume` and the `postgresql-client` apt line are all gone; `libpq5` stays because psycopg needs it at runtime. **Why:** the owner wants ReelTalk lean and scoped to what it is for — backups are operator infrastructure, the same class of thing as TLS termination, which D14 already refused to put in the project. The research done the same day found the fediverse split on this (BookWyrm automatic, Pixelfed unscheduled, Mastodon and Lemmy absent) and the owner chose removal anyway; the split is support, not the reason. **Consequence:** the app ships two app roles and three named volumes, and an operator who wants backups dumps `pgdata` themselves. R58 and R77 are left as written history — they accurately describe what was built and drilled at the time; this entry is what changed since.

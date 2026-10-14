@@ -1,8 +1,8 @@
 # ReelTalk — prebuilt image stack.
 #
-# Same topology as docker-compose.yml (db + web + worker + backup, same named
-# volumes), but no service builds anything: every app role names the SAME
-# published image tag, so the whole stack is pulled rather than compiled.
+# Same topology as docker-compose.yml (db + web + worker, same named volumes),
+# but no service builds anything: every app role names the SAME published image
+# tag, so the whole stack is pulled rather than compiled.
 #
 #   cp .env.example .env && ./setup.sh
 #   docker compose -f docker-compose.prebuilt.yml up -d
@@ -84,22 +84,10 @@ services:
       web:
         condition: service_healthy
 
-  # Daily database backup. Shares the image tag with web and worker so a
-  # restore can never be run by a different code version than wrote the dump.
-  backup:
-    <<: *default-image
-    command: bash /app/backup-loop.sh
-    volumes:
-      - backups_volume:/app/backups
-    depends_on:
-      db:
-        condition: service_healthy
-
 volumes:
   pgdata:
   static_volume:
   media_volume:
-  backups_volume:
 
 networks:
   main:

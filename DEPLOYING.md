@@ -35,8 +35,10 @@ browser ──https──▶ Cloudflare (DNS only, grey cloud)
               (uvicorn + whitenoise, no TLS)
 ```
 
-The stack is four compose services: `web`, `db`, `worker`, `backup`. All four
+The stack is three compose services: `web`, `db`, `worker`. The two app roles
 build from the same Dockerfile but are **separate image tags** — see §7.
+Backups are not part of the stack at all: they are the operator's job, in the
+same way TLS termination is (decision D14).
 
 ---
 
@@ -102,10 +104,9 @@ Django's CSRF check.
 
 | Variable | Value here | Notes |
 |---|---|---|
-| `REELTALK_TMDB_API_KEY` | set | Optional. Without it, film search is local-library only. Shared quota — see §12. |
+| `REELTALK_TMDB_API_KEY` | set | Optional. Without it, film search is local-library only. Shared quota — see §10. |
 | `EMAIL_*` | unset | Optional. Console backend when unset, so no mail is actually sent. |
 | `WEB_PORT` | `3030` | Host port published for the cleartext endpoint. See §5. |
-| `BACKUP_TIME` / `BACKUP_RETENTION` / `BACKUP_DIR` | `03:17` / `7` / `/app/backups` | See §8. |
 
 ---
 
@@ -122,7 +123,7 @@ The proxy **must** forward:
    the port for anything that isn't 443-on-https, which is how `:3030` leaks into
    published actor IDs.
 
-NPM's defaults do both. Verify rather than trust — see §11.
+NPM's defaults do both. Verify rather than trust — see §9.
 
 Also required on the proxy host:
 
@@ -178,9 +179,9 @@ docker compose up -d
 
 # 5. Import the watchlist through the app's Import surface.
 
-# 6. Set the signup policy (§10).
+# 6. Set the signup policy (§8).
 
-# 7. Verify (§11).
+# 7. Verify (§9).
 ```
 
 `entrypoint.sh` applies migrations and collects static files only when the
@@ -190,13 +191,13 @@ service starts `uvicorn`, so `web` must come up before `worker`.
 
 ## 7. Build gotcha: every service needs its image
 
-`web`, `worker` and `backup` each get their **own** image tag (`reeltalk-web`,
-`reeltalk-worker`, `reeltalk-backup`). Building `web` alone leaves the others on
-the old code, and the failure is confusing:
+`web` and `worker` each get their **own** image tag (`reeltalk-web`,
+`reeltalk-worker`). Building `web` alone leaves the worker on the old code,
+and the failure is confusing:
 
 ```
-$ docker compose run --rm backup python manage.py restore_database ...
-Unknown command: 'restore_database'
+$ docker compose run --rm worker python manage.py some_new_command ...
+Unknown command: 'some_new_command'
 ```
 
 Because the image bakes the source with **no bind mount**, a tree edit is
@@ -205,104 +206,7 @@ invisible to a container until that service's image is rebuilt. Use
 
 ---
 
-## 8. Backups
-
-The `backup` service runs `backup-loop.sh`: a plain sleep loop that wakes daily at
-`BACKUP_TIME` (default `03:17` in `TIME_ZONE`), runs `python manage.py
-backup_database`, and on failure logs a warning and retries the next day rather
-than exiting. It is deliberately **not** a Django-Q2 scheduled task, so backups
-happen regardless of web/worker/queue health.
-
-- Format: `pg_dump --format=custom` (gzip-compressed, `pg_restore`-able).
-- Names: `<db>-YYYYMMDDTHHMMSSZ.dump`, zero-padded UTC, so lexicographic order
-  **is** chronological order and retention prunes by name.
-- Retention: newest `BACKUP_RETENTION` (default 7) per database.
-- Location: the `backups` named volume, mounted at `/app/backups`.
-- The password goes through `PGPASSWORD`, never argv — nothing sensitive appears
-  in the process list or in the command's own echoed output.
-
-Manual run:
-
-```bash
-docker compose run --rm backup python manage.py backup_database
-```
-
-**A backup you have never restored is a hope, not a backup.** Drill the restore
-(§9) on a schedule you would actually be comfortable relying on.
-
----
-
-## 9. Restoring a backup
-
-`restore_database` is the counterpart to `backup_database`. Because the two
-operations are not symmetric — dumping the live DB is harmless, restoring over it
-destroys the owner's data — the target is **never defaulted**.
-
-```bash
-# Restore into an explicitly named database (must already exist):
-docker compose run --rm backup python manage.py restore_database \
-    /app/backups/reeltalk-20260921T134126Z.dump --into reeltalk_drill
-```
-
-| Flag | Meaning |
-|---|---|
-| `dump` (positional) | Path to the custom-format `.dump`. Must exist, or the command refuses before touching a database. |
-| `--into <db>` | **Required, no default.** The command will not guess that you meant the app's own database. The target must already exist — it never creates one, so a typo is a loud connection failure, not a fresh empty database nobody is looking at. |
-| `--force` | Required *in addition to* naming the live database. Without it, `--into reeltalk` is refused. |
-| `--clean` | `pg_restore --clean --if-exists` — drop and recreate objects in a target that already holds a schema. Leave off for an empty target. |
-
-Under the hood: `--exit-on-error` (fail loudly, not pg_restore's default of
-carrying on), `--single-transaction` (all-or-nothing, so a mid-way failure leaves
-the target empty rather than half-loaded), `--no-owner` (drops the dump's
-`ALTER OWNER` so a restore under a different role works).
-
-### Drilling the restore without risking live data
-
-The drill must **never** restore into the live database. Throwaway target only.
-This was run end to end on the real stack:
-
-```bash
-# 1. Fresh dump through the real path
-docker compose run --rm backup python manage.py backup_database
-
-# 2. Throwaway database in the same cluster
-docker compose exec db psql -U reeltalk -d postgres -c 'CREATE DATABASE reeltalk_drill'
-
-# 3. Restore into it
-docker compose run --rm backup python manage.py restore_database \
-    /app/backups/<newest>.dump --into reeltalk_drill
-
-# 4. Compare per-table row counts against live
-for db in reeltalk reeltalk_drill; do
-  docker compose exec -T db psql -U reeltalk -d $db -At \
-    -c "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename" \
-    | while read -r t; do printf 'SELECT %s AS tbl, count(*) FROM public."%s" UNION ALL\n' "'$t'" "$t"; done \
-    | sed '$ s/ UNION ALL$//' \
-    | docker compose exec -T db psql -U reeltalk -d $db -At -f /dev/stdin
-done
-
-# 5. Boot the app against the restored database and probe it
-docker compose run -d --rm -p 3132:3030 -e POSTGRES_DB=reeltalk_drill \
-    web uvicorn reeltalk.asgi:application --host 0.0.0.0 --port 3030
-curl -s http://127.0.0.1:3132/ -o /dev/null -w '%{http_code}\n'
-
-# 6. Tear down, then confirm live is untouched
-docker stop <container>
-docker compose exec db psql -U reeltalk -d postgres -c 'DROP DATABASE reeltalk_drill'
-```
-
-Result of the drill on 2026-09-21: **24 public tables, row counts identical to
-live**, the app booted against the restored DB reporting `No migrations to apply`
-(the dump carries a current schema), and it served restored content over HTTP.
-After teardown the cluster held only `postgres`/`reeltalk`/`template0`/
-`template1`, and live row counts diffed clean against the pre-drill baseline.
-
-The same round trip runs in the test suite (`reeltalk/tests/test_restore.py`), so
-the restore path stays proven rather than merely documented.
-
----
-
-## 10. Invite-only signup and invite links
+## 8. Invite-only signup and invite links
 
 Two settings in Django admin → **Site settings**, and they are independent:
 `signup_policy` decides whether a link is *needed*; `invite_scope` decides who
@@ -414,7 +318,7 @@ docker compose run --rm web python manage.py shell -c \
 
 ---
 
-## 11. Post-deploy verification
+## 9. Post-deploy verification
 
 Run these after the domain goes live. The first is the check that everything else
 in §3 and §4 was actually configured right.
@@ -482,7 +386,7 @@ in the response cookies, `COOKIES_FOLLOW_SCHEME` has been turned off.
 
 ---
 
-## 12. Known limits at this point
+## 10. Known limits at this point
 
 Named rather than hidden, so nobody discovers them in production:
 

@@ -3,8 +3,8 @@ A federated social network for tracking, reviewing, and discovering films. Free 
 
 ## Deployment
 
-ReelTalk ships as one Docker image running three roles (web, worker and a
-daily backup) plus PostgreSQL. There are two install paths and they differ
+ReelTalk ships as one Docker image running two roles (web and worker) plus
+PostgreSQL. There are two install paths and they differ
 only in whether you build the image or pull a prebuilt one:
 
 | | Build from source | Prebuilt image |
@@ -68,7 +68,6 @@ Optional, and most installs want some of them:
 | `WEB_PORT` | `3030` | Host port the web container publishes. |
 | `CSRF_TRUSTED_ORIGINS` | unset | Comma-separated list of full origins (scheme, host and port) that a browser may post forms to. Not a yes/no switch, and the scheme is required. Leave it unset for a normal single-domain https install; add one entry per extra origin you actually type into a browser. Example: `CSRF_TRUSTED_ORIGINS=https://reeltalk.example.com,http://192.168.1.50:3030` |
 | `TRUSTED_PROXIES` | the private ranges | Which peers may tell us a request arrived over https, and which hops to skip when reading the client address. A proxy on your LAN or on the Compose network needs no value at all. |
-| `BACKUP_TIME` / `BACKUP_RETENTION` | `03:17` / `7` | Daily dump schedule. |
 | `ALLOWED_HOSTS` | `DOMAIN` plus localhost | Add extra hostnames here. |
 
 Leave `DEBUG` off. Do not turn it on for anything reachable over a network.
@@ -225,11 +224,12 @@ Named volumes, created automatically:
 | `pgdata` | The database. The only thing you cannot rebuild. |
 | `static_volume` | Collected static assets. Regenerated on start. |
 | `media_volume` | Uploaded images and posters fetched from TMDB. |
-| `backups_volume` | Daily database dumps. |
 
-Both Compose files declare the same four, so the volumes follow you across
-either install path. Backups live in a Docker volume: if you back up the host
-but not that volume, you have no backups. Copy them off the machine.
+Both Compose files declare the same three, so the volumes follow you across
+either install path. Backups are yours: ReelTalk ships no backup or restore
+feature, so `pgdata` is protected by whatever you do outside the app, the
+same way TLS termination is. If you back up the host but not that volume,
+you have no backups.
 
 ### 8. Upgrading
 
@@ -259,35 +259,11 @@ docker compose build
 docker compose up -d
 ```
 
-Build all services, not just `web`. The worker and backup roles run from
-their own image tags built from the same Dockerfile, and a half rebuilt stack
-is how you end up with two code versions against one database.
+Build all services, not just `web`. The worker role runs from its own image
+tag built from the same Dockerfile, and a half rebuilt stack is how you end
+up with two code versions against one database.
 
-### 9. Backups and restore
-
-The `backup` service dumps the database once a day at `BACKUP_TIME` into the
-`backups_volume`, keeping the newest `BACKUP_RETENTION`.
-
-```bash
-docker compose run --rm backup python manage.py backup_database
-```
-
-Restore names its target explicitly and never defaults it, because dumping
-the live database is harmless and restoring over it is not:
-
-```bash
-docker compose exec db psql -U reeltalk -d postgres -c 'CREATE DATABASE reeltalk_restore'
-docker compose run --rm backup python manage.py restore_database /app/backups/<dump>.dump --into reeltalk_restore
-```
-
-| Flag | Meaning |
-|---|---|
-| `<dump>` | Path to the custom format dump. Refuses if it does not exist. |
-| `--into <db>` | Required, no default. Never creates a database, so a typo fails loudly instead of silently making an empty one. |
-| `--force` | Additionally required to restore over the live database. |
-| `--clean` | Drop and recreate objects in a target that already has a schema. |
-
-### 10. Troubleshooting
+### 9. Troubleshooting
 
 | Symptom | Cause |
 |---|---|

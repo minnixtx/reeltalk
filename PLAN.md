@@ -121,8 +121,8 @@ Docker-first. The stack grows per milestone (owner direction: grow the stack as 
 
 - **M1–M3 services (2):** `web` (uvicorn + Django; serves the site AND static/media itself via whitenoise + a media URL pattern) on `${WEB_PORT:-3030}`, and `db` (Postgres 17). No proxy, no Redis, no task queue — M1 has zero background tasks.
 - **M2+ services (3):** a `worker` (same image, Django-Q2 `qcluster`) joins for the TMDB backfill task; its cluster lives in Postgres, so still no Redis.
-- **Public deploy (M6):** the same containers behind the operator's own TLS-terminating reverse proxy (D14). No in-project proxy at any milestone; a daily `pg_dump` backup job lands before public deploy.
-- **Volumes:** `pgdata`, `static_volume`, `media_volume` (posters/avatars); `exports_volume` + `backups` land with M3/M6 as needed.
+- **Public deploy (M6):** the same containers behind the operator's own TLS-terminating reverse proxy (D14). No in-project proxy at any milestone. Backups are likewise the operator's job: the built-in daily `pg_dump` service shipped at M6 was **removed 2026-10-14** (see the NOW block in PROGRESS.md), the same reasoning as D14.
+- **Volumes:** `pgdata`, `static_volume`, `media_volume` (posters/avatars); `exports_volume` lands with M3 as needed.
 - **Entrypoint behavior:** the web container auto-runs migrations + collectstatic on start (no manual migrate step); an `initdb` management command seeds permissions/site settings idempotently. The image runs as a non-root user.
 - **TLS policy (D14):** none in-project; operator reverse proxy in front of :3030 forwarding `X-Forwarded-Proto`. `CSRF_TRUSTED_ORIGINS` env-overridable for extra access origins (LAN IP, etc.).
 - **Env:** `.env` with `DOMAIN`, generated secrets (`SECRET_KEY`, `POSTGRES_PASSWORD`), optional `REELTALK_TMDB_API_KEY`, optional SMTP vars; a `setup.sh` generates the secrets safely.
@@ -266,9 +266,11 @@ New and changed dependencies from the stack audit (§3.9), same method as §4.1 
 
 ### 4.7 M6 additions (2026-09-14)
 
-| Package | License (verified) | Verdict |
-|---|---|---|
-| **postgresql-client** (Debian system package, in-image) — new, for the daily `pg_dump` backup job | PostgreSQL License (the permissive license Postgres ships under; a BSD-style grant) | ✅ Provides `pg_dump`/`pg_restore` inside the app image so the tested `backup_database` command runs in-container and from the `backup` service. Not a Python dependency (no `pyproject.toml` change); installed via apt in the Dockerfile alongside the already-present `libpq5`. |
+No surviving additions. The one entry here was `postgresql-client`
+(Debian system package, PostgreSQL License), added for the daily `pg_dump`
+backup job and **removed 2026-10-14** with that job. `libpq5` stays: it is
+the runtime client library psycopg needs, a different package, audited with
+the base image.
 
 ## 5. Milestone status — the build sequence is complete
 
@@ -325,7 +327,7 @@ uv.lock                 # committed lockfile — Docker builds use `uv sync --fr
 Dockerfile              # python:3.13-slim, uv venv at /app/.venv, non-root appuser;
                         # one image serves web (and the M2 worker role)
 docker-compose.yml      # web (uvicorn on :3030) + db (postgres:17) + worker (Django-Q2,
-                        # joined at M2) + backup (daily pg_dump, joined at M6)
+                        # joined at M2)
 entrypoint.sh           # auto migrate + collectstatic on web start
 .env.example / setup.sh # config template + secret generation
 manage.py               # Django entry point
