@@ -18,9 +18,7 @@ Both paths clone this repo, because the Compose files, `.env.example` and
 `setup.sh` all live in it. Neither needs Python or a package manager on your
 host.
 
-This section is the source of truth for installing and upgrading.
-
-### What you need first
+### Requirements
 
 - **Docker with the Compose plugin** (`docker compose version`).
 - **A domain name** pointing at your server. ReelTalk federates, so its
@@ -63,19 +61,19 @@ Optional, and most installs want some of them:
 | Key | Default | Notes |
 |---|---|---|
 | `REELTALK_TMDB_API_KEY` | unset | Free key from themoviedb.org. Without it, film search falls back to the local library only. |
-| `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS` | unset | Real mail. See step 4 for the sender rule that bites. |
+| `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS` | unset | Your email parameters. |
 | `EMAIL_SENDER_NAME` | `admin` | Local part of the From address. |
 | `EMAIL_SENDER_DOMAIN` | `DOMAIN` | Domain part of the From address. |
 | `CANONICAL_ORIGIN` | `https://DOMAIN` | The origin every ActivityPub identity is minted from. Set it only if that is wrong for you, and never to a LAN address. |
 | `WEB_PORT` | `3030` | Host port the web container publishes. |
-| `CSRF_TRUSTED_ORIGINS` | unset | Needed if you reach the instance by a hostname other than `DOMAIN`. |
+| `CSRF_TRUSTED_ORIGINS` | unset | Comma-separated list of full origins (scheme, host and port) that a browser may post forms to. Not a yes/no switch, and the scheme is required. Leave it unset for a normal single-domain https install; add one entry per extra origin you actually type into a browser. Example: `CSRF_TRUSTED_ORIGINS=https://reeltalk.example.com,http://192.168.1.50:3030` |
 | `TRUSTED_PROXIES` | the private ranges | Which peers may tell us a request arrived over https, and which hops to skip when reading the client address. A proxy on your LAN or on the Compose network needs no value at all. |
 | `BACKUP_TIME` / `BACKUP_RETENTION` | `03:17` / `7` | Daily dump schedule. |
 | `ALLOWED_HOSTS` | `DOMAIN` plus localhost | Add extra hostnames here. |
 
 Leave `DEBUG` off. Do not turn it on for anything reachable over a network.
 
-Two things that will bite you, both verified on a real install:
+Please note the following:
 
 **Reaching the instance by IP address.** `ALLOWED_HOSTS` defaults to your
 `DOMAIN` plus localhost. Browse to a raw IP and every request returns HTTP
@@ -97,23 +95,17 @@ as described in step 4.
 
 ### 3. Start
 
-Build from source:
+To build the image yourself:
 
 ```bash
 docker compose up -d --build
 ```
 
-Prebuilt image:
+To use the official maintainer image:
 
 ```bash
 docker compose -f docker-compose.prebuilt.yml up -d
 ```
-
-The prebuilt file pins every app role to the same published tag
-(`minnixtx/reeltalk:${REELTALK_VERSION:-0.1.0}`) and contains no `build:`
-key anywhere, which is what makes it pull only. It uses the same project name
-and the same named volumes as `docker-compose.yml`, so moving between the two
-paths reuses your data instead of orphaning it.
 
 Wait for the web container to report healthy:
 
@@ -127,21 +119,68 @@ set, and make sure it forwards `X-Forwarded-Proto: https` and the original
 
 ### 4. Mail (SMTP)
 
-This is the part most installs get wrong, and it is not cosmetic. Every
-account has to verify its address before it can sign in, so if mail does not
-work then nobody, including you, can get in.
+If you do not setup email, you will have to access your token from the
+docker logs.
 
-Set the five `EMAIL_*` keys in `.env`. The rule that bites: many mail servers
-reject a message whose envelope sender is not the account you authenticated
-as. ReelTalk builds From from `EMAIL_SENDER_NAME@EMAIL_SENDER_DOMAIN`, so
-that pair must agree with `EMAIL_HOST_USER`. A mismatch does not fail at
-startup. It fails per send inside the worker, so it looks like a broken
-feature rather than a bad config. Check the pair before you create the first
+Set the five `EMAIL_*` keys in `.env`.
+
+One rule breaks more installs than everything else combined. Many mail servers
+refuse to send a message whose envelope sender is not the account you
+authenticated as. ReelTalk builds its From address from
+`EMAIL_SENDER_NAME@EMAIL_SENDER_DOMAIN`, so that pair has to add up to
+`EMAIL_HOST_USER`. Get the two to match and the rule never fires.
+
+It bites by default because `EMAIL_SENDER_NAME` and `EMAIL_SENDER_DOMAIN`
+fall back to `admin@<your instance host>`, and that is almost never a real
+mailbox on your mail server. A mismatch also does not fail at startup: it
+fails on every individual send inside the worker, so it reads as a broken
+feature rather than a bad setting. Check the pair before you create the first
 account:
 
 ```bash
 grep -E 'EMAIL_HOST_USER|EMAIL_SENDER_NAME|EMAIL_SENDER_DOMAIN' .env
 ```
+
+Two worked examples.
+
+A mailbox on a provider you sign up for, Gmail for instance. Google will not
+accept your normal account password over SMTP, so turn on two-step
+verification first and then generate a 16-character app password at
+myaccount.google.com/apppasswords. Gmail enforces the sender rule too, so the
+From pair has to be your Gmail address and not your instance domain:
+
+```
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=true
+EMAIL_HOST_USER=you@gmail.com
+EMAIL_HOST_PASSWORD=xxxxxxxxxxxxxxxx
+EMAIL_SENDER_NAME=you
+EMAIL_SENDER_DOMAIN=gmail.com
+```
+
+Yahoo works the same way: `smtp.mail.yahoo.com`, port 587, and an app password
+from your Yahoo account security page. A free mailbox is a good fit for a
+private single-user instance, which is what most people want here. It is a poor
+fit for an open one, because a free mailbox caps how many messages you can send
+a day and every verification mail arrives from a personal address.
+
+A mail server on your own domain, which is what you want once the instance has
+a few people on it:
+
+```
+EMAIL_HOST=mail.example.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=true
+EMAIL_HOST_USER=reeltalk@example.com
+EMAIL_HOST_PASSWORD=...
+EMAIL_SENDER_NAME=reeltalk
+EMAIL_SENDER_DOMAIN=example.com
+```
+
+Notice that in both examples the From pair is just `EMAIL_HOST_USER` split at
+the `@`. That is the whole rule. If you can say the two halves out loud and
+they reassemble into the account you log in with, your mail will go out.
 
 If you have not configured mail at all, the console backend prints each
 message to the worker log instead of sending it. During setup that log is
@@ -248,17 +287,7 @@ docker compose run --rm backup python manage.py restore_database /app/backups/<d
 | `--force` | Additionally required to restore over the live database. |
 | `--clean` | Drop and recreate objects in a target that already has a schema. |
 
-### 10. Image tags
-
-Published on Docker Hub as `minnixtx/reeltalk`, with no `v` prefix:
-
-- `0.1.0`: exact version. Pin this.
-- `0.1`: the minor line.
-- `0`: the major line.
-- `latest`: newest stable release. Prereleases publish their own tag and do
-  not move `latest`.
-
-### 11. Troubleshooting
+### 10. Troubleshooting
 
 | Symptom | Cause |
 |---|---|

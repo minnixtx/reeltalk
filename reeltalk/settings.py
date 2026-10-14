@@ -337,16 +337,16 @@ else:
 # ``EMAIL_SENDER_DOMAIN`` overrides the domain the From address is minted on,
 # falling back to the instance's own host. The override is not cosmetic. A
 # mail server that authenticates a user and then refuses any envelope sender
-# which is not that user — the anti-spoofing rule YunoHost/Postfix enforce
-# as ``554 5.7.1 <rcpt>: Recipient address rejected: Sender is not same as
-# SMTP authenticate username`` — forces the From address and
-# ``EMAIL_HOST_USER`` to agree, and the instance's own host is frequently
-# not the mail account's domain (this instance is ``reeltalk.minnix.dev``,
-# the mail account is on ``minnix.dev``). With no knob here there is no way
-# to express that from ``.env``, so every send fails at the server however
-# correctly everything else is configured — and because the failure happens
-# in the worker it would show up as a failed task rather than a
-# misconfiguration someone could spot.
+# which is not that user — the anti-spoofing rule Postfix enforces via
+# ``reject_sender_login_mismatch`` as ``554 5.7.1 <rcpt>: Recipient address
+# rejected: Sender is not same as SMTP authenticate username`` — forces the
+# From address and ``EMAIL_HOST_USER`` to agree, and the instance's own host
+# is frequently not the mail account's domain (this instance is
+# ``reeltalk.minnix.dev``, the mail account is on ``minnix.dev``). With no
+# knob here there is no way to express that from ``.env``, so every send
+# fails at the server however correctly everything else is configured — and
+# because the failure happens in the worker it would show up as a failed
+# task rather than a misconfiguration someone could spot.
 #
 # Unset preserves the previous behaviour exactly: ``admin@<instance host>``.
 DEFAULT_FROM_EMAIL = (

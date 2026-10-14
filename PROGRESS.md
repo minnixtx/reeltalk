@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-13
+**Last updated:** 2026-10-14
 
 ---
 
@@ -9,91 +9,112 @@
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
 
+- **THE NEXT JOB IS REMOVING THE BACKUP FEATURE (owner decision 2026-10-14).**
+  The daily `pg_dump` backup service, `backup-loop.sh`, `backup_database`,
+  `restore_database`, `BACKUP_DIR`/`BACKUP_RETENTION`, `backups_volume` and
+  the `postgresql-client` apt line all come out. **Why:** the owner wants
+  ReelTalk lean and scoped to what it is for; backups are the operator's
+  job, "the same reason I didn't include any TLS termination in the project
+  and left that up to the user." It is a deliberate repeat of the D14
+  no-in-project-proxy call, not an oversight. Full removal inventory, the
+  ordering trap, and the docs that have to change are in
+  `.qwen/tmp/reeltalk-backup-removal-handoff.md`. **This is a real code
+  removal and needs a full gate before it ships.**
+- **The research behind that call, done 2026-10-14 (the split, not a
+  majority).** **BookWyrm** ships it built-in and automatic: a
+  `db-backup-job` service in `docker-compose.yml` built from a local
+  `postgres-docker` dir, dumping daily at midnight UTC into a `backups`
+  volume. **Pixelfed** ships `php artisan backup:run` (spatie/laravel-backup)
+  but does **not** schedule it: all 23 entries in
+  `bootstrap/scheduledtasks.php` are gc/maintenance tasks, no backup among
+  them, so the operator wires the cron. **Mastodon** has no built-in backup
+  at all; `docs.joinmastodon.org/admin/backups/` makes it the operator's
+  job (`pg_dump`, save `.env.production`, copy `public/system`, copy Redis
+  `dump.rdb`), and `tootctl accounts backup` is a per-user GDPR export,
+  not an instance backup. **Lemmy** likewise hands the operator a
+  `pg_dumpall | gzip` command and a sample rsync script. So one of four has
+  it automatic, one ships the tool without the schedule, two leave it out.
+  The owner read that as support for removal.
 - **First release is prepared and unblocked, not yet published (2026-10-14).**
-  Version **v0.1.0**, to be marked GitHub **Latest**. The secrets blocker
-  recorded yesterday is **closed**: the owner has set `DOCKERHUB_USERNAME`
-  and `DOCKERHUB_ACCESS_TOKEN`, confirmed present via `gh secret list`.
-  Nothing is on Docker Hub yet — `minnixtx/reeltalk` still has **0 tags,
-  0 pulls**.
-- **Publishing is authorised only on the owner's explicit go-ahead.** A tag
-  and a public image are effectively permanent; do not create them unprompted.
-  When it does go out, verify the multi-arch manifest actually landed
-  (`docker buildx imagetools inspect`) rather than trusting a green check.
-- **New instances now ship invite-only** (owner decision, 2026-10-14).
-  `SiteSettings.signup_policy` default flipped `open` → `invite`, with
-  migration `social/0020_alter_sitesettings_signup_policy` (an `AlterField`;
-  existing rows keep whatever they chose). The safe state is the one you get
-  by doing nothing, and opening signup becomes a deliberate act in the admin.
-  **Verified safe before flipping:** `setup()` gates only on `has_admin()`,
-  never on `signup_policy`, so a closed default cannot lock out the
-  first admin.
-- **The default change moved 11 test files, and the interesting ones were the
-  tests that would have gone quietly vacuous.** Tests that rode the old open
-  default now call `reeltalk/tests/signup.py::open_signup()` by name. Four
-  throttle tests failed outright; but `test_a_signup_that_reaches_no_uniqueness_check_is_not_counted`
-  and `test_an_addressless_signup_is_refused_rather_than_built_unverifiable`
-  were passing on the **closed door** rather than on the property their names
-  claim, and `test_a_banned_localname_cannot_be_re_registered_*` would have
-  proven the reservation while actually proving the lockout. All opened
-  explicitly. Two more surfaced late by asserting the visible text `"Sign up"`
-  instead of `href="/signup/"` (`test_home_rail`, `test_user_films`) — a
-  substring sweep on the href alone misses them.
-- **README.md is now the single source of truth for deployment.** New
-  `## Deployment` section covers both install paths, every `.env` parameter,
-  SMTP, the first-run admin, volumes, upgrades, backup/restore, image tags
-  and troubleshooting. `INSTALL.md` is a redirect stub, so there is one
-  document to update rather than two that can drift.
-- **Release-blocking tag bug caught before publishing, not after.** The
-  workflow's `type=semver,pattern={{version}}` publishes the **bare**
-  version (`0.1.0`), but `docker-compose.prebuilt.yml` defaulted to
-  `REELTALK_VERSION:-v0.1.0`. Every pull-path install would have died with
-  `failed to resolve reference ... not found` — the exact symptom my own
-  install doc lists as a troubleshooting item. Default corrected to `0.1.0`.
-- **Gate is green: 2519 passed, 5 skipped**, all four markers `0`
-  (`RUFF_CHECK`, `RUFF_FORMAT`, `MIGRATIONS`, `PYTEST`). Baseline was
-  2514 passed + 5 skipped; the delta is the new signup coverage. Log
-  `/tmp/inc6-gate.log`.
-- **Em dashes: release-facing text only** (owner instruction). README.md is
-  at 0 and the release notes follow the same rule. `DEPLOYING.md`,
-  `PLAN.md`, `PROGRESS.md` and `REWRITE.md` keep theirs as internal history,
-  and **no code, template or user-visible string was touched for this.**
-- **Secret-leak fix in `.dockerignore` (closed).** It excluded `.env` and
-  `.env.dev` but this tree also holds **`.env.b`**, and `COPY . /app/` would
-  have baked it into every published image. Now `.env` + `.env.*` with
-  `!.env.example`, plus `.coverage`. Rebuilt and verified: the image holds
-  only `.env.example`.
-- **Real SMTP delivery proven** against `mail.minnix.dev` on 587/STARTTLS,
-  receipt confirmed over IMAPS with a before/after baseline (1025 → 1026).
-  From `minnix@minnix.dev` equals `EMAIL_HOST_USER`, so the anti-spoof rule
-  is satisfied by the shipped defaults.
-- **Two install gotchas confirmed on a real install, both documented.** Raw
-  IP returns **HTTP 400** unless `ALLOWED_HOSTS` names it, and forms then
-  need `CSRF_TRUSTED_ORIGINS`. The emailed verify link is minted from
-  `CANONICAL_ORIGIN` = `https://DOMAIN`, so it is dead-on-arrival until TLS
-  actually answers.
-- **The published image ships the Python dev toolchain** (`pytest`, `ruff`,
-  `mypy`, `coverage` — ~26MB of 165MB site-packages) because the gate runs
-  pytest *inside the baked image*. Owner chose to ship as-is for v0.1.0
-  rather than change the build path the gate rests on. A slim runtime stage
-  is deferred, not forgotten.
-- **Architectures: amd64 + arm64 on GitHub Actions.** Every platform-specific
-  dependency in `uv.lock` carries an aarch64 wheel, so nothing compiles from
-  source under emulation. This box cannot build arm64 itself (buildx default
-  driver is `docker`, amd64 only, no QEMU binfmt handler).
+  Version **v0.1.0**, to be marked GitHub **Latest**. Both Docker Hub
+  secrets are set (`DOCKERHUB_USERNAME`, `DOCKERHUB_ACCESS_TOKEN`). Nothing
+  is on Docker Hub yet — `minnixtx/reeltalk` still has **0 tags, 0 pulls**.
+  **Publishing is authorised only on the owner's explicit go-ahead.** A tag
+  and a public image are effectively permanent; do not create them
+  unprompted. When it does go out, verify the multi-arch manifest actually
+  landed (`docker buildx imagetools inspect`) rather than trusting a green
+  check.
+- **New instances ship invite-only** (owner decision, 2026-10-14).
+  `SiteSettings.signup_policy` default is `invite`, via migration
+  `social/0020_alter_sitesettings_signup_policy` (an `AlterField`;
+  existing rows keep what they chose). **Verified safe before flipping:**
+  `setup()` gates only on `has_admin()`, never on `signup_policy`, so a
+  closed default cannot lock out the first admin. The change moved 11 test
+  files, and the interesting ones were the tests that would have gone
+  quietly vacuous: `reeltalk/tests/signup.py::open_signup()` now names the
+  open door where a test needs it. Two surfaced late by asserting the
+  visible text `"Sign up"` rather than `href="/signup/"`, which a
+  substring sweep on the href alone misses.
+- **README.md is the single source of truth for deployment**, and this
+  session reshaped its prose on the owner's review. `INSTALL.md` is a
+  redirect stub. The `## Deployment` section now runs 1-10: Configure, the
+  `.env` parameters, Start, Mail, first-run admin, signup policy, volumes,
+  upgrading, backups, troubleshooting. **The `Image tags` section was
+  deleted** and `Troubleshooting` renumbered into its place.
+- **The mail section was rewritten around one plain statement of the rule**,
+  because the owner's questions showed the old phrasing hid it: the From
+  pair is just `EMAIL_HOST_USER` split at the `@`, so matching the two
+  means the rule never fires. Added **two worked examples** — a Gmail
+  app-password setup and a same-domain mail server setup — because a
+  private single-user instance fed by a free mailbox is a real and wanted
+  shape. Both examples put `EMAIL_SENDER_NAME`/`EMAIL_SENDER_DOMAIN` on the
+  mail account, not the instance host.
+- **A factual error of mine is corrected in the tree.** A code comment in
+  `settings.py` attributed the anti-spoof rejection to **YunoHost**. The
+  owner runs **iRedMail on a Debian VM**. The comment now names the actual
+  mechanism instead of a guessed product: Postfix's
+  `reject_sender_login_mismatch`. **The mechanism was always right** — the
+  `554 5.7.1 ... Sender is not same as SMTP authenticate username`
+  rejection is real, was thrown at us, and is what `EMAIL_SENDER_NAME`/
+  `EMAIL_SENDER_DOMAIN` exist for. Only the product label was invented.
+  iRedMail ships Postfix, so nothing downstream changes.
+- **`CSRF_TRUSTED_ORIGINS` is now explained as what it is**: a
+  comma-separated list of full origins including scheme, host and port,
+  not a yes/no switch, left unset for a normal single-domain https install,
+  with a worked value. The old one-liner ("needed if you reach the instance
+  by a hostname other than DOMAIN") read like a boolean.
+- **Verification this session was scoped to what changed.** The tree moved
+  only `README.md` (docs) and one **comment-only** change in
+  `settings.py`, confirmed comment-only by diffing and filtering out `#`
+  lines. `ruff check` and `ruff format --check` both exit `0` on
+  `settings.py`, and it parses. **The full pytest gate was not re-run**,
+  because nothing executable changed. The last full gate stands at **2519
+  passed, 5 skipped**, all four markers `0`. Treat that as the baseline the
+  backup removal has to return to.
+- **Em dashes: release-facing text only** (standing owner instruction).
+  `README.md` is at **0**. `DEPLOYING.md`, `PLAN.md`, `PROGRESS.md` and
+  `REWRITE.md` keep theirs as internal history, and **no code, template or
+  user-visible string was touched for this.**
 - **Standing product constraints unchanged:** no third home column; genre
-  feeds stay 20/page; no virtualisation, scroll restoration, mid-scroll deep
-  links or live home updates; TMDB primary with manual fallback; no new
-  `Notification.Kind`; mirrors notify nobody; federation is fix-forward,
-  not a relay; deployment stays independent of the owner's proxy.
+  feeds stay 20/page; no virtualisation, scroll restoration, mid-scroll
+  deep links or live home updates; TMDB primary with manual fallback; no
+  new `Notification.Kind`; mirrors notify nobody; federation is
+  fix-forward, not a relay; deployment stays independent of the owner's
+  proxy. **Add to these: the app does not do the operator's backups, and
+  does not terminate TLS.** Both are the operator's, by design.
 - **Gate mechanics unchanged:** rebuild all Compose services after source
-  changes; pytest uses baked source, ruff can mount host; read all four gate
-  markers, not the wrapper exit; never run concurrent pytest against
-  `test_reeltalk`. **One trap hit this session:** killing a gate run at a
-  timeout orphans its `docker compose run` container, which holds
-  `test_reeltalk` and makes every fixture in the rerun die with
-  `DuplicateDatabase`. Clear the orphan and drop the DB before rerunning.
-  Also: `pgrep -f run-gate.sh` self-matches the checking command, so it
-  reports a false "still running".
+  changes; pytest uses baked source, ruff can mount host; read all four
+  gate markers (`RUFF_CHECK`, `RUFF_FORMAT`, `MIGRATIONS`, `PYTEST`), not
+  the wrapper exit; never run concurrent pytest against `test_reeltalk`.
+  **Two traps on record:** killing a gate run at a timeout orphans its
+  `docker compose run` container, which holds `test_reeltalk` and makes
+  every fixture in the rerun die with `DuplicateDatabase` — clear the
+  orphan and drop the DB before rerunning. And `pgrep -f run-gate.sh`
+  self-matches the checking command, so it reports a false "still running";
+  detect completion by the `PYTEST_EXIT=` marker appearing in the log.
+  **Working lint invocation** (ruff is not on the image's PATH; the gate
+  bind-mounts the host tree read-only):
+  `docker compose run --rm --no-deps -v "$PWD":/host:ro,z web sh -c "cd /host && ruff check --cache-dir /tmp/rc ."`
 
 ## 1. Current state
 
