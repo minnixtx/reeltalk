@@ -5,8 +5,8 @@
 #   M2+: a `worker` service (same image, Django-Q2 qcluster) joins for the
 #        TMDB backfill task. No Redis, no nginx, no Celery at any milestone.
 #
-# Host quirks this file accounts for (see PLAN.md §6):
-#   - :z on bind mounts (SELinux shared label; no-op on non-SELinux hosts)
+# All three volumes below are named, not host bind mounts, so there is no
+# host-specific mount labelling to account for here.
 name: reeltalk
 
 x-logging:

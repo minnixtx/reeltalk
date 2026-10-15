@@ -73,7 +73,7 @@ echo
 echo "  Or pull the prebuilt image from Docker Hub (no build):"
 echo "    docker compose -f docker-compose.prebuilt.yml up -d"
 echo
-echo "  Then: curl -4 http://localhost:3030   (IPv6 docker-proxy quirk on this host)"
+echo "  Then: curl http://localhost:3030"
 echo
 echo "The site is plain HTTP; terminate TLS with your own reverse proxy."
 echo "A brand-new instance redirects to /setup/ to create the first admin."
