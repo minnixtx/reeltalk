@@ -27,12 +27,18 @@ gen_secret() {
     fi
 }
 
+PLACEHOLDER_DOMAIN="your-instance.example.com"
+
 domain="$(get_var DOMAIN)"
-if [ -z "$domain" ] || [ "$domain" = "your-instance.example.com" ]; then
+if [ -z "$domain" ] || [ "$domain" = "$PLACEHOLDER_DOMAIN" ]; then
     if [ -t 0 ]; then
         read -r -p "DOMAIN (e.g. films.example.com): " domain || domain=""
     fi
-    if [ -z "${domain:-}" ]; then
+    # Re-checked against the placeholder, not just emptiness. With no TTY the
+    # prompt above is skipped, so the placeholder survives as a non-empty
+    # value and a scripted install would come up minted on a domain nobody
+    # owns. Fail loudly instead.
+    if [ -z "${domain:-}" ] || [ "$domain" = "$PLACEHOLDER_DOMAIN" ]; then
         echo "DOMAIN is required. Set it in $ENV_FILE and re-run." >&2
         exit 1
     fi
