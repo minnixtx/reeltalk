@@ -62,6 +62,73 @@ FORWARDED_FOR_META = "HTTP_X_FORWARDED_FOR"
 #: several distinct assets) is not mistaken for a whole user base.
 COLLAPSE_SAMPLE = 50
 
+#: CDNs whose published egress ranges we recognise for diagnosis only.
+#:
+#: This list grants nothing. It is not consulted by :func:`is_trusted_proxy`,
+#: :func:`client_ip` or the scheme decision, so shipping it cannot widen who
+#: we believe; the only thing it changes is whether a deployer is *told* what
+#: is in front of them. Adding a CDN here is a convenience for reading the
+#: warning, never a step toward trusting it.
+#:
+#: Ranges are each provider's own published edge blocks. Cloudflare is here
+#: because it is the common case of a proxy sitting in front of a proxy: it
+#: is free, it is one DNS toggle, and it rotates egress per connection,
+#: which is precisely the shape that hides from a detector looking for one
+#: repeated address. The list is deliberately short. Extend it from the
+#: provider's published ranges, not from a guess.
+KNOWN_CDNS: dict[str, tuple[str, ...]] = {
+    "Cloudflare": (
+        "173.245.48.0/20",
+        "103.21.244.0/22",
+        "103.22.200.0/22",
+        "103.31.4.0/22",
+        "141.101.64.0/18",
+        "108.162.192.0/18",
+        "190.93.240.0/20",
+        "188.114.96.0/20",
+        "197.234.240.0/22",
+        "198.41.128.0/17",
+        "162.158.0.0/15",
+        "104.16.0.0/13",
+        "104.24.0.0/14",
+        "172.64.0.0/13",
+        "131.0.72.0/22",
+    ),
+}
+
+
+def cdn_owning(address) -> str | None:
+    """Which :data:`KNOWN_CDNS` provider owns ``address``, if any.
+
+    Diagnosis only, for the same reason ``KNOWN_CDNS`` grants nothing: the
+    answer is used to name a CDN in a warning, never to decide whether a
+    forwarded header is believed.
+    """
+    addr = _parse(address)
+    if addr is None:
+        return None
+    for name, ranges in KNOWN_CDNS.items():
+        if any(addr in ip_network(spec) for spec in ranges):
+            return name
+    return None
+
+
+def one_cdn_owning_all(addresses) -> str | None:
+    """The single known CDN that owns every address given, or ``None``.
+
+    ``None`` on a mixed set, including any address we cannot parse or cannot
+    place with a known provider: a set holding even one address outside a CDN
+    is evidence the walk is reaching real clients, which is the healthy case
+    and must stay quiet. Shared by the middleware's live warning and
+    ``manage.py check_client_ip`` so the two can never disagree about what
+    "all of these are one CDN" means.
+    """
+    owners = {cdn_owning(address) for address in addresses}
+    if None in owners or len(owners) != 1:
+        return None
+    (name,) = owners
+    return name
+
 
 def _parse(value):
     """``value`` as an address, or ``None``. Never raises."""
@@ -212,28 +279,45 @@ class TrustedProxySchemeMiddleware:
         return self.get_response(request)
 
     def _watch_for_collapse(self, request) -> None:
-        """Warn once if every proxied request resolves to one address.
+        """Warn once if no proxied request resolves to a real client.
 
         A deploy cannot be told at startup that its proxy chain is wrong,
         because the failure is invisible without traffic: the settings look
         identical whether or not a CDN sits upstream of the proxy. So this
-        watches the first ``sample_size`` proxied requests and warns when not
-        one of them resolved to a distinct client.
+        watches the first ``sample_size`` proxied requests and judges them
+        once, against two distinct shapes.
 
-        That is the signature of "your entire user base counts as one
-        source" — either the proxy is not forwarding ``X-Forwarded-For`` at
-        all, or it is behind a CDN whose ranges are not in
-        ``TRUSTED_PROXIES``, so the CDN's egress address is what every
-        limit keys on. It is also the signature of an instance that
-        genuinely has one user, which is why the message says so instead of
-        asserting a fault.
+        **One address** (``_warn_single_source``). Every request resolved to
+        the same client address: either the proxy is not forwarding
+        ``X-Forwarded-For`` at all, or it sits behind a CDN whose ranges
+        are not in ``TRUSTED_PROXIES``.
+
+        **Many addresses, one CDN** (``_warn_rotating_cdn``). The addresses
+        differ, which is why the first shape cannot see it, but every one of
+        them falls inside a single known CDN's published egress ranges. A
+        CDN that rotates egress per connection produces this shape on every
+        request, so a detector keyed on a *repeated* address never fires
+        and the deployer gets no warning at all.
+
+        Both are also the signature of an instance that genuinely has one
+        user, or one upstream provider, which is why each message says so
+        instead of asserting a fault.
         """
         if self._reported or self._seen >= self.sample_size:
             return
         self._seen += 1
         self._resolved.add(client_ip(request))
-        if self._seen < self.sample_size or len(self._resolved) > 1:
+        if self._seen < self.sample_size:
             return
+        if len(self._resolved) == 1:
+            self._warn_single_source(request)
+            return
+        shared = one_cdn_owning_all(self._resolved)
+        if shared is not None:
+            self._warn_rotating_cdn(shared)
+
+    def _warn_single_source(self, request) -> None:
+        """Every sampled request resolved to one address."""
         self._reported = True
         (only,) = self._resolved
         if only == (request.META.get("REMOTE_ADDR") or ""):
@@ -261,6 +345,36 @@ class TrustedProxySchemeMiddleware:
             self.sample_size,
             only,
             detail,
+        )
+
+    def _warn_rotating_cdn(self, name: str) -> None:
+        """Every sampled address belongs to one known CDN, rotating."""
+        self._reported = True
+        logger.warning(
+            "EVERY USER LOOKS LIKE A ROTATING %s EGRESS: the %d proxied "
+            "requests sampled resolved to %d different client addresses, "
+            "and every one of them falls inside %s's published egress "
+            "ranges. %s is sitting in front of your proxy and its ranges "
+            "are not in TRUSTED_PROXIES, so every per-address limit here "
+            "keys on a CDN address rather than on the visitor. This is "
+            "worse than the single-address case in one specific way worth "
+            "stating plainly: the budget is spread over a pool of addresses "
+            "that a single attacker never exhausts, while two real visitors "
+            "who happen to land on the same egress address still lock each "
+            "other out. Add %s's published ranges to TRUSTED_PROXIES so the "
+            "walk skips them and reaches the real client. Run `python "
+            "manage.py check_client_ip` for the configured ranges and the "
+            "addresses we have actually been resolving. If every real user "
+            "here genuinely arrives through %s, some of this is "
+            "unavoidable, but the per-address limits still do not mean what "
+            "they appear to mean.",
+            name,
+            self.sample_size,
+            len(self._resolved),
+            name,
+            name,
+            name,
+            name,
         )
 
 

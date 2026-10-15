@@ -24,7 +24,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from reeltalk.proxy_trust import is_trusted_proxy, resolve_chain
+from reeltalk.proxy_trust import is_trusted_proxy, one_cdn_owning_all, resolve_chain
 from reeltalk.social.models import EmailVerificationToken
 from reeltalk.social.verify import RESEND_IP_LIMIT, RESEND_IP_WINDOW_MINUTES
 
@@ -202,12 +202,28 @@ class Command(BaseCommand):
                 "in front of it — add the CDN's ranges to TRUSTED_PROXIES."
             )
         else:
-            self.stdout.write(
-                f"{'VERDICT':{LABEL_WIDTH}}Distinct addresses are being "
-                "resolved, so per-address limits key on distinct clients. "
-                f"Each address may mint {RESEND_IP_LIMIT} mails per "
-                f"{RESEND_IP_WINDOW_MINUTES} minutes before it is limited."
-            )
+            shared = one_cdn_owning_all(distinct)
+            if shared is not None:
+                self.stdout.write(
+                    f"{'VERDICT':{LABEL_WIDTH}}Every counted send resolved "
+                    f"to a {shared} egress address ({len(distinct)} distinct "
+                    "ones). That is a rotating CDN in front of your proxy: "
+                    "the addresses look distinct, so a check for one "
+                    "repeated address calls this healthy, but none of them "
+                    "is the visitor. Per-address limits here key on "
+                    f"{shared}'s pool, which one attacker never exhausts "
+                    "while two real users landing on the same egress still "
+                    f"lock each other out. Add {shared}'s published ranges "
+                    "to TRUSTED_PROXIES so the walk skips them and reaches "
+                    "the real client."
+                )
+            else:
+                self.stdout.write(
+                    f"{'VERDICT':{LABEL_WIDTH}}Distinct addresses are being "
+                    "resolved, so per-address limits key on distinct clients. "
+                    f"Each address may mint {RESEND_IP_LIMIT} mails per "
+                    f"{RESEND_IP_WINDOW_MINUTES} minutes before it is limited."
+                )
         self.stdout.write("")
 
     # -- formatting -------------------------------------------------------

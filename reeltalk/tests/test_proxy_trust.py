@@ -41,9 +41,11 @@ from reeltalk.proxy_trust import (
     FORWARDED_FOR_META,
     FORWARDED_PROTO_META,
     TrustedProxySchemeMiddleware,
+    cdn_owning,
     client_ip,
     forwarded_chain,
     is_trusted_proxy,
+    one_cdn_owning_all,
 )
 from reeltalk.social.models import EmailVerificationToken
 from reeltalk.tests.members import unverified_member
@@ -485,6 +487,100 @@ def test_the_middleware_starts_at_the_production_sample_size():
     with override_settings(TRUSTED_PROXIES=[f"{NPM}/32"]):
         middleware = TrustedProxySchemeMiddleware(lambda r: HttpResponse("ok"))
     assert middleware.sample_size == COLLAPSE_SAMPLE
+
+
+# -- the rotating-CDN diagnostic ----------------------------------------
+
+# Real published Cloudflare egress addresses, from the provider's own list.
+# Using several distinct ones is the point: rotation is what hid this failure
+# from the one-address detector, so a test built on a single repeated address
+# would prove nothing about it.
+CF_A = "172.70.94.100"
+CF_B = "172.69.65.234"
+CF_C = "198.41.227.148"
+CF_D = "104.16.0.1"
+
+
+def rotating_messages(caplog):
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if "ROTATING" in r.getMessage() and "EGRESS" in r.getMessage()
+    ]
+
+
+def test_cdn_owning_recognises_a_published_range_and_nothing_else():
+    assert cdn_owning(CF_A) == "Cloudflare"
+    assert cdn_owning(CF_C) == "Cloudflare"
+    # TEST-NET and a real non-CDN address are nobody's egress; an
+    # unparseable value must not raise on the way to saying so.
+    assert cdn_owning("203.0.113.9") is None
+    assert cdn_owning("97.98.21.119") is None
+    assert cdn_owning("not-an-ip") is None
+    assert cdn_owning("") is None
+
+
+def test_one_cdn_owning_all_needs_every_address_to_agree():
+    assert one_cdn_owning_all([CF_A, CF_B, CF_C]) == "Cloudflare"
+    # One address outside the CDN is evidence the walk is reaching real
+    # clients, so the whole set reads as healthy.
+    assert one_cdn_owning_all([CF_A, CF_B, "203.0.113.9"]) is None
+    assert one_cdn_owning_all([CF_A, "not-an-ip"]) is None
+    assert one_cdn_owning_all([]) is None
+
+
+def test_the_warning_fires_when_every_address_is_one_rotating_cdn(caplog):
+    # The shape that hid: four requests, four different resolved addresses,
+    # all of them Cloudflare egress. Against the previous detector this
+    # produced no warning at all, because it only ever looked for ONE
+    # repeated address.
+    run_middleware(
+        [(NPM, cf) for cf in (CF_A, CF_B, CF_C, CF_D)],
+        caplog,
+    )
+    (message,) = rotating_messages(caplog)
+    assert "Cloudflare" in message
+    assert "check_client_ip" in message
+    assert "TRUSTED_PROXIES" in message
+    # Distinct from the single-source warning, which has different words and
+    # a different remedy.
+    assert collapse_messages(caplog) == []
+
+
+def test_a_mixed_sample_reaching_one_real_client_stays_quiet(caplog):
+    # One non-CDN address in the set means the walk does reach real clients,
+    # so warning here would be a false positive of exactly the kind that
+    # trains a deployer to ignore the real ones.
+    run_middleware(
+        [(NPM, cf) for cf in (CF_A, CF_B, CF_C)] + [(NPM, "203.0.113.9")],
+        caplog,
+    )
+    assert rotating_messages(caplog) == []
+    assert collapse_messages(caplog) == []
+
+
+def test_the_rotating_warning_fires_only_once_per_process(caplog):
+    cases = [(NPM, cf) for cf in (CF_A, CF_B, CF_C, CF_D)] * 3
+    run_middleware(cases, caplog)
+    assert len(rotating_messages(caplog)) == 1
+
+
+def test_a_trusted_cdn_does_not_produce_the_rotating_warning(caplog):
+    # If the operator has already added the CDN's ranges, the walk skips
+    # past them to the real client, so the sampled addresses are not CDN
+    # addresses and nothing should fire. This is the fixed-deploy case.
+    run_middleware(
+        [
+            (NPM, f"{CF_A}, 203.0.113.9"),
+            (NPM, f"{CF_B}, 203.0.113.10"),
+            (NPM, f"{CF_C}, 203.0.113.11"),
+            (NPM, f"{CF_D}, 203.0.113.12"),
+        ],
+        caplog,
+        trusted=(NPM + "/32", "172.64.0.0/13", "198.41.128.0/17", "104.16.0.0/13"),
+    )
+    assert rotating_messages(caplog) == []
+    assert collapse_messages(caplog) == []
 
 
 # -- manage.py check_client_ip ------------------------------------------
