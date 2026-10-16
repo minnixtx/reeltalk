@@ -14,8 +14,8 @@ disagrees with this block, this block is current and the other is history.**
 - **Left for the owner, deliberately not done here: `reeltalk-backup-1` is still running.** It was up (25h) when the Compose edit landed, so it is now an **orphan** and every `docker compose run` prints the orphan warning. Touching the live stack was outside this session's scope, which was the code removal. Clear it with `docker compose up -d --remove-orphans` or `docker rm -f reeltalk-backup-1` when you choose; the now-unused `reeltalk-backup:latest` image tag is still on disk too.
 - **THE PREBUILT PATH IS PUBLISHED AND PROVEN END TO END (2026-10-15).**
   `v0.1.0` is GitHub **Latest**; the registry carries
-  **`0.1.0`, `0.1`, `0`, `latest`** (plus `0.1.0-rc1`, the candidate that
-  de-risked the pipeline). Each is a real multi-arch OCI index with
+  **`0.1.0`, `0.1`, `0`, `latest`** and nothing else - all four resolve to
+  the one digest `abb9ce8e11cc...`. Each is a real multi-arch OCI index with
   **`linux/amd64` + `linux/arm64`**, confirmed with
   `docker buildx imagetools inspect` rather than by trusting the green
   `Build and push` step. **The default pin was proven with a genuine pull:**
@@ -57,7 +57,7 @@ disagrees with this block, this block is current and the other is history.**
 - **NEXT: nothing is blocked. Both deploy paths are shipped and proven.** The remaining live-test caveats are not defects and both need the owner's keypress, not code:
   - **The real-client path through the public URL** has only ever been measured from inside the LAN, where hairpin NAT corrupts it. Settling it needs a test from outside the LAN, e.g. a phone on cellular.
   - **A fresh `check_client_ip` mail resend** to refresh its recorded send, which sends real mail and must be the owner's action.
-  - **`0.1.0-rc1` GitHub prerelease DELETED (owner instruction 2026-10-15).** The git tag `v0.1.0-rc1` and the registry tag `minnixtx/reeltalk:0.1.0-rc1` (digest `06c170ef9f72`) both still exist - `gh release delete` touches neither. Deleting the registry tag is a separate call if you want the candidate gone entirely.
+  - **`0.1.0-rc1` is FULLY GONE (owner instruction, completed 2026-10-15).** All four objects removed: the GitHub prerelease (`gh release delete`), the git tag `v0.1.0-rc1` (`git push origin :refs/tags/...`; it pointed at `47728d1`, still on `main`, so no history lost), the local image tag, and the Docker Hub tag - the owner deleted that one in the Docker Hub UI because **this box has no Docker Hub login at all** (no `~/.docker/config.json`, no `DOCKER_CONFIG`, nothing in env or `.env`; the only credentials are the write-only Actions secrets). Verified after: `imagetools inspect` on `0.1.0-rc1` returns **`not found`** while `0.1.0`/`0.1`/`0`/`latest` all still resolve to `abb9ce8e11cc...`.
   - **The dev toolchain (~38MB, mostly `ruff`) still ships in the runtime image** because the gate runs inside the baked image. A slim runtime stage is a known, documented follow-up, not urgent.
 - **Em dashes: release-facing text only** (standing owner instruction).
   `README.md` is at **0**. `DEPLOYING.md`, `PLAN.md`, `PROGRESS.md` and
