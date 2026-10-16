@@ -1,5 +1,9 @@
+![ReelTalk](assets/reeltalk-github-banner.jpg)
+
 # ReelTalk
 A federated social network for tracking, reviewing, and discovering films. Free yourself from corporate social media and join a close community of film fans who value being free from spyware and data collection by gathering on a free and open source platform.
+
+Available for amd64 and aarch64.
 
 ## Deployment
 

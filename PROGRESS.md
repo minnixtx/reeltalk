@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-16
 
 ---
 
@@ -9,80 +9,120 @@
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
 
-- **THE BACKUP FEATURE IS REMOVED (owner decision 2026-10-14, landed this increment; recorded as R154, reversing R58).** Out: `backup-loop.sh`, `backup_database`, `restore_database`, `test_backup.py` (7 defs) and `test_restore.py` (17 defs), the `backup` service in **both** Compose files, `backups_volume`, `BACKUP_DIR`/`BACKUP_RETENTION` in `settings.py`, `BACKUP_TIME` in `.env.example`, and `postgresql-client` from the image. **`libpq5` stays** — a different package, the runtime library psycopg needs. The stack is now **two app roles (`web`, `worker`) and three named volumes (`pgdata`, `static_volume`, `media_volume`)**, confirmed with `docker compose config --services` and `--volumes` on both files. **Why:** the owner wants ReelTalk lean and scoped to what it is for; backups are the operator's job, "the same reason I didn't include any TLS termination in the project and left that up to the user." A deliberate repeat of D14, not an oversight, and not open to re-litigation. The decision text and the research behind it are preserved in **§2P**, and the superseded docs bullets from the previous NOW block in **§2Q** — nothing was deleted.
-- **Gate for the removal: 2489 passed, 5 skipped, all four markers `0`** (`RUFF_CHECK`, `RUFF_FORMAT`, `MIGRATIONS`, `PYTEST`), 36:07, after a full `docker compose build`. **No new migration** — removing Python files and settings touches no schema. **The count is 2489, not the 2495 the handoff predicted, and the gap is fully accounted for:** HEAD collected **2524** items; the two deleted files collected **25**, not the 24 you get by counting `def test` lines, because `test_restore.py:91` is `@pytest.mark.parametrize("bad", ["", "   "])`; and the clean-room guard `test_clean_room.py::test_no_bookwyrm_telltale_strings` is itself parametrized over **every file in the repo**, so deleting 5 files removed 5 more cases. 2524 − 25 − 5 = **2494 collected = 2489 passed + 5 skipped**. **Count collected items, not `def test` lines**, in any future handoff.
-- **Left for the owner, deliberately not done here: `reeltalk-backup-1` is still running.** It was up (25h) when the Compose edit landed, so it is now an **orphan** and every `docker compose run` prints the orphan warning. Touching the live stack was outside this session's scope, which was the code removal. Clear it with `docker compose up -d --remove-orphans` or `docker rm -f reeltalk-backup-1` when you choose; the now-unused `reeltalk-backup:latest` image tag is still on disk too.
-- **THE PREBUILT PATH IS PUBLISHED AND PROVEN END TO END (2026-10-15).**
-  `v0.1.0` is GitHub **Latest**; the registry carries
-  **`0.1.0`, `0.1`, `0`, `latest`** and nothing else - all four resolve to
-  the one digest `abb9ce8e11cc...`. Each is a real multi-arch OCI index with
-  **`linux/amd64` + `linux/arm64`**, confirmed with
-  `docker buildx imagetools inspect` rather than by trusting the green
-  `Build and push` step. **The default pin was proven with a genuine pull:**
-  the local `0.1.0` tag was deleted first, so the running container's image
-  ID `abb9ce8e11cc...` could only have arrived over the network. The stack
-  came up healthy on an isolated project, applied 77 migrations, and served
-  `/` **302**, `/login/` **200**, `/setup/` **200**. **Both deploy paths
-  are now proven - do not re-prove them.**
-- **THE PRERELEASE GUARD HELD, WHICH IS WHY THE rc WAS WORTH DOING.**
-  While only `0.1.0-rc1` existed, the registry tag list was **exactly
-  `['0.1.0-rc1']`**: `latest`, `0.1` and `0` were **not** moved. Confirmed
-  against the metadata-action docs - a prerelease extends only
-  `{{version}}`, because pre-releases "are updated frequently, and contain
-  many breaking changes that are (by the author's design) not yet fit for
-  public consumption." **A green `Build and push` step is not the verdict;
-  the manifest and the tag list are.** The rc also proved the Docker Hub
-  token was real and writable before any stable tag was at risk.
-- **New instances ship invite-only** (owner decision, 2026-10-14).
+- **CURRENT GATE: 2495 passed, 5 skipped, all four markers `0`, 35:25
+  (2026-10-16).** The number is the same as the R156 baseline because
+  this increment added **no tests** - read it as "nothing regressed",
+  not as "new coverage". The full detail of what was verified is in
+  **§2R**.
+- **REELTALK INSTALLS ON aarch64, NOT JUST amd64 (verified 2026-10-16).**
+  Not manifest-listed-only: the published `linux/arm64` variant was
+  *booted* under QEMU in an isolated Compose project and came up fully -
+  every migration `OK`, collectstatic 161 files + 449 post-processed,
+  uvicorn bound `0.0.0.0:3030`, `/` 302 -> `/setup/` 200, `/login/`
+  200 with the real field names, and the worker ran `qcluster` with its
+  full forked pool. `uname -m` inside both app containers = `aarch64`.
+  **All 33 packages in the runtime lock closure install from an aarch64
+  wheel at cp313 - nothing compiles from source.** Trap for anyone
+  re-checking this: `cryptography` ships `cp39-abi3`/`cp311-abi3`
+  manylinux2014_aarch64, so grepping the lock for `cp313` alone makes it
+  look sdist-only when it is not. **Limit: emulated, not native ARM
+  hardware.** It proves the image is architecturally correct and the
+  native wheels load and execute; do not claim "tested on real ARM
+  hardware".
+- **THE WEB HEALTHCHECK GRACE PERIOD IS 120s, UP FROM 3s, IN BOTH COMPOSE
+  FILES (2026-10-16).** A cold first boot runs migrations + collectstatic
+  before uvicorn binds, and the worker gates on this check. Under the old
+  3s start the first `docker compose up -d` **exited with an error and
+  left the worker in `Created`, never started** - observed directly. This
+  is not a transient yellow an operator can ignore; it reads as a broken
+  install. **Not an arm64 defect** - QEMU stretched one first boot to
+  ~6 minutes - but a slow Pi-class board on an SD card can plausibly
+  brush past the old 78s budget on its own, on any architecture.
+- **THE README CARRIES A BANNER AND AN ARCHITECTURE LINE (2026-10-16).**
+  `assets/reeltalk-github-banner.jpg` (274KB, 1672x941) sits above the
+  H1, and `Available for amd64 and aarch64.` sits under the tagline.
+  The banner **cannot** live in `images/` - that path is gitignored as
+  the media volume. `assets/` is tracked in git but **excluded in
+  `.dockerignore`**, because `COPY . /app/` would otherwise bake ~3MB of
+  repo-page artwork into every published image. Confirmed by
+  build-context probe: `assets` absent from the image, `README.md`
+  present.
+- **THE BACKUP FEATURE IS REMOVED (owner decision 2026-10-14, R154,
+  reversing R58).** Out: `backup-loop.sh`, `backup_database`,
+  `restore_database`, their tests, the `backup` service in both Compose
+  files, `backups_volume`, `BACKUP_DIR`/`BACKUP_RETENTION` in
+  `settings.py`, `BACKUP_TIME` in `.env.example`, and
+  `postgresql-client` from the image. **`libpq5` stays** - a different
+  package, the runtime library psycopg needs. The stack is **two app
+  roles (`web`, `worker`) and three named volumes (`pgdata`,
+  `static_volume`, `media_volume`)**. **Why:** the owner wants ReelTalk
+  lean; backups are the operator's job, "the same reason I didn't
+  include any TLS termination in the project and left that up to the
+  user." A deliberate repeat of D14, not open to re-litigation. Full
+  text and research in **§2P**.
+- **BOTH DEPLOY PATHS ARE PUBLISHED AND PROVEN - do not re-prove them.**
+  `v0.1.0` is GitHub **Latest**; the registry carries **`0.1.0`, `0.1`,
+  `0`, `latest`** and nothing else, all four resolving to the one digest
+  `abb9ce8e11cc...`, each a real multi-arch OCI index with
+  **`linux/amd64` + `linux/arm64`**. The default pin was proven with a
+  genuine pull (local tag deleted first, so the running image ID could
+  only have arrived over the network). `0.1.0-rc1` is **fully gone** -
+  GitHub prerelease, git tag, local image tag and Docker Hub tag all
+  removed 2026-10-15. **This box has no Docker Hub login at all**; the
+  only credentials are the write-only GitHub Actions secrets, so a
+  registry delete must go through the Docker Hub UI or a supplied token.
+- **NEW INSTANCES SHIP INVITE-ONLY** (owner decision, 2026-10-14).
   `SiteSettings.signup_policy` default is `invite`, via migration
   `social/0020_alter_sitesettings_signup_policy` (an `AlterField`;
   existing rows keep what they chose). **Verified safe before flipping:**
   `setup()` gates only on `has_admin()`, never on `signup_policy`, so a
-  closed default cannot lock out the first admin. The change moved 11 test
-  files, and the interesting ones were the tests that would have gone
-  quietly vacuous: `reeltalk/tests/signup.py::open_signup()` now names the
-  open door where a test needs it. Two surfaced late by asserting the
-  visible text `"Sign up"` rather than `href="/signup/"`, which a
-  substring sweep on the href alone misses.
-- **THE COLLAPSE DETECTOR NOW CATCHES A ROTATING CDN (R156, landed 2026-10-15; current gate 2495 passed, 5 skipped, all four markers `0`, 35:39).** Until now the detector only warned when every sampled request resolved to the *same single* address, because it bailed on `len(self._resolved) > 1`. A CDN that rotates egress per connection produces many distinct addresses, so it slipped past completely and the deployer got **no warning at all** - measured on the owner's fresh Debian 13 LXC install, `EVERY USER LOOKS LIKE ONE SOURCE` fired zero times while Cloudflare sat in front of NPM and every per-address limit keyed on Cloudflare egress. This is worse than the case it already handled: the budget spreads over a pool one attacker never exhausts, while two real visitors landing on the same egress still lock each other out. **`KNOWN_CDNS` is diagnostic only** - consulted by neither `is_trusted_proxy`, `client_ip` nor the scheme decision, so shipping Cloudflare's 15 published ranges cannot widen who the app believes; adding a provider there is a readability aid for the warning, never a step toward trusting it. `one_cdn_owning_all()` returns `None` if any sampled address is unplaceable, because one address outside a CDN is evidence the walk is reaching real clients and must stay quiet. `check_client_ip`'s verdict no longer calls rotation healthy. **Six new tests** (2489 + 6 = 2495, which is the arithmetic check on the count). **The owner's own remedy was infrastructure, not code:** they switched Cloudflare to DNS-only, since NPM already terminates TLS with a Let's Encrypt wildcard. Verified after: `server: openresty`, no `cf-ray`, recorded source moved off CDN ranges to `192.168.1.1` - which is **hairpin NAT from the test box, not a residual fault**; proving the real client path needs a test from outside the LAN, e.g. a phone on cellular.
-- **README.md is the single source of truth for deployment**, and its `## Deployment` section now runs **1-9**: Configure, the `.env` parameters, Start, Mail, first-run admin, signup policy, volumes, upgrading, troubleshooting. **The backup section is gone and Troubleshooting was renumbered 10 → 9.** The owner then trimmed the README hard (2026-10-14): the mail section keeps only the From-pair rule plus the two labelled configs (`Gmail setup:`, `Domain mail server:`) with no explanatory prose around them, the volumes note no longer editorialises about who owns backups, the "build all services" warning is out of Upgrading, and **the whole `## Status` block is deleted** — release status lives in this NOW block only, not in the README. `INSTALL.md` is a redirect stub.
-- **The README build path is PROVEN end to end (2026-10-14).** A clean clone of `main` from GitHub went `cp .env.example .env` → `./setup.sh` → `docker compose build` → `up -d` → `web` **healthy**, `GET /` → **302 `/setup/`**, `GET /setup/` → **200** "Set up ReelTalk", and `Host: evil.example.com` → **400**, so `ALLOWED_HOSTS` is enforced exactly as documented. **Run it isolated: both Compose files hardcode `name: reeltalk`, so a verbatim second run on a host already running the stack collides on containers, volumes and network.** This test used `docker compose -p rtreadme` on `WEB_PORT=3099` and was torn down with `down -v`; the live stack was verified untouched.
-- **`setup.sh` no longer accepts the placeholder `DOMAIN` silently (owner-approved fix, 2026-10-14).** The guard checked only for *emptiness*, but the prompt itself is gated on `[ -t 0 ]`, so with no TTY the read is skipped and the `.env.example` placeholder `your-instance.example.com` survives as a **non-empty** value: **exit 0 with an instance minted on a domain nobody owns**. It now re-checks against `PLACEHOLDER_DOMAIN` after the prompt, so a scripted install fails loudly with `DOMAIN is required`. **Verified on all four paths:** no-TTY + placeholder → **exit 1**; no-TTY + real `DOMAIN` in `.env` → exit 0 with both secrets; real pty → prompt fires and the typed domain is written; `bash -n` clean. Clean-room guard re-run against the edited tree: **308 passed, 5 skipped**. **The interactive path was always fine**, so this closes a scripted-install trap rather than a blocker for a terminal deploy.
-- **Two deployer-facing comments fixed (owner-authorized, 2026-10-15).** `setup.sh` no longer prints `curl -4 … (IPv6 docker-proxy quirk on this host)` to every deployer; that was a quirk of this Fedora box, so the banner now says plain `curl http://localhost:3030`. And `docker-compose.yml` no longer documents `:z` on bind mounts as a quirk the file accounts for, because **there are no bind mounts in either Compose file** (all three volumes are named). Verified after editing: `bash -n setup.sh` clean, `docker compose config -q` valid, no `:z` left in the Compose file, zero em dashes added. Neither blocked an install; both were documentation-only. **Do not re-flag these.**
-- **`.env.example` is now the owner's rewritten version (R155, 2026-10-15).** Shorter by design: the long explanatory prose is gone because `DEPLOYING.md` is the reference doc and already carries it (§3 the `TRUSTED_PROXIES` private-ranges default, §5 the port and firewall expectation, line 40 backups). **The variable set is correct in both directions** - nothing invented, nothing dropped, all 22 consumed variables present with every stated default matching `settings.py`. Three placeholder hazards were fixed before the swap, all of them armed by the file's own new header "Uncomment when changing default values": `EMAIL_SENDER_DOMAIN`'s trailing inline comment became the literal value under Compose's `env_file` parser (`KEY= # note` resolves to `# note`, unlike `KEY=value # note`), which minted `From: admin@# defaults to DOMAIN` via the truthy `or DOMAIN_HOST` fallback at `settings.py:346`; `TRUSTED_PROXIES=<IP-ADDRESS>/32` crashed startup on an invalid CIDR (`proxy_trust.py:285`) and is now the RFC 5737 doc address `203.0.113.10/32`; and the `TRUSTED_PROXIES` shipped default was restored to the comment because only the "explicitly EMPTY means no proxy" half survived the trim, which reads as mandatory. **The rule this leaves behind: a placeholder on a line the deployer is told to uncomment is live code, not a comment - test it through both the Compose and `environs` parsers before shipping.** `CSRF_TRUSTED_ORIGINS=http://<IP-ADDRESS>:3030` keeps its angle brackets deliberately: a non-matching origin there is inert, not fatal.
-- **SUPERSEDED 2026-10-15: the two "deliberately not changed" items above are both closed.** (1) The prebuilt path is no longer blocked at all - `0.1.0` is published and the **default** pin resolves and pulls cleanly, so the README path works with no override. (2) The wrong-prefix local tag `minnixtx/reeltalk:v0.1.0` is **deleted** (`docker rmi` succeeded, nothing held that image ID), so the only `v`-prefixed thing left is the git tag, which is correct. Still true and still worth knowing: **`# WEB_PORT=3030` is commented out in `.env.example`**, so the port comes from the Compose default and a blind `sed 's/^WEB_PORT=/…/'` no-ops.
-- **THE RELEASE NOTES SHIPPED A FEATURE THAT DOES NOT EXIST - caught before publish (2026-10-15).** The draft notes listed **"Daily database backups with an explicit, non-defaulted restore target"** under "What is in this release". That is the exact feature R154 removed on the owner's decision; at HEAD there are **0 tracked files matching `backup`, 0 `backup_database`/`restore_database` commands, and 0 `backup` services in either Compose file**. Publishing it would have advertised in the release notes the one capability the owner deliberately handed back to the operator. **Deleted on the owner's instruction.** Also corrected in the same pass: the notes claimed the dev toolchain was **"about 26MB"**; measured in the built image it is **~38MB** (15MB of dev site-packages plus a 22MB standalone `ruff` binary), so the understatement was ~46%. **The durable lesson: release notes are copy, and copy must name objects that exist at the commit being released. Grep the claim against the tree before it goes public - a green pipeline says nothing about whether the prose is true.**
-- **`env_file:` is NOT the interpolation layer, and this produced two false proofs in one session (2026-10-15).** In `docker-compose.prebuilt.yml`, `${REELTALK_VERSION}` in the `image:` line and `${WEB_PORT}` in `ports:` are resolved by Compose's **interpolation**, which reads the shell environment and the **project-root `.env`** (or a file given with `--env-file`). The `env_file:` key only populates the **container's** environment and never feeds interpolation. Proven directly: `ENV_FILE=/tmp/probe.env` with `REELTALK_VERSION` set inside it resolved to `0.1.0`, while `REELTALK_VERSION` in the shell resolved to `0.1.0-rc1`. **Consequence: a probe that sets values only in an `env_file` can silently run a different image than intended and report a pass that tested the wrong thing.** Always confirm the running container's `Config.Image` and `Image` ID match the intended tag before believing any result.
-- **The owner's fresh LAN install at `192.168.1.40` is healthy (2026-10-15).** Deployed `87d56c4`, all three services up, `manage.py check` clean, migrations applied, real login through `test.minnix.dev` returning 302 with a working session, verification mail sent with no SMTP error, webfinger resolving correct aliases, **credential throttle at 0 rows**. `USERNAME_FIELD = localname`, so sign-in is `minnix`, **not** `minnix@test.minnix.dev` (the full form is the federated handle only). The `CSRF_TRUSTED_ORIGINS` entry pointing at `192.168.1.137` was the owner's own typo and is inert: the public origin is correctly listed, and the LAN IP is rejected earlier at `ALLOWED_HOSTS` (`DisallowedHost`), so **fixing the CSRF entry alone would not open LAN access - both settings are needed as a pair**, exactly as README.md:77-86 already documents. `check_client_ip` reporting `192.168.1.1` is **hairpin NAT from a LAN test box**, not a fault.
-- **NEXT: nothing is blocked. Both deploy paths are shipped and proven.** The remaining live-test caveats are not defects and both need the owner's keypress, not code:
-  - **The real-client path through the public URL** has only ever been measured from inside the LAN, where hairpin NAT corrupts it. Settling it needs a test from outside the LAN, e.g. a phone on cellular.
-  - **A fresh `check_client_ip` mail resend** to refresh its recorded send, which sends real mail and must be the owner's action.
-  - **`0.1.0-rc1` is FULLY GONE (owner instruction, completed 2026-10-15).** All four objects removed: the GitHub prerelease (`gh release delete`), the git tag `v0.1.0-rc1` (`git push origin :refs/tags/...`; it pointed at `47728d1`, still on `main`, so no history lost), the local image tag, and the Docker Hub tag - the owner deleted that one in the Docker Hub UI because **this box has no Docker Hub login at all** (no `~/.docker/config.json`, no `DOCKER_CONFIG`, nothing in env or `.env`; the only credentials are the write-only Actions secrets). Verified after: `imagetools inspect` on `0.1.0-rc1` returns **`not found`** while `0.1.0`/`0.1`/`0`/`latest` all still resolve to `abb9ce8e11cc...`.
-  - **The dev toolchain (~38MB, mostly `ruff`) still ships in the runtime image** because the gate runs inside the baked image. A slim runtime stage is a known, documented follow-up, not urgent.
-- **Em dashes: release-facing text only** (standing owner instruction).
-  `README.md` is at **0**. `DEPLOYING.md`, `PLAN.md`, `PROGRESS.md` and
-  `REWRITE.md` keep theirs as internal history, and **no code, template or
-  user-visible string was touched for this.**
-- **Standing product constraints unchanged:** no third home column; genre
-  feeds stay 20/page; no virtualisation, scroll restoration, mid-scroll
-  deep links or live home updates; TMDB primary with manual fallback; no
-  new `Notification.Kind`; mirrors notify nobody; federation is
-  fix-forward, not a relay; deployment stays independent of the owner's
-  proxy. **Add to these: the app does not do the operator's backups, and
-  does not terminate TLS.** Both are the operator's, by design.
-- **Gate mechanics unchanged:** rebuild all Compose services after source
+  closed default cannot lock out the first admin.
+- **THE COLLAPSE DETECTOR CATCHES A ROTATING CDN (R156, landed
+  2026-10-15).** The detector used to bail on `len(self._resolved) > 1`,
+  so a CDN rotating egress per connection slipped past and the deployer
+  got **no warning at all**. **`KNOWN_CDNS` is diagnostic only** -
+  consulted by neither `is_trusted_proxy`, `client_ip` nor the scheme
+  decision, so shipping a provider's published ranges cannot widen who
+  the app believes. `one_cdn_owning_all()` returns `None` if any sampled
+  address is unplaceable.
+- **README.md IS THE SINGLE SOURCE OF TRUTH FOR DEPLOYMENT**, and its
+  `## Deployment` section runs **1-9**: Configure, the `.env` parameters,
+  Start, Mail, first-run admin, signup policy, volumes, upgrading,
+  troubleshooting. `INSTALL.md` is a redirect stub. The whole `## Status`
+  block is deleted - release status lives in this NOW block only.
+- **EM DASHES: RELEASE-FACING TEXT ONLY** (standing owner instruction).
+  `README.md` is at **0**, including the banner alt text and the new
+  architecture line. `DEPLOYING.md`, `PLAN.md`, `PROGRESS.md` and
+  `REWRITE.md` keep theirs as internal history, and **no code, template
+  or user-visible string was touched for this.**
+- **STANDING PRODUCT CONSTRAINTS UNCHANGED:** no third home column;
+  genre feeds stay 20/page; no virtualisation, scroll restoration,
+  mid-scroll deep links or live home updates; TMDB primary with manual
+  fallback; no new `Notification.Kind`; mirrors notify nobody;
+  federation is fix-forward, not a relay; deployment stays independent
+  of the owner's proxy. **The app does not do the operator's backups,
+  and does not terminate TLS.** Both are the operator's, by design.
+- **GATE MECHANICS UNCHANGED:** rebuild all Compose services after source
   changes; pytest uses baked source, ruff can mount host; read all four
-  gate markers (`RUFF_CHECK`, `RUFF_FORMAT`, `MIGRATIONS`, `PYTEST`), not
-  the wrapper exit; never run concurrent pytest against `test_reeltalk`.
-  **Two traps on record:** killing a gate run at a timeout orphans its
-  `docker compose run` container, which holds `test_reeltalk` and makes
-  every fixture in the rerun die with `DuplicateDatabase` — clear the
-  orphan and drop the DB before rerunning. And `pgrep -f run-gate.sh`
-  self-matches the checking command, so it reports a false "still running";
-  detect completion by the `PYTEST_EXIT=` marker appearing in the log.
-  **Working lint invocation** (ruff is not on the image's PATH; the gate
-  bind-mounts the host tree read-only):
+  gate markers (`RUFF_CHECK`, `RUFF_FORMAT`, `MIGRATIONS`, `PYTEST`),
+  not the wrapper exit; never run concurrent pytest against
+  `test_reeltalk`. **Two traps on record:** killing a gate run at a
+  timeout orphans its `docker compose run` container, which holds
+  `test_reeltalk` and makes every fixture in the rerun die with
+  `DuplicateDatabase` - clear the orphan and drop the DB before
+  rerunning. And `pgrep -f run-gate.sh` self-matches the checking
+  command, so it reports a false "still running"; detect completion by
+  the `PYTEST_EXIT=` marker appearing in the log. **Working lint
+  invocation** (ruff is not on the image's PATH; the gate bind-mounts
+  the host tree read-only):
   `docker compose run --rm --no-deps -v "$PWD":/host:ro,z web sh -c "cd /host && ruff check --cache-dir /tmp/rc ."`
+- **NEXT: nothing is blocked.** Both deploy paths are shipped and proven,
+  on two architectures. The remaining live-test caveats are not defects
+  and both need the owner's keypress, not code: the real-client path
+  through the public URL has only ever been measured from inside the LAN,
+  where hairpin NAT corrupts it (needs a test from outside, e.g. a phone
+  on cellular), and a fresh `check_client_ip` mail resend sends real mail
+  and must be the owner's action.
 
 ## 1. Current state
 
@@ -8052,6 +8092,207 @@ Moved out of the NOW block on 2026-10-14 so the block could be rewritten for the
   because nothing executable changed. The last full gate stands at **2519
   passed, 5 skipped**, all four markers `0`. Treat that as the baseline the
   backup removal has to return to.
+
+## 2R. aarch64 verification, the README banner and the healthcheck grace period (2026-10-16)
+
+**Owner brief for the session:** read the clean-VM deploy handoff
+(`.qwen/tmp/reeltalk-clean-vm-deploy-handoff-2026-10-15b.md`) and confirm
+whether ReelTalk is installable and ready for use on aarch64, so the
+README could say so.
+
+### The handoff's own premise was stale
+
+Section 6 of that handoff asserted the prebuilt path was unavailable,
+`hub.docker.com/v2/repositories/minnixtx/reeltalk/tags` returning
+`{"count":0}`, and called it re-verified 2026-10-15. **It is wrong now.**
+The registry carries four tags (`0.1.0`, `0.1`, `0`, `latest`), all
+pushed `2026-10-16T01:17Z`, all resolving to digest `abb9ce8e11cc...`,
+each a real multi-arch OCI index with `linux/amd64` **and**
+`linux/arm64`. **Re-check a handoff's registry claims against the live
+registry before repeating them; a "do not publish" instruction can be
+overtaken by the thing having been published.**
+
+### aarch64: booted, not just listed
+
+The published `linux/arm64` variant was run in an isolated Compose
+project (`-p rt-arm64`, scratch env file, its own volumes) so the live
+stack was never at risk. It came up fully:
+
+| Check | Result |
+|---|---|
+| `uname -m` in web and worker | `aarch64` |
+| Base images `python:3.13-slim`, `postgres:17` | both publish `linux/arm64/v8` |
+| Runtime lock closure (33 packages) | **all install from an aarch64 wheel at cp313; nothing compiles from source** |
+| Migrations | every one `OK` |
+| collectstatic | 161 files copied, 449 post-processed |
+| uvicorn | bound `0.0.0.0:3030`; `/` 302 -> `/setup/` 200; `/login/` 200 |
+| worker | `qcluster` ran on aarch64 with its full forked pool |
+| Native modules | Ed25519 sign+verify, Pillow resize, psycopg import |
+
+**The grep trap in that audit:** `cryptography` ships
+`cp39-abi3`/`cp311-abi3` manylinux2014_aarch64 wheels. A first pass that
+filtered the lock on `cp313` classified it as sdist-only, which would
+have implied aarch64 needs a compiler. **abi3 wheels carry the version in
+the ABI tag, not the Python tag.**
+
+**Honest limit, and the reason the README line is worded as it is:** this
+was QEMU emulation on x86_64, not native ARM hardware. It proves the
+image is architecturally correct and the native wheels load and execute.
+It is not a performance test and cannot rule out real-hardware-only
+issues. It also proved boot-and-serve, not a full login/mail/federation
+session on ARM.
+
+### The healthcheck finding, which was not the brief
+
+Under emulation the web container went `unhealthy` and the first
+`docker compose up -d` **exited with an error, leaving the worker in
+`Created` and never started**:
+
+```
+Container rt-arm64-web-1 Error dependency web failed to start
+dependency failed to start: container rt-arm64-web-1 is unhealthy
+```
+
+Web recovered to healthy minutes later, but Compose had already given up
+and did not retry the worker; it had to be started with
+`up -d --no-deps worker`. The old budget was ~78s (3s start + 25x3s)
+against a cold first boot that runs migrations and collectstatic before
+uvicorn binds.
+
+**Not an arm64 defect** - QEMU stretched that boot to ~6 minutes. But
+`depends_on: web: condition: service_healthy` makes this a real
+deployer-facing failure on *any* slow host, and a Pi-class board on an SD
+card is exactly where a cold migrate could brush past 78s. **Fixed:**
+`start_period: 3s` -> `120s` on the web healthcheck in both Compose
+files. Deployer-agnostic, needs no operator action, per the standing rule
+that the fix belongs in shipped code.
+
+### The banner, and why it is not in `images/`
+
+Owner supplied `~/design-elements/reeltalk_github_banner.png` (2.8MB),
+then replaced it with `reeltalk-github-banner.jpg` (274KB) on the size
+concern raised here. Same 1672x941, so the rendered look is unchanged.
+
+Two placement constraints that are easy to get wrong:
+
+1. **It cannot live in `images/`** - that path is gitignored as the media
+   volume (`/images/*`, `!images/.gitkeep`), so a banner there would not
+   reach GitHub. It lives in a tracked `assets/` dir.
+2. **`assets/` is excluded in `.dockerignore`.** `COPY . /app/` at
+   Dockerfile:30 would otherwise bake ~3MB of repo-page artwork into
+   every published image. Nothing in the app reads it. Verified by
+   build-context probe: `assets` absent from the image, `README.md`
+   present.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Both Compose files parse | valid |
+| Clean-room guard, working tree bind-mounted | 308 passed, 5 skipped |
+| Telltale scan on the JPEG itself | 280,882 bytes, zero hits |
+| Build-context probe | `assets` excluded, `README.md` included |
+| **Full gate** | **2495 passed, 5 skipped, all four markers `0`, 35:25** |
+
+**The clean-room guard mattered specifically because of the new file.**
+`assets/` is not in the guard's `TOP_LEVEL_SKIP_DIRS`, so the new binary
+entered its scan set and the guard runs `read_text(errors="ignore")` over
+it. It was run with the working tree bind-mounted, because the gate's own
+pytest runs against the baked image, which predates the banner.
+
+### Two workflow notes from this session
+
+- **The gate's green result covered less than it looks like.** None of the
+  four changed files is Python, so 35 minutes validated code this change
+  never touched. The one check that mattered - the clean-room guard
+  against the new asset - was run separately.
+- **Owner set a new working rule: batch edits, run the long suite only on
+  request.** Raised as: "if I want to continue to make changes in the
+  same session before running the gate and committing, I have to wait for
+  over 30 minutes." The prior rule only gated the suite on design
+  approval, which left the general case unspecified and I filled it by
+  inference. Saved to memory.
+
+### Carried forward verbatim from the previous NOW block
+
+The 2026-10-16 rewrite of the NOW block condensed or dropped these. They
+are preserved here so nothing is lost; the NOW block above is the current
+summary and this is the record.
+
+- **Gate for the removal: 2489 passed, 5 skipped, all four markers `0`** (`RUFF_CHECK`, `RUFF_FORMAT`, `MIGRATIONS`, `PYTEST`), 36:07, after a full `docker compose build`. **No new migration** — removing Python files and settings touches no schema. **The count is 2489, not the 2495 the handoff predicted, and the gap is fully accounted for:** HEAD collected **2524** items; the two deleted files collected **25**, not the 24 you get by counting `def test` lines, because `test_restore.py:91` is `@pytest.mark.parametrize("bad", ["", "   "])`; and the clean-room guard `test_clean_room.py::test_no_bookwyrm_telltale_strings` is itself parametrized over **every file in the repo**, so deleting 5 files removed 5 more cases. 2524 − 25 − 5 = **2494 collected = 2489 passed + 5 skipped**. **Count collected items, not `def test` lines**, in any future handoff.
+
+- **Left for the owner, deliberately not done here: `reeltalk-backup-1` is still running.** It was up (25h) when the Compose edit landed, so it is now an **orphan** and every `docker compose run` prints the orphan warning. Touching the live stack was outside this session's scope, which was the code removal. Clear it with `docker compose up -d --remove-orphans` or `docker rm -f reeltalk-backup-1` when you choose; the now-unused `reeltalk-backup:latest` image tag is still on disk too.
+
+- **THE PRERELEASE GUARD HELD, WHICH IS WHY THE rc WAS WORTH DOING.**
+  While only `0.1.0-rc1` existed, the registry tag list was **exactly
+  `['0.1.0-rc1']`**: `latest`, `0.1` and `0` were **not** moved. Confirmed
+  against the metadata-action docs - a prerelease extends only
+  `{{version}}`, because pre-releases "are updated frequently, and contain
+  many breaking changes that are (by the author's design) not yet fit for
+  public consumption." **A green `Build and push` step is not the verdict;
+  the manifest and the tag list are.** The rc also proved the Docker Hub
+  token was real and writable before any stable tag was at risk.
+
+- **New instances ship invite-only** (owner decision, 2026-10-14).
+  `SiteSettings.signup_policy` default is `invite`, via migration
+  `social/0020_alter_sitesettings_signup_policy` (an `AlterField`;
+  existing rows keep what they chose). **Verified safe before flipping:**
+  `setup()` gates only on `has_admin()`, never on `signup_policy`, so a
+  closed default cannot lock out the first admin. The change moved 11 test
+  files, and the interesting ones were the tests that would have gone
+  quietly vacuous: `reeltalk/tests/signup.py::open_signup()` now names the
+  open door where a test needs it. Two surfaced late by asserting the
+  visible text `"Sign up"` rather than `href="/signup/"`, which a
+  substring sweep on the href alone misses.
+
+- **THE COLLAPSE DETECTOR NOW CATCHES A ROTATING CDN (R156, landed 2026-10-15; current gate 2495 passed, 5 skipped, all four markers `0`, 35:39).** Until now the detector only warned when every sampled request resolved to the *same single* address, because it bailed on `len(self._resolved) > 1`. A CDN that rotates egress per connection produces many distinct addresses, so it slipped past completely and the deployer got **no warning at all** - measured on the owner's fresh Debian 13 LXC install, `EVERY USER LOOKS LIKE ONE SOURCE` fired zero times while Cloudflare sat in front of NPM and every per-address limit keyed on Cloudflare egress. This is worse than the case it already handled: the budget spreads over a pool one attacker never exhausts, while two real visitors landing on the same egress still lock each other out. **`KNOWN_CDNS` is diagnostic only** - consulted by neither `is_trusted_proxy`, `client_ip` nor the scheme decision, so shipping Cloudflare's 15 published ranges cannot widen who the app believes; adding a provider there is a readability aid for the warning, never a step toward trusting it. `one_cdn_owning_all()` returns `None` if any sampled address is unplaceable, because one address outside a CDN is evidence the walk is reaching real clients and must stay quiet. `check_client_ip`'s verdict no longer calls rotation healthy. **Six new tests** (2489 + 6 = 2495, which is the arithmetic check on the count). **The owner's own remedy was infrastructure, not code:** they switched Cloudflare to DNS-only, since NPM already terminates TLS with a Let's Encrypt wildcard. Verified after: `server: openresty`, no `cf-ray`, recorded source moved off CDN ranges to `192.168.1.1` - which is **hairpin NAT from the test box, not a residual fault**; proving the real client path needs a test from outside the LAN, e.g. a phone on cellular.
+
+- **The README build path is PROVEN end to end (2026-10-14).** A clean clone of `main` from GitHub went `cp .env.example .env` → `./setup.sh` → `docker compose build` → `up -d` → `web` **healthy**, `GET /` → **302 `/setup/`**, `GET /setup/` → **200** "Set up ReelTalk", and `Host: evil.example.com` → **400**, so `ALLOWED_HOSTS` is enforced exactly as documented. **Run it isolated: both Compose files hardcode `name: reeltalk`, so a verbatim second run on a host already running the stack collides on containers, volumes and network.** This test used `docker compose -p rtreadme` on `WEB_PORT=3099` and was torn down with `down -v`; the live stack was verified untouched.
+
+- **`setup.sh` no longer accepts the placeholder `DOMAIN` silently (owner-approved fix, 2026-10-14).** The guard checked only for *emptiness*, but the prompt itself is gated on `[ -t 0 ]`, so with no TTY the read is skipped and the `.env.example` placeholder `your-instance.example.com` survives as a **non-empty** value: **exit 0 with an instance minted on a domain nobody owns**. It now re-checks against `PLACEHOLDER_DOMAIN` after the prompt, so a scripted install fails loudly with `DOMAIN is required`. **Verified on all four paths:** no-TTY + placeholder → **exit 1**; no-TTY + real `DOMAIN` in `.env` → exit 0 with both secrets; real pty → prompt fires and the typed domain is written; `bash -n` clean. Clean-room guard re-run against the edited tree: **308 passed, 5 skipped**. **The interactive path was always fine**, so this closes a scripted-install trap rather than a blocker for a terminal deploy.
+
+- **Two deployer-facing comments fixed (owner-authorized, 2026-10-15).** `setup.sh` no longer prints `curl -4 … (IPv6 docker-proxy quirk on this host)` to every deployer; that was a quirk of this Fedora box, so the banner now says plain `curl http://localhost:3030`. And `docker-compose.yml` no longer documents `:z` on bind mounts as a quirk the file accounts for, because **there are no bind mounts in either Compose file** (all three volumes are named). Verified after editing: `bash -n setup.sh` clean, `docker compose config -q` valid, no `:z` left in the Compose file, zero em dashes added. Neither blocked an install; both were documentation-only. **Do not re-flag these.**
+
+- **`.env.example` is now the owner's rewritten version (R155, 2026-10-15).** Shorter by design: the long explanatory prose is gone because `DEPLOYING.md` is the reference doc and already carries it (§3 the `TRUSTED_PROXIES` private-ranges default, §5 the port and firewall expectation, line 40 backups). **The variable set is correct in both directions** - nothing invented, nothing dropped, all 22 consumed variables present with every stated default matching `settings.py`. Three placeholder hazards were fixed before the swap, all of them armed by the file's own new header "Uncomment when changing default values": `EMAIL_SENDER_DOMAIN`'s trailing inline comment became the literal value under Compose's `env_file` parser (`KEY= # note` resolves to `# note`, unlike `KEY=value # note`), which minted `From: admin@# defaults to DOMAIN` via the truthy `or DOMAIN_HOST` fallback at `settings.py:346`; `TRUSTED_PROXIES=<IP-ADDRESS>/32` crashed startup on an invalid CIDR (`proxy_trust.py:285`) and is now the RFC 5737 doc address `203.0.113.10/32`; and the `TRUSTED_PROXIES` shipped default was restored to the comment because only the "explicitly EMPTY means no proxy" half survived the trim, which reads as mandatory. **The rule this leaves behind: a placeholder on a line the deployer is told to uncomment is live code, not a comment - test it through both the Compose and `environs` parsers before shipping.** `CSRF_TRUSTED_ORIGINS=http://<IP-ADDRESS>:3030` keeps its angle brackets deliberately: a non-matching origin there is inert, not fatal.
+
+- **SUPERSEDED 2026-10-15: the two "deliberately not changed" items above are both closed.** (1) The prebuilt path is no longer blocked at all - `0.1.0` is published and the **default** pin resolves and pulls cleanly, so the README path works with no override. (2) The wrong-prefix local tag `minnixtx/reeltalk:v0.1.0` is **deleted** (`docker rmi` succeeded, nothing held that image ID), so the only `v`-prefixed thing left is the git tag, which is correct. Still true and still worth knowing: **`# WEB_PORT=3030` is commented out in `.env.example`**, so the port comes from the Compose default and a blind `sed 's/^WEB_PORT=/…/'` no-ops.
+
+- **THE RELEASE NOTES SHIPPED A FEATURE THAT DOES NOT EXIST - caught before publish (2026-10-15).** The draft notes listed **"Daily database backups with an explicit, non-defaulted restore target"** under "What is in this release". That is the exact feature R154 removed on the owner's decision; at HEAD there are **0 tracked files matching `backup`, 0 `backup_database`/`restore_database` commands, and 0 `backup` services in either Compose file**. Publishing it would have advertised in the release notes the one capability the owner deliberately handed back to the operator. **Deleted on the owner's instruction.** Also corrected in the same pass: the notes claimed the dev toolchain was **"about 26MB"**; measured in the built image it is **~38MB** (15MB of dev site-packages plus a 22MB standalone `ruff` binary), so the understatement was ~46%. **The durable lesson: release notes are copy, and copy must name objects that exist at the commit being released. Grep the claim against the tree before it goes public - a green pipeline says nothing about whether the prose is true.**
+
+- **`env_file:` is NOT the interpolation layer, and this produced two false proofs in one session (2026-10-15).** In `docker-compose.prebuilt.yml`, `${REELTALK_VERSION}` in the `image:` line and `${WEB_PORT}` in `ports:` are resolved by Compose's **interpolation**, which reads the shell environment and the **project-root `.env`** (or a file given with `--env-file`). The `env_file:` key only populates the **container's** environment and never feeds interpolation. Proven directly: `ENV_FILE=/tmp/probe.env` with `REELTALK_VERSION` set inside it resolved to `0.1.0`, while `REELTALK_VERSION` in the shell resolved to `0.1.0-rc1`. **Consequence: a probe that sets values only in an `env_file` can silently run a different image than intended and report a pass that tested the wrong thing.** Always confirm the running container's `Config.Image` and `Image` ID match the intended tag before believing any result.
+
+- **The owner's fresh LAN install at `192.168.1.40` is healthy (2026-10-15).** Deployed `87d56c4`, all three services up, `manage.py check` clean, migrations applied, real login through `test.minnix.dev` returning 302 with a working session, verification mail sent with no SMTP error, webfinger resolving correct aliases, **credential throttle at 0 rows**. `USERNAME_FIELD = localname`, so sign-in is `minnix`, **not** `minnix@test.minnix.dev` (the full form is the federated handle only). The `CSRF_TRUSTED_ORIGINS` entry pointing at `192.168.1.137` was the owner's own typo and is inert: the public origin is correctly listed, and the LAN IP is rejected earlier at `ALLOWED_HOSTS` (`DisallowedHost`), so **fixing the CSRF entry alone would not open LAN access - both settings are needed as a pair**, exactly as README.md:77-86 already documents. `check_client_ip` reporting `192.168.1.1` is **hairpin NAT from a LAN test box**, not a fault.
+
+- **Standing product constraints unchanged:** no third home column; genre
+  feeds stay 20/page; no virtualisation, scroll restoration, mid-scroll
+  deep links or live home updates; TMDB primary with manual fallback; no
+  new `Notification.Kind`; mirrors notify nobody; federation is
+  fix-forward, not a relay; deployment stays independent of the owner's
+  proxy. **Add to these: the app does not do the operator's backups, and
+  does not terminate TLS.** Both are the operator's, by design.
+
+- **Gate mechanics unchanged:** rebuild all Compose services after source
+  changes; pytest uses baked source, ruff can mount host; read all four
+  gate markers (`RUFF_CHECK`, `RUFF_FORMAT`, `MIGRATIONS`, `PYTEST`), not
+  the wrapper exit; never run concurrent pytest against `test_reeltalk`.
+  **Two traps on record:** killing a gate run at a timeout orphans its
+  `docker compose run` container, which holds `test_reeltalk` and makes
+  every fixture in the rerun die with `DuplicateDatabase` — clear the
+  orphan and drop the DB before rerunning. And `pgrep -f run-gate.sh`
+  self-matches the checking command, so it reports a false "still running";
+  detect completion by the `PYTEST_EXIT=` marker appearing in the log.
+  **Working lint invocation** (ruff is not on the image's PATH; the gate
+  bind-mounts the host tree read-only):
+  `docker compose run --rm --no-deps -v "$PWD":/host:ro,z web sh -c "cd /host && ruff check --cache-dir /tmp/rc ."`
+
+### Current state of the leftover backup objects (checked 2026-10-16)
+
+The dropped NOW bullet above said `reeltalk-backup-1` was still running.
+Re-checked today: that container is **gone**. What remains is **not** this
+project's orphan - `rt-fresh-backup-1` is **Up 2 days**, from the
+separate `rt-fresh` stack, and the `reeltalk-backup:latest` image
+(199MB) is still on disk. Neither is touched by this change, and clearing
+the live stack stays the owner's call.
 
 ## 3. Host facts (this box)
 

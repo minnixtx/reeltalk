@@ -69,7 +69,11 @@ services:
       test: ["CMD-SHELL", "curl -f http://localhost:3030"]
       interval: 3s
       timeout: 1s
-      start_period: 3s
+      # A cold first boot runs migrations + collectstatic before uvicorn binds,
+      # and the worker gates on this check. A short grace period makes a slow
+      # host fail `up` outright and leave the worker never started, rather than
+      # just showing a transient yellow.
+      start_period: 120s
       retries: 25
     depends_on:
       db:

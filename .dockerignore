@@ -14,5 +14,8 @@ __pycache__/
 node_modules/
 exports/
 backups/
+# Repo-page artwork only (the README banner). Nothing in the app reads it, and
+# `COPY . /app/` would otherwise bake ~3MB into every published image.
+assets/
 images/*
 !images/.gitkeep
