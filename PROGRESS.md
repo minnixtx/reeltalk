@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-17
 
 ---
 
@@ -38,15 +38,20 @@ disagrees with this block, this block is current and the other is history.**
   install. **Not an arm64 defect** - QEMU stretched one first boot to
   ~6 minutes - but a slow Pi-class board on an SD card can plausibly
   brush past the old 78s budget on its own, on any architecture.
-- **THE README CARRIES A BANNER AND AN ARCHITECTURE LINE (2026-10-16).**
+- **THE README LEADS WITH THE PITCH (2026-10-17).**
   `assets/reeltalk-github-banner.jpg` (274KB, 1672x941) sits above the
-  H1, and `Available for amd64 and aarch64.` sits under the tagline.
-  The banner **cannot** live in `images/` - that path is gitignored as
-  the media volume. `assets/` is tracked in git but **excluded in
-  `.dockerignore`**, because `COPY . /app/` would otherwise bake ~3MB of
-  repo-page artwork into every published image. Confirmed by
-  build-context probe: `assets` absent from the image, `README.md`
-  present.
+  H1. Under the H1, in order: the tagline, the four feature bullets
+  (federated / film-first / community-driven / free and open source),
+  then `Available for amd64 and aarch64.` The separate
+  `## What Is ReelTalk?` section is **deleted** - its bullets moved up
+  so the pitch sits above the fold instead of below the troubleshooting
+  table. Docs-only: no code, template or config touched, no tests added,
+  so the gate number is unchanged by design. The banner **cannot** live
+  in `images/` - that path is gitignored as the media volume. `assets/`
+  is tracked in git but **excluded in `.dockerignore`**, because
+  `COPY . /app/` would otherwise bake ~3MB of repo-page artwork into
+  every published image. Confirmed by build-context probe: `assets`
+  absent from the image, `README.md` present.
 - **THE BACKUP FEATURE IS REMOVED (owner decision 2026-10-14, R154,
   reversing R58).** Out: `backup-loop.sh`, `backup_database`,
   `restore_database`, their tests, the `backup` service in both Compose

@@ -1,7 +1,13 @@
 ![ReelTalk](assets/reeltalk-github-banner.jpg)
 
 # ReelTalk
+
 A federated social network for tracking, reviewing, and discovering films. Free yourself from corporate social media and join a close community of film fans who value being free from spyware and data collection by gathering on a free and open source platform.
+
+🌐 Federated - built on ActivityPub; instances can follow each other across the fediverse
+🎬 Film-first - track what you've watched, rate it, write reviews, and build shelves of favorites
+👥 Community-driven - small, trusted communities instead of one giant feed
+🔓 Free and open source - AGPLv3, no corporate middleman
 
 Available for amd64 and aarch64.
 
@@ -246,13 +252,6 @@ docker compose up -d
 | A verification link you pasted says it did not work | You used a truncated token. The full token is in the mail body. |
 | `failed to resolve reference ... not found` | The pinned `REELTALK_VERSION` tag does not exist on Docker Hub. Tags carry no `v` prefix. |
 | Everyone shares one throttle bucket | A CDN sits in front and its ranges are not in `TRUSTED_PROXIES`. `python manage.py check_client_ip` shows why. |
-
-## What Is ReelTalk?
-
-🌐 Federated - built on ActivityPub; instances can follow each other across the fediverse  
-🎬 Film-first - track what you've watched, rate it, write reviews, and build shelves of favorites  
-👥 Community-driven - small, trusted communities instead of one giant feed  
-🔓 Free and open source - AGPLv3, no corporate middleman
 
 ## License
 GNU AGPLv3
