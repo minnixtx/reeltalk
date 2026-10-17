@@ -45,8 +45,12 @@ disagrees with this block, this block is current and the other is history.**
   then `Available for amd64 and aarch64.` The separate
   `## What Is ReelTalk?` section is **deleted** - its bullets moved up
   so the pitch sits above the fold instead of below the troubleshooting
-  table. Docs-only: no code, template or config touched, no tests added,
-  so the gate number is unchanged by design. The banner **cannot** live
+  table. Each of the four bullet lines ends in **two trailing spaces** -
+  Markdown's hard line break - which is why they render as four lines and
+  not one wrapped paragraph. Do not let a formatter strip them; the
+  section that was deleted carried them for the same reason. Docs-only:
+  no code, template or config touched, no tests added, so the gate
+  number is unchanged by design. The banner **cannot** live
   in `images/` - that path is gitignored as the media volume. `assets/`
   is tracked in git but **excluded in `.dockerignore`**, because
   `COPY . /app/` would otherwise bake ~3MB of repo-page artwork into

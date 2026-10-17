@@ -4,10 +4,10 @@
 
 A federated social network for tracking, reviewing, and discovering films. Free yourself from corporate social media and join a close community of film fans who value being free from spyware and data collection by gathering on a free and open source platform.
 
-🌐 Federated - built on ActivityPub; instances can follow each other across the fediverse
-🎬 Film-first - track what you've watched, rate it, write reviews, and build shelves of favorites
-👥 Community-driven - small, trusted communities instead of one giant feed
-🔓 Free and open source - AGPLv3, no corporate middleman
+🌐 Federated - built on ActivityPub; instances can follow each other across the fediverse  
+🎬 Film-first - track what you've watched, rate it, write reviews, and build shelves of favorites  
+👥 Community-driven - small, trusted communities instead of one giant feed  
+🔓 Free and open source - AGPLv3, no corporate middleman  
 
 Available for amd64 and aarch64.
 
