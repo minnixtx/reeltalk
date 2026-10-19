@@ -1177,12 +1177,18 @@ def feed_entries(
     """
     member_ids = user.feed_member_ids()
 
+    # ``shelf`` is in the select_related because the grouping loop below reads
+    # ``row.shelf.identifier`` for every row: without it the lazy FK costs one
+    # ``core_shelf`` SELECT per shelf row, which on the owner's 1,378-row
+    # imported watchlist was 1,378 of the home page's ~1,397 queries. The
+    # ``shelf__identifier__in`` filter above is a JOIN for the WHERE clause
+    # only and does not populate the instance cache.
     shelf_rows = list(
         ShelfFilm.objects.filter(
             user_id__in=member_ids,
             shelf__identifier__in=[Shelf.TO_READ, Shelf.READ],
         )
-        .select_related("user", "film")
+        .select_related("shelf", "user", "film")
         .order_by("shelved_date", "id")
     )
 

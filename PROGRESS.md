@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-17
+**Last updated:** 2026-10-19
 
 ---
 
@@ -9,11 +9,27 @@
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
 
-- **CURRENT GATE: 2495 passed, 5 skipped, all four markers `0`, 35:25
-  (2026-10-16).** The number is the same as the R156 baseline because
-  this increment added **no tests** - read it as "nothing regressed",
-  not as "new coverage". The full detail of what was verified is in
-  **§2R**.
+- **THE HOME FEED'S SHELF N+1 IS GONE (2026-10-19, R157, §2S).** The item
+  that sat here unread from 2026-09-23 ("1,378 of the home page's ~1,397
+  queries") had one cause: `feed_entries` did
+  `select_related("user", "film")` and omitted `shelf`, while the grouping
+  loop reads `row.shelf.identifier` on **every** row - so each `ShelfFilm`
+  paid its own `SELECT FROM "core_shelf" WHERE "id" = ?`. **The fix is one
+  word:** `select_related("shelf", "user", "film")`. **The trap that hid it
+  for 26 days:** the same queryset filters `shelf__identifier__in=[...]`,
+  which reads as a join but builds the `WHERE` join only and never populates
+  the instance cache. **Measured:** 5 shelf rows cost 11 queries and 25 cost
+  31 before; 11 and 11 after. `test_feed_query_count.py` pins **invariance
+  to row count**, not a ceiling - a "fewer than N queries" assertion passes
+  on both sides of this fix and is vacuous against it. Non-vacuity proven by
+  mutation. **Not fixed, deliberately:** `feed_entries` still computes the
+  whole feed in Python per request, because §2I decision 1 pages the
+  computed list on a real correctness break. SQL aggregation needs its own
+  section and brief.
+- **CURRENT GATE: 2498 passed, 5 skipped, all five markers `0`, 35:17
+  (2026-10-19).** Delta on the R156 baseline is **+3 = 2 new tests + 1
+  clean-room param** for `tests/test_feed_query_count.py`; counted as
+  collected items, not `def test` lines. Full detail in **§2S**.
 - **REELTALK INSTALLS ON aarch64, NOT JUST amd64 (verified 2026-10-16).**
   Not manifest-listed-only: the published `linux/arm64` variant was
   *booted* under QEMU in an isolated Compose project and came up fully -
@@ -1985,8 +2001,7 @@ Each is sized for one session and ends at a committed, gate-verified checkpoint.
 
 ### Outside this arc
 
-- **The home feed's 1,378 identical `core_shelf` queries** — one per watchlist row, most of the home page's ~1s. Measured 2026-09-23, unrelated to notifications, and the same 1,378 that once crashed a browser. It deserves its own increment whenever the owner wants it. **Do not fold it into a notifications increment.**
-- The parked **design polish (R73)**, and the rest of the `PLAN.md` §5 list: lists, groups, directory, RSS, moderation, 2FA.
+- The parked **design polish (R73)**, and the rest of the `PLAN.md` §5 list: groups, directory, RSS, 2FA. **Lists and moderation are built** (§2K/§2D) — `PLAN.md`'s "genuinely open work" line still names both and is stale.
 - **Mentions and hashtags** as features (the parser, not the notification) — `PLAN.md` lists both entities and neither is built.
 - **Job-completion notifications**, which need a per-user job record that does not exist.
 
@@ -8303,6 +8318,88 @@ separate `rt-fresh` stack, and the `reeltalk-backup:latest` image
 (199MB) is still on disk. Neither is touched by this change, and clearing
 the live stack stays the owner's call.
 
+## 2S. The home feed's shelf N+1 is gone (2026-10-19, R157)
+
+**Owner brief:** after the leftover-issues review, the instruction was "if it
+is only a one word fix then go ahead and implement the fix in this session."
+It was one word.
+
+### The 1,378 queries had one cause, and it was still live
+
+The item had sat in this file since 2026-09-23 as a measurement without a
+diagnosis: "the home feed spends 1,378 of its ~1,397 queries on identical
+`core_shelf` lookups." Reading `feed_entries` in
+`reeltalk/core/models.py` found the cause in one line. The shelf-row query
+carried `select_related("user", "film")` and **not `shelf`**, while the
+grouping loop a few lines below reads `row.shelf.identifier` on **every
+row**. Each `ShelfFilm` instance therefore paid its own
+`SELECT ... FROM "core_shelf" WHERE "core_shelf"."id" = ?`.
+
+**The trap that makes this easy to miss:** the same queryset filters on
+`shelf__identifier__in=[...]`, which reads as though the shelf is already
+joined. That lookup builds a JOIN for the `WHERE` clause only and does
+**not** populate the instance cache, so the join is there and the rows are
+still fetched one at a time. The number matching the row count exactly is
+what confirms this was the whole of it and not a contributor.
+
+**The fix:** `select_related("shelf", "user", "film")`. One word added, in
+`feed_entries`, with a comment naming the trap so the next reader does not
+"tidy" it away. No behaviour change, no migration, no template change.
+
+### Measured, before and after
+
+`reeltalk/tests/test_feed_query_count.py`, 2 tests. The property pinned is
+**invariance to row count**, not a ceiling - a "fewer than N queries"
+assertion passes both before and after for any N loose enough to fit the
+feed the test builds, which makes it vacuous against exactly this bug.
+
+| | 5 shelf rows | 25 shelf rows |
+|---|---|---|
+| Before | 11 queries | **31** |
+| After | 11 queries | **11** |
+
+The count grows by precisely the number of rows added. The second test
+counts the queries that name `"core_shelf"`: 9 with the bug, exactly 1 with
+the fix. The closing quotes are load-bearing in that match -
+`"core_shelffilm"` does not contain `"core_shelf"` because of its closing
+quote, so the filter names the shelf table and never the shelf-row table.
+
+**Non-vacuity proven by mutation**, in the house way: `"shelf"` was removed
+again, the image rebuilt, and **both** tests went red. The second failure
+printed the N+1 eight times over, byte-identical to the shape recorded on
+2026-09-23. Restored byte-identical.
+
+**Two flaws in the first draft of the test, both worth keeping.** The table
+is `core_shelffilm`, not `core_shelf_film`, so the original assertion was
+wrong in the direction of passing. And the first failure message printed
+`[]` when 20 queries had actually been added, because a set difference hides
+duplicates and every per-row lookup is byte-identical to its siblings - a
+useless diagnostic for the one regression the test exists to catch. It uses
+a `Counter` multiset difference now.
+
+### What this does NOT fix, stated plainly
+
+`feed_entries` still materialises **every** shelf row of every feed member
+on **every** page request, because §2I decision 1 pages the computed Python
+list rather than SQL - a decision taken on a real correctness break (a
+page-local `absorbed` set duplicates a rating-only status across a page
+boundary), not for convenience. After this fix the home page is
+low-double-digit queries and what remains is Python over ~1,400 in-memory
+rows, which is milliseconds. **SQL aggregation was deliberately not bundled
+here**; if it is ever wanted it is its own section with its own brief, behind
+the seam §2I already named.
+
+Two smaller things noticed while verifying and left alone on purpose:
+`feed_member_ids()` runs twice per home render, once directly and once
+inside `Status.feed_for`, costing a handful of duplicated queries and not an
+N+1; and `_group_has_written_review` is one query per **group**, not per row,
+so it is bounded by groups and was never part of this.
+
+**Verification:** new tests 2 passed; the adjacent feed suites
+(`test_feed_paging`, `test_feed_endless_scroll`, `test_feed_click_target`,
+`test_feed_list_row`, `test_home_rail`) **93 passed**; `ruff check` and
+`ruff format --check` clean. Full gate result is recorded in **R157**.
+
 ## 3. Host facts (this box)
 
 - Fedora 44, Docker via dnf; compose project **`reeltalk`**, port **3030** owned by this stack (legacy stack torn down 2026-09-05).
@@ -8653,3 +8750,4 @@ not an optimisation.
 
 - **R156 — The collapse detector now catches a rotating CDN, which it previously could not see at all (2026-10-15).** Found on the owner's fresh Debian 13 LXC install at `test.minnix.dev`, which was running Cloudflare-in-front-of-NPM. **The defect was one clause:** `_watch_for_collapse` bailed out on `len(self._resolved) > 1`, so it only ever warned when every sampled request resolved to the *same single* address. A CDN that rotates egress per connection produces many distinct addresses, which made the detector return early forever. **Measured on the live box, not inferred:** three deliberately-wrong logins through the public path recorded `172.70.94.100` and `172.69.65.234`, both inside Cloudflare's published `172.64.0.0/13`, while the real client egress was `97.98.21.119` and was never seen once; `check_client_ip` showed the mail axis resolving to `198.41.227.148` (`198.41.128.0/17`); and `EVERY USER LOOKS LIKE ONE SOURCE` had fired **zero** times across the entire period the proxy was in place. **Why this is worse than the single-address case it already handled, and why the new message says so:** the budget is spread over a pool of CDN addresses that one attacker never exhausts, while two real visitors who happen to land on the same egress address still lock each other out. Under-protection against the attacker and false lockout of honest users at the same time, with no signal either way. **The fix, in `reeltalk/proxy_trust.py`:** `KNOWN_CDNS` carries Cloudflare's 15 published IPv4 ranges and is **diagnostic only** — it is consulted by neither `is_trusted_proxy`, `client_ip`, nor the scheme decision, so shipping it cannot widen who the app believes; adding a provider there is a readability aid for the warning, never a step toward trusting it. `cdn_owning()` names the provider behind an address; `one_cdn_owning_all()` returns the single provider owning a whole set and returns `None` if any member is unplaceable, because one address outside a CDN is evidence the walk is reaching real clients and must stay quiet. It is a shared module function rather than a method so the middleware and the management command can never disagree on what "all of these are one CDN" means. The watcher now samples the full window and judges two shapes: `_warn_single_source` (existing behavior, preserved verbatim) and `_warn_rotating_cdn` (new). `manage.py check_client_ip`'s verdict no longer calls rotation healthy; it names the provider and says why a distinct-address count is the wrong test. **Six new tests** in `test_proxy_trust.py` use real published Cloudflare addresses: unit coverage for both helpers, the rotating shape firing, a mixed sample staying quiet, fire-once-per-process, and the fixed-deploy case where the CDN ranges are already trusted producing no warning. **Gate: 2495 passed, 5 skipped, all four markers `0`, 35:39**, after a full `docker compose build` (the image was a day older than the edits, and pytest runs the baked image). **The owner's actual remedy was infrastructure, not code:** they switched Cloudflare from proxied to DNS-only, since NPM already terminates TLS with a Let's Encrypt wildcard for `minnix.dev`. Verified after the switch: `server: openresty` instead of `cloudflare`, no `cf-ray`, and the recorded source moved off CDN ranges to `192.168.1.1`. That last value is **hairpin NAT, not a residual fault** — the test box is `192.168.1.138` and its route to the now-direct `97.98.21.119` loops back through the router, which source-NATs it, destroying the original address upstream of the app. Proving the real client path needs a test from outside the LAN, e.g. a phone on cellular. **Process lessons from this session, both worth keeping:** the first green markers read were *stale* from a prior run because the gate truncates its log only when it starts, so a rebuild plus a wait for the log to be rewritten is mandatory before reading any verdict; and a `setsid`-detached watcher cannot notify the session, so the `monitor` tool is the right primitive for waiting on a marker.
 
+- **R157 — The home feed's shelf N+1 is fixed by one word (2026-10-19).** `feed_entries` now does `select_related("shelf", "user", "film")`. It previously omitted `shelf` while the grouping loop a few lines below read `row.shelf.identifier` on **every** row, so each `ShelfFilm` paid its own `SELECT ... FROM "core_shelf" WHERE "core_shelf"."id" = ?`. **This closes the item that had sat in this file unread since 2026-09-23** as "1,378 of the home page's ~1,397 queries", and the query count matching the row count exactly is what proved it was the whole cause rather than a contributor. **The trap that hid it for 26 days:** the same queryset filters `shelf__identifier__in=[...]`, which reads as though the shelf is already joined. That builds the JOIN for the `WHERE` clause only and does **not** populate the instance cache, so the join is present and the rows are still fetched one at a time. **Measured:** 5 shelf rows cost 11 queries and 25 cost 31 before; 11 and 11 after. `reeltalk/tests/test_feed_query_count.py` pins **invariance to row count** rather than a ceiling, because a "fewer than N queries" assertion passes on both sides of the fix and is therefore vacuous against exactly this bug; the second test counts the queries naming `"core_shelf"` (9 before, exactly 1 after), with the closing quotes load-bearing so `"core_shelffilm"` cannot match. **Non-vacuity proven by mutation:** `"shelf"` removed again, image rebuilt, both tests red, the second failure printing the N+1 eight times over byte-identical to the 2026-09-23 shape; restored byte-identical. Two flaws in the test's first draft are recorded in §2S because both were in the direction of passing. **Explicitly not in scope, and not to be bundled later:** `feed_entries` still computes the whole feed in Python on every request, because §2I decision 1 pages the computed list on a real correctness break, not for convenience. SQL aggregation stays behind the seam §2I already named and needs its own section and brief. Also left alone deliberately: `feed_member_ids()` runs twice per home render (a few duplicated queries, not an N+1) and `_group_has_written_review` is one query per **group**, not per row. **No behaviour change, no migration, no template change.** **Gate: 2498 passed, 5 skipped, all five markers `0`, 2117.78s (35:17)**, after a full `docker compose build` — the build stage was added to the wrapper this run because the clean-room guard walks the **baked** tree, so a `PROGRESS.md` edit alone makes a stale image a stale verdict. Log at `/tmp/r157-gate.log`.
