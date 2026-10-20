@@ -170,12 +170,17 @@ message to the worker log instead of sending it. During setup that log is
 your way in:
 
 ```bash
-docker compose logs worker | grep -A5 "Click the link"
+docker compose logs worker | python3 -c "
+import quopri,re,sys
+raw=re.sub(rb'(?m)^[^ ]+ +\| ',b'',sys.stdin.buffer.read())
+t=quopri.decodestring(raw).decode('utf8','replace')
+for u in sorted(set(re.findall(r'https?://\S+/account/verify/[A-Za-z0-9_-]+/',t))): print(u)
+"
 ```
 
-Copy the `/account/verify/<token>/` URL and open it in your browser. Take
-the full token from the mail body. The token echoed in other log lines is
-truncated and will not work.
+Open the `/account/verify/<token>/` URL it prints in your browser.
+
+The token echoed in other log lines is truncated and will not work.
 
 ### 5. First run: create the admin
 
