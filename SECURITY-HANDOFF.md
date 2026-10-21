@@ -1,74 +1,86 @@
 # Security audit handoff
 
-> Status: S1 was executed on 2026-10-20 by the session this file handed off
-> to. The `## NOW` block in `PROGRESS.md` is the current source of truth;
-> everything below is the handoff as written at the audit session's close.
+> Status: S1 landed 2026-10-20 (`1b4ec4b`) and runs live on the dev box;
+> the full gate is green as of 2026-10-21 (**2528 passed, 5 skipped**).
+> This file now hands off increment **S2**. The `## NOW` block in
+> `PROGRESS.md` is the current source of truth; everything below is the
+> handoff as written at S1's close.
 
 Point the next session at this file. Everything needed is in the repo; no
-production access is required to start increment S1.
+production access is required to start S2.
 
-## State (as of the 2026-10-20 audit session)
+## State (as of the S1 close, 2026-10-21)
 
-- Audit complete: findings F1-F12 in `SECURITY-AUDIT.md`. Worst: F1 stored
-  XSS via remote ActivityPub HTML (unsanitized on ingest, rendered `|safe`),
-  F2 forged Update/Delete accepted from any verified sender, F3 a Person
-  document's id is never checked against the URL it was fetched from.
-- Fix plan complete: `security-plan.md`, increments S1-S6, one per session.
-- No fixes have been applied to the repo yet. This session's only repo
-  changes are untracked docs (`SECURITY-AUDIT.md`, `security-plan.md`, this
-  file) and the capture under `.qwen/tmp/vps-hardening/`.
-- VPS recon complete: production (`/srv/reeltalk`, same commit `19696d3` as
-  local) carries uncommitted hardening code - the `public_http.py` SSRF
-  guard, django-csp wiring, HSTS/HTTPS-redirect settings, compose
-  hardening, and dependency bumps. The full diff plus both new files are
-  captured under `.qwen/tmp/vps-hardening/` (`vps-hardening.diff`,
-  `public_http.py`, `test_public_http.py`).
-- The captured diff was reviewed; the verdict is folded into S1 of the plan.
-  Most of it is sound, but two must-fix defects stand out before it lands:
-  1. `public_http.py` hard-rejects every non-global IP with no opt-in, so
-     LAN federation (Mastodon peer 192.168.1.85, test instance
-     192.168.1.40) breaks the moment it ships.
-  2. The VPS compose hardcodes `127.0.0.1:3030:3030`, dropping the shipped
-     `${WEB_PORT:-3030}` host mapping; a fresh deployer without a local
-     proxy loses external access.
-  Plus two nits: `CSPMiddleware` sits last in `MIDDLEWARE` so short-circuit
-  responses (e.g. the SSL redirect) skip the CSP header, and
-  `ipaddress.ip_address` can raise an uncaught `ValueError` on scoped IPv6
-  literals like `fe80::1%eth0`.
+- S1 closed **F4 (SSRF)** and **F5 (CSP never sent)**:
+  `reeltalk/public_http.py` fronts every outbound fetch (one DNS
+  resolution, socket pinned to the checked literal, 8 MiB cap, redirects
+  re-checked, signed POSTs never follow them); non-global destinations
+  need a `FEDERATION_ALLOWED_NETWORKS` CIDR (default deny, multicast
+  always refused, cloud metadata stays blocked); django-csp wired with
+  `CSPMiddleware` above `SecurityMiddleware`; compose hardening plus
+  parameterized `WEB_BIND`; Pillow 13 / urllib3 2.8.0 / certifi bump.
+  The owner's four S1 decisions are recorded in `security-plan.md`
+  ("Decisions", 2026-10-20).
+- The dev-box instance (`reeltalk.minnix.dev`) runs S1 live: CSP header
+  observed on real responses, worker qcluster proven by a consumed task,
+  `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24` set in this box's `.env`.
+- **VPS redeploy is deferred until the whole audit is finished (owner,
+  2026-10-21).** reeltalk.dev still runs pre-S1 code. When it eventually
+  redeploys from the repo, its `.env` needs `WEB_BIND=127.0.0.1` and
+  `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24`.
+- Gate baseline: **2528 passed, 5 skipped** (2026-10-21). One hermeticity
+  fix rode with it: the pytest-env block pins
+  `FEDERATION_ALLOWED_NETWORKS` empty (`92415ba`), because the gate
+  container inherits the env_file `.env` and an operator's allowlist must
+  never decide what the suite proves.
+- Open findings: **F1 (S2, next)**, F2 + F3 (S3), F6 (S4), F7-F9 (S5),
+  F10-F12 (S6). The DB role split ships in the default deploy flow and
+  lands with S4 (owner decision).
 
 ## What the next session should do
 
-Execute increment S1 from `security-plan.md`: apply the captured diff, apply
-S1's must-fix corrections and nits, add the listed tests, and commit
-`SECURITY-AUDIT.md` + `security-plan.md` + `SECURITY-HANDOFF.md` as the
-session's first commit. Then S2 (F1 sanitization) in the session after that.
+Execute increment **S2** from `security-plan.md`: F1, sanitize remote HTML
+on ingest - the worst open finding (stored XSS from any peer, including
+into the moderator queue).
 
-## Read in this order
-
-1. `security-plan.md` - ground rules first, then S1.
-2. `SECURITY-AUDIT.md` - findings detail with file:line evidence.
-3. `.qwen/tmp/vps-hardening/` - the VPS code S1 lands (`vps-hardening.diff`,
-   `public_http.py`, `test_public_http.py`).
-4. `~/design-elements/HARDENING.md` - the VPS operator changelog; its infra
-   half (nftables, sshd, sysctl, nginx, backups) stays out of the repo.
+- `reeltalk/activitypub/statuses.py` (line refs verified 2026-10-21):
+  run `sanitize_html()` on
+  (a) Note `content` in `_mirror_status` (line 419) and its update branch
+  `_apply_note_fields` (line 397),
+  (b) Film `summary` in `_mirror_film` (line 188),
+  (c) list extension `summary` in `_mirror_list` (line 725) and
+  `_apply_list_fields` (line 711).
+- Pattern to follow: `mirrors.py:281` - `user.summary =
+  sanitize_html(summary)`, imported from `reeltalk.core.utils`.
+- Tests (from the plan): inbox-deliver a Note with `<script>` and
+  `<img onerror>` and assert the stored row is escaped (bleach escapes
+  rather than strips); same for a Film mirror summary and a list
+  description; assert the moderation queue page renders the stored value
+  safely.
 
 ## Ground rules (full list in security-plan.md)
 
 - Rebuild the Docker image before running pytest; the gate runs the baked
   image.
-- Targeted pytest + ruff per increment. The full gate (~36 min) only on the
-  owner's explicit signal.
-- One commit per increment, no co-author trailer. Rewrite the `PROGRESS.md`
-  NOW block as the increment's last step.
+- Targeted pytest + ruff per increment. The full gate (~36 min) only on
+  the owner's explicit signal.
+- One commit per increment, no co-author trailer. Rewrite the
+  `PROGRESS.md` NOW block as the increment's last step.
 - Deployer-agnostic: safe no-config defaults in shipped code; host infra
   stays out of the repo.
-- The VPS is production: read-only unless the owner approves a change
-  (access: `minnix@37.60.246.66`, recorded in memory).
+- The VPS is production: read-only unless the owner approves a change,
+  and all VPS work is deferred until the audit is complete.
 - No em dashes in user-facing text.
+- The suite must not inherit operator env: any setting `.env` may
+  legitimately set that tests assume a default of belongs pinned in
+  pyproject's pytest-env block.
 
-## Open questions for the owner
+## Read in this order
 
-Also listed at the end of `security-plan.md`: the LAN opt-in shape and env
-name for `public_http`, the shipped `WEB_BIND` default, accepting the
-Pillow 12-to-13 major bump, and whether the DB role split ships in the
-default flow or stays an ops recipe.
+1. `security-plan.md` - ground rules first, then S2.
+2. `SECURITY-AUDIT.md` - F1 evidence with file:line.
+3. `reeltalk/activitypub/statuses.py` and the `mirrors.py` sanitize
+   pattern.
+
+No open questions for the owner going into S2; the four S1 decisions are
+already recorded in `security-plan.md`.

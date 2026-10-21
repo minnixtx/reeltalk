@@ -72,15 +72,17 @@ disagrees with this block, this block is current and the other is history.**
   whole feed in Python per request, because §2I decision 1 pages the
   computed list on a real correctness break. SQL aggregation needs its own
   section and brief.
-- **GATE STATE (2026-10-20).** Last full-suite run: **2498 passed, 5
-  skipped, all five markers `0`, 35:17 (2026-10-19, pre-S1).** S1 was
-  verified targeted per the plan: **622 collected, 622 passed** across the
-  19 touched test files - including **24 new** in `test_public_http.py`
-  (17 from the VPS capture + 5 LAN opt-in + scoped-IPv6 + invalid-CIDR)
-  and `test_csp.py` (200 + 301) - with ruff check + format green, all on
-  the rebuilt baked image. **The full gate has not been re-run since S1**;
-  owner's signal. For reference the VPS ran the full suite on the captured
-  hardening code: 2524 passed, 5 skipped (`HARDENING.md`).
+- **GATE STATE (2026-10-21).** Last full-suite run: **2528 passed, 5
+  skipped, all markers `0`, 35:12** (post-S1, owner's signal). The first
+  post-S1 run failed exactly one test,
+  `test_private_destination_never_opens_socket[192.168.1.1]`, and the
+  cause was environmental, not product: the gate container inherits the
+  env_file `.env`, which now names the LAN federation range, so the
+  default-deny test found its address allowlisted. Fixed hermetically -
+  `FEDERATION_ALLOWED_NETWORKS` is pinned empty in pyproject's pytest-env
+  block (`92415ba`), so no operator env can decide what the suite proves.
+  **How to apply:** any setting `.env` may legitimately set that tests
+  assume a default of belongs pinned there too.
 - **REELTALK INSTALLS ON aarch64, NOT JUST amd64 (verified 2026-10-16).**
   Not manifest-listed-only: the published `linux/arm64` variant was
   *booted* under QEMU in an isolated Compose project and came up fully -
