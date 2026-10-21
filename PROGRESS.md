@@ -9,6 +9,43 @@
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
 
+- **FEDERATION INGEST NOW CHECKS WHO MAY MUTATE A MIRROR (2026-10-21,
+  security increment S3, closes F2 + F3). TARGETED GREEN: 652 passed** on
+  the rebuilt image (the federation/activitypub/moderation set); the full
+  gate has not been run since S2 - when it runs, expect **2551 passed, 5
+  skipped** (2541 + 9 new tests + 1 clean-room item). Both findings shared
+  one shape: the signature proves *who sent* an activity, and nothing more.
+  **F2:** `Update`/`Delete` looked a mirror up by its object url and applied
+  the change without checking the verified sender against the row's author -
+  the attribution rule credits a *new* row to the signer and said nothing
+  about who may *mutate* an existing one - so any peer with a working
+  keypair could rewrite or tombstone another remote user's mirrored content
+  by replaying its object id. The update branch of `_mirror_status` and
+  `handle_delete` now drop (and log) when the sender is not the author, the
+  same graceful-ignore posture as the other unforged-but-unusable shapes:
+  202, the peer's queue drains, the row stays exactly as its author left it.
+  The guard sits above the list-extension read, so a forged list update is
+  dropped by the same check. **F3:** a fetched Person document's `id` was
+  never checked against the URL it was fetched from, and the mirror is
+  keyed on that id - a server answering a fetch of its own actor URL with
+  somebody else's id would mint a mirror impersonating that identity and
+  occupy the unique `actor_url` slot the real actor needs to federate here
+  at all. `fetch_person_document` now refuses the mismatch beside its other
+  unusable-document guards, comparing against the requested URL
+  fragment-stripped. Tests: `reeltalk/tests/test_federation_integrity.py`
+  (7), every one delivered through the real signed `/inbox/` route - forged
+  Update and forged Delete from a second verified sender are ignored and
+  logged; the author's own Update/Delete still land (the regression guard);
+  a second sender still edits its own rows; first contact with a lying
+  Person document is refused and mints nothing, while honest first contact
+  still mirrors - plus two unit tests beside the existing
+  `fetch_person_document` guards. Non-vacuity: with the guards stashed,
+  exactly the four attack tests go red and every control stays green.
+  **Live check pending (owner):** an edit and a delete from a LAN Mastodon
+  post must arrive as update/tombstone, and a first contact from a new peer
+  must mint its mirror - the F3 id check has not yet met a real Mastodon
+  Person document.
+
 - **REMOTE HTML IS SANITIZED ON INGEST (2026-10-21, security increment S2,
   closes F1). FULL GATE GREEN ON IT: 2541 passed, 5 skipped**, all four
   markers 0. The count moved 2528 to 2541, not the predicted 2540, because
@@ -114,8 +151,9 @@ disagrees with this block, this block is current and the other is history.**
   whole feed in Python per request, because §2I decision 1 pages the
   computed list on a real correctness break. SQL aggregation needs its own
   section and brief.
-- **GATE STATE (2026-10-21).** Last full-suite run: **2528 passed, 5
-  skipped, all markers `0`, 35:12** (post-S1, owner's signal). The first
+- **GATE STATE (2026-10-21).** Last full-suite run: **2541 passed, 5
+  skipped, all markers `0`** (on S2, owner's signal). S3 ran targeted only
+  (652); when the full gate next runs, expect 2551 passed, 5 skipped. The
   post-S1 run failed exactly one test,
   `test_private_destination_never_opens_socket[192.168.1.1]`, and the
   cause was environmental, not product: the gate container inherits the

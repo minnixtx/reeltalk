@@ -177,6 +177,26 @@ def test_fetch_person_document_rejects_missing_public_key(person_doc):
 
 
 @responses.activate
+def test_fetch_person_document_rejects_id_mismatch(person_doc):
+    # The document answers this URL but names a different actor (F3). The
+    # mirror is keyed on the document id, so a mismatch is an impersonation
+    # attempt, not a spelling difference.
+    person_doc["id"] = "https://elsewhere.example/user/carol/"
+    responses.add(responses.GET, REMOTE_ACTOR, json=person_doc)
+    with pytest.raises(RemoteFetchError):
+        fetch_person_document(REMOTE_ACTOR)
+
+
+@responses.activate
+def test_fetch_person_document_id_match_ignores_the_requested_fragment(person_doc):
+    # Callers strip the keyid fragment before fetching; the guard strips it
+    # too, so a caller that passes one through still matches (F3).
+    responses.add(responses.GET, REMOTE_ACTOR + "#main-key", json=person_doc)
+    doc = fetch_person_document(REMOTE_ACTOR + "#main-key")
+    assert doc["id"] == REMOTE_ACTOR
+
+
+@responses.activate
 def test_fetch_person_document_rejects_network_error():
     # A connection-level failure surfaces as RemoteFetchError too. It must be
     # a requests exception for the client's ``except requests.RequestException``

@@ -528,6 +528,23 @@ def _mirror_status(sender, note: dict, request):
 
     existing = Status.objects.filter(local=False, remote_url=home_url).first()
     if existing is not None:
+        if existing.user_id != sender.pk:
+            # The signature proves *who sent this*; the lookup above proves
+            # *which row it names*. Conflating the two is the whole finding
+            # (F2): the attribution rule credits a **new** row to the
+            # verified sender and says nothing about who may mutate an
+            # existing one, so any peer with a working keypair could rewrite
+            # another remote user's mirror by replaying its object id. The
+            # row stays exactly as its author left it - dropped and logged,
+            # the same graceful posture as the other unforged-but-unusable
+            # shapes. The list extension is read below this line, so a
+            # forged list update is dropped by this same check.
+            logger.info(
+                "Ignoring Update of %s: %s is not the author of the mirror",
+                home_url,
+                sender.localname,
+            )
+            return existing
         if existing.deleted:
             # A tombstone stays (v0.1 has no undelete path).
             return existing
@@ -931,10 +948,22 @@ def handle_delete(activity, sender, request):
         home_url = obj.get("id")
         if isinstance(home_url, str) and home_url:
             status = Status.objects.filter(local=False, remote_url=home_url).first()
-            if status is not None:
-                # Soft-delete; a no-op when the row is already a tombstone.
-                # A list's ``FilmList`` goes down with it — see
-                # ``_tombstone_mirror``.
-                _tombstone_mirror(status)
+            if status is None:
+                return
+            if status.user_id != sender.pk:
+                # The same rule as the update branch of ``_mirror_status``
+                # (F2): the signature names the sender, and this sender is
+                # not the row's author - a stranger cannot tombstone a
+                # mirror it does not own by replaying its object id.
+                logger.info(
+                    "Ignoring Delete of %s: %s is not the author of the mirror",
+                    home_url,
+                    sender.localname,
+                )
+                return
+            # Soft-delete; a no-op when the row is already a tombstone.
+            # A list's ``FilmList`` goes down with it - see
+            # ``_tombstone_mirror``.
+            _tombstone_mirror(status)
     elif obj_type == "ShelfEvent":
         _apply_shelf_event(sender, obj, request, added=False)

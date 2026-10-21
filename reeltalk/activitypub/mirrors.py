@@ -72,8 +72,9 @@ def fetch_person_document(actor_url: str) -> dict:
     """GET a remote actor's Person document (public — no signature needed).
 
     Raises :class:`RemoteFetchError` on any failure: unsupported scheme,
-    network error, non-2xx status, non-JSON body, or a document that is not
-    a usable Person (missing id/publicKeyPem or the wrong type).
+    network error, non-2xx status, non-JSON body, a document that is not a
+    usable Person (missing id/publicKeyPem or the wrong type), or a document
+    whose ``id`` is not the URL it was fetched from.
     """
     parsed = urlparse(actor_url)
     if parsed.scheme not in ("http", "https"):
@@ -100,6 +101,20 @@ def fetch_person_document(actor_url: str) -> dict:
         raise RemoteFetchError("Actor document is not JSON") from err
     if not isinstance(doc, dict) or not doc.get("id"):
         raise RemoteFetchError("Not a usable Person document")
+    if doc["id"] != actor_url.split("#", 1)[0]:
+        # The document must describe the actor at the URL it was fetched
+        # from (F3). ``mirror_user_from_person`` keys the mirror on this id,
+        # so a server that answers a fetch of its own actor URL with
+        # somebody else's id would mint a mirror impersonating that
+        # identity - and occupy the unique ``actor_url`` slot the real
+        # actor needs to mirror here. The requested URL is compared
+        # fragment-stripped: callers strip the keyid fragment before
+        # fetching, and the strip keeps the rule true for any caller that
+        # does not.
+        raise RemoteFetchError(
+            f"Person document id {doc['id']!r} does not match the URL "
+            "it was fetched from"
+        )
     doc_type = doc.get("type")
     types = [doc_type] if isinstance(doc_type, str) else list(doc_type or [])
     if "Person" not in types:
