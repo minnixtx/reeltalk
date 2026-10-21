@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-20
+**Last updated:** 2026-10-21
 
 ---
 
@@ -34,15 +34,24 @@ disagrees with this block, this block is current and the other is history.**
   compose hardcoded loopback; the repo default is all interfaces), then
   one live exchange with the LAN Mastodon peer as the guard's first real
   test. Findings: `SECURITY-AUDIT.md`; plan: `security-plan.md`.
-- **THIS DEV BOX'S `.env` AND THE RUNNING DB DISAGREE ON
-  `POSTGRES_PASSWORD` (found 2026-10-20, pre-existing, untouched).** `.env`
-  was edited 2026-10-20 15:52; the live `reeltalk-db-1` volume holds the
-  older password (hash-compared, not guessed). The running web container
-  still serves because its env predates the edit, but **any new container
-  gets `FATAL: password authentication failed for user "reeltalk"`** -
-  which is why S1's suite ran against a throwaway Postgres. Reconcile
-  before the next local `up -d`: `ALTER ROLE` the db to the `.env` value
-  and recreate web/worker, or restore the old value into `.env`.
+- **THIS DEV BOX'S `.env` DRIFT IS REPAIRED (found 2026-10-20, resolved
+  2026-10-21).** Cause: an accidental `setup.sh` re-run over a freshly
+  re-copied `.env` - it regenerates only blank values, so both secrets
+  came out new, `DOMAIN` came out as another box's domain, and every
+  setting `.env.example` does not carry was gone (mail, TMDB key,
+  `CSRF_TRUSTED_ORIGINS`, `TRUSTED_PROXIES`, `SECURE_COOKIES`,
+  `ALLOWED_HOSTS`). `.env` is now restored from the live web
+  container's environment: all 19 app keys hash-match the running
+  stack, the db accepts the `.env` password over real TCP scram, and
+  `DOMAIN` is `reeltalk.minnix.dev` (owner-confirmed for this box). No
+  credential was reset - the originals were recovered from the running
+  containers. The damaged file is kept at `.env.bak-accidental-20261020`
+  (git-ignored); a dead `REDIS_PASSWORD` rode along in the restore,
+  nothing in the repo reads it. **The next local `up -d` is safe** and
+  will deploy S1: the running containers predate the S1 build. If this
+  instance is to exchange with the LAN Mastodon peer after that
+  restart, `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24` must be added
+  to `.env` first - S1 refuses private destinations by default.
 - **THE HOME FEED'S SHELF N+1 IS GONE (2026-10-19, R157, §2S).** The item
   that sat here unread from 2026-09-23 ("1,378 of the home page's ~1,397
   queries") had one cause: `feed_entries` did
