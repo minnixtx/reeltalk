@@ -67,6 +67,12 @@ env = [
     "SECURE_HSTS_SECONDS = 0",
     "DOMAIN = localhost",
     "ALLOWED_HOSTS = localhost",
+    # The gate container inherits the operator's env_file, and this box's
+    # .env names a LAN range for federation (S1's opt-in). The guard's
+    # block tests assert the default-deny posture, so pin the setting empty
+    # here - an operator's allowlist must never decide what the suite proves.
+    # Tests that need ranges override the setting explicitly.
+    "FEDERATION_ALLOWED_NETWORKS =",
     # ActivityPub identities are minted from CANONICAL_ORIGIN, not from the
     # request (R108). In tests that origin is the host Django's test client
     # presents, so the suite keeps asserting the URLs it already knows while
