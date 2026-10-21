@@ -34,8 +34,18 @@ disagrees with this block, this block is current and the other is history.**
   `reeltalk/tests/test_federation_sanitize.py` (12), every one delivered
   through the real signed `/inbox/` route, including the moderation-queue
   render; the guard was reverted to confirm 8 go red while the 4 controls stay
-  green. **Owner live check:** post a status carrying markup from the LAN
-  Mastodon peer and confirm it arrives as text, not as a live tag.
+  green. **Live-verified by the owner 2026-10-21**, on this box, with a real
+  signed payload rather than a mock: a mirror actor was minted with its own
+  keypair and five RFC 9421 activities were POSTed to the live `/inbox/` -
+  a Note, a Film summary, a list description, and a Note that arrived clean
+  and was then **edited** to hostile, so the update branch was proven
+  separately from create. All three surfaces rendered the payload as inert
+  text, the moderation queue rendered it as readable text, and no alert ever
+  fired. The same session proved the S1 guard's first real federation
+  exchange: this box and the LAN Mastodon peer follow each other and posts
+  arrive. **The link consequence is accepted as intended** (owner,
+  2026-10-21): with no allowed link domains, a link inside a remote post
+  arrives as plain text. That is the local rule applied evenly, not a defect.
 
 - **THE VPS HARDENING PASS IS NOW THE SHIPPED CODE (2026-10-20, security
   increment S1, closes F4 + F5).** Production code and the shipped tree

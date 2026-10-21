@@ -96,9 +96,17 @@ the current state of those files rather than the audit's line numbers.
 
 ## Open items for the owner
 
-- **S2 live check (owner's keypress, not code):** post a status carrying
-  markup from the LAN Mastodon peer and confirm it arrives as text rather
-  than as a live tag. The suite proves the path with mocks only.
+- **S2 live check: DONE 2026-10-21.** A real signed payload (its own keypair,
+  five RFC 9421 activities POSTed to the live `/inbox/`) was delivered to
+  this box and rendered inert on all three surfaces, in the moderation
+  queue, and on the edited-note update path. No alert fired. The same
+  session closed S1's outstanding live item too: this box and the LAN
+  Mastodon peer follow each other and posts arrive, so the SSRF guard and
+  its LAN opt-in have now met a real peer.
+- **The link consequence is settled, not open (owner, 2026-10-21):** with no
+  allowed link domains, a link inside a remote post arrives as plain text.
+  The owner confirmed that is what they want. Do not re-open it as a defect
+  in a later increment.
 - The full gate has not been run since S1. Say the word and a session runs
   it; expect 2540 passed, 5 skipped if S2 is clean.
 
