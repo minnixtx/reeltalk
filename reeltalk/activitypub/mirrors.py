@@ -25,7 +25,7 @@ from django.core.files.base import ContentFile
 from django.db import IntegrityError
 from PIL import Image
 
-from reeltalk import __version__
+from reeltalk import __version__, public_http
 from reeltalk.core.utils import sanitize_html
 from reeltalk.moderation.models import blocked_domain_for
 from reeltalk.social.models import User
@@ -79,7 +79,7 @@ def fetch_person_document(actor_url: str) -> dict:
     if parsed.scheme not in ("http", "https"):
         raise RemoteFetchError(f"Unsupported actor URL scheme: {parsed.scheme!r}")
     try:
-        resp = requests.get(
+        resp = public_http.get(
             actor_url,
             headers={
                 "Accept": "application/activity+json",
@@ -135,7 +135,7 @@ def webfinger_actor_url(localname: str, domain: str) -> str:
     for scheme in schemes:
         url = f"{scheme}://{domain}/.well-known/webfinger"
         try:
-            resp = requests.get(
+            resp = public_http.get(
                 url, params={"resource": resource}, timeout=REQUEST_TIMEOUT
             )
         except requests.RequestException:
@@ -310,7 +310,7 @@ def fetch_image_bytes(url: str, max_bytes: int) -> "bytes | None":
         )
         return None
     try:
-        resp = requests.get(
+        resp = public_http.get(
             url,
             headers={"User-Agent": f"reeltalk/{__version__}"},
             timeout=REQUEST_TIMEOUT,

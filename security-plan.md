@@ -167,13 +167,18 @@ touches the same files.
 nftables/SSH/sysctl/logrotate work, nginx realip and rate limits, TLS,
 backups, certbot, host-side DB roles, Cloudflare dashboard settings.
 
-## Open questions for the owner
+## Decisions (owner, 2026-10-20, at S1 kickoff)
 
-1. LAN opt-in shape for `public_http` (S1 must-fix): boolean allow-private
-   or a peer CIDR/domain allowlist; default deny either way. Confirm the
-   env name.
-2. `WEB_BIND` shipped default (S1): all interfaces, loopback via `.env`?
-3. Pillow 12 to 13 major bump: accept as-is or hold for patch releases?
-4. DB role split (`reeltalk_app` + bootstrap): the captured diff only
-   separates the db container's env; the role split itself is host-side.
-   Ship it in the default flow or document it as an ops recipe?
+1. LAN opt-in: a CIDR allowlist. `FEDERATION_ALLOWED_NETWORKS`, a
+   comma-separated env list of CIDRs, default empty = every private
+   destination stays refused. Parsed lazily with the same memo and
+   invalid-CIDR posture as `TRUSTED_PROXIES`.
+2. `WEB_BIND` shipped default: empty = all interfaces (today's behavior,
+   `WEB_PORT` keeps working); the VPS sets `WEB_BIND=127.0.0.1` in its own
+   `.env`. Applied to both compose files.
+3. Pillow 12 to 13: accepted. The avatar/poster/image tests run inside
+   S1's targeted pytest.
+4. DB role split: ship it in the default deploy flow. Out of S1's scope
+   (S1 only separates the db container's env); the role creation, the
+   ownership migration, and the upgrade path for existing installs land
+   with S4's deploy hygiene pass.

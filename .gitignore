@@ -24,3 +24,7 @@ backups/
 
 # Instance B env (federation peer; secrets) — M4 increment 7
 .env.b
+
+# All instance environment variants may contain credentials
+.env.*
+!.env.example

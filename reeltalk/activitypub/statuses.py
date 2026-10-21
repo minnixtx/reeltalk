@@ -68,7 +68,7 @@ import requests
 from django.core.files.base import ContentFile
 from django.utils import timezone
 
-from reeltalk import __version__
+from reeltalk import __version__, public_http
 from reeltalk.core.models import (
     Film,
     Shelf,
@@ -155,7 +155,7 @@ def _fetch_film_document(url: str) -> dict:
     if parsed.scheme not in ("http", "https"):
         raise RemoteObjectError(f"Unsupported film URL scheme: {parsed.scheme!r}")
     try:
-        resp = requests.get(
+        resp = public_http.get(
             url,
             headers={
                 "Accept": "application/activity+json",

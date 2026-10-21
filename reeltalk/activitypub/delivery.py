@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import requests
 
+from reeltalk import public_http
+
 from .signatures import sign_request
 
 if TYPE_CHECKING:
@@ -124,7 +126,7 @@ def deliver_activity(inbox_url: str, activity: dict, private_pem: str, key_id: s
     headers["Accept"] = "application/activity+json"
     activity_type = activity.get("type", "?") if isinstance(activity, dict) else "?"
     try:
-        response = requests.post(
+        response = public_http.post(
             inbox_url, data=body, headers=headers, timeout=REQUEST_TIMEOUT
         )
     except requests.RequestException as exc:

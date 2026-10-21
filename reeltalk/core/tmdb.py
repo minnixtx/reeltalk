@@ -24,6 +24,7 @@ from typing import Any
 import requests
 from django.conf import settings
 
+from reeltalk import public_http
 from reeltalk.core.utils import render_markdown
 
 API_BASE = "https://api.themoviedb.org/3"
@@ -60,7 +61,7 @@ def _get(url: str, params: dict[str, Any]) -> dict[str, Any]:
     distinguish a bad key from a rate limit from a network problem.
     """
     try:
-        resp = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
+        resp = public_http.get(url, params=params, timeout=REQUEST_TIMEOUT)
     except requests.RequestException as err:
         raise TmdbNetworkError("Could not reach TMDB; try again shortly.") from err
     if resp.status_code == 401:
@@ -138,7 +139,7 @@ def download_poster(poster_path: str | None) -> bytes | None:
     if not poster_path:
         return None
     try:
-        resp = requests.get(f"{IMAGE_BASE}{poster_path}", timeout=REQUEST_TIMEOUT)
+        resp = public_http.get(f"{IMAGE_BASE}{poster_path}", timeout=REQUEST_TIMEOUT)
     except requests.RequestException as err:
         raise TmdbNetworkError("Could not download the film poster.") from err
     if not resp.ok:

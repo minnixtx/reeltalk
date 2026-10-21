@@ -61,12 +61,19 @@ services:
     <<: *default-image
     command: uvicorn reeltalk.asgi:application --host 0.0.0.0 --port 3030
     ports:
-      - "${WEB_PORT:-3030}:3030"
+      # WEB_BIND unset (default) publishes on every interface, which is what
+      # a deploy with no local reverse proxy needs. Set WEB_BIND=127.0.0.1
+      # in .env when a proxy on this same host fronts the app.
+      - "${WEB_BIND:-}${WEB_BIND:+:}${WEB_PORT:-3030}:3030"
     volumes:
       - static_volume:/app/static
       - media_volume:/app/images
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3030"]
+      # The forwarded-proto header is load-bearing once SECURE_SSL_REDIRECT
+      # is on: a plain-HTTP probe would take the 301 and the container would
+      # read unhealthy forever. Loopback is inside TRUSTED_PROXIES by
+      # default, so the header is believed here and nowhere else.
+      test: ["CMD-SHELL", "curl -f -H 'X-Forwarded-Proto: https' http://localhost:3030"]
       interval: 3s
       timeout: 1s
       # A cold first boot runs migrations + collectstatic before uvicorn binds,

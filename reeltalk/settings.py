@@ -53,6 +53,14 @@ SECURE_PROXY_SSL_HEADER = (
     ("HTTP_X_FORWARDED_PROTO", "https") if TRUSTED_PROXIES else None
 )
 
+# Which networks a peer that genuinely shares this instance's network lives
+# in (public_http.py, the SSRF guard). Outbound fetches dial only globally
+# routable addresses, so a LAN federation peer is unreachable until its
+# CIDR is named here. Default empty keeps every private destination refused;
+# cloud metadata stays blocked even once a LAN range is listed, because an
+# allowlist entry only rescues the addresses it actually names.
+FEDERATION_ALLOWED_NETWORKS = env.list("FEDERATION_ALLOWED_NETWORKS", default=[])
+
 
 # The one origin every ActivityPub identity is minted from. Deliberately not the
 # request's host+scheme: a moderator acting over http://192.168.1.138:3030
@@ -125,6 +133,11 @@ MIDDLEWARE = [
     # Must stay after the gate above: it keys the cookie Secure flag off
     # request.is_secure(), which is only trustworthy once the gate has run.
     "reeltalk.cookie_policy.SchemeAwareCookieMiddleware",
+    # Above SecurityMiddleware on purpose: a middleware only decorates the
+    # responses that come back from below it, and SecurityMiddleware
+    # short-circuits (the SSL redirect, once SECURE_SSL_REDIRECT is on).
+    # Below it, those responses would go out with no CSP header.
+    "csp.middleware.CSPMiddleware",
     "django.middleware.security.SecurityMiddleware",
     # Serves collected static files from the web process — this stack has no
     # separate static server (PLAN.md §3.8).
@@ -270,6 +283,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Django default and is spelled out here because the invite-only deployment
 # relies on it: top-level navigations still carry the cookie (a follow link
 # from another instance still logs you in), cross-site POSTs do not.
+SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=False)
+SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=0)
+
 SECURE_COOKIES = env.bool("SECURE_COOKIES", default=True)
 # One instance can front two transports: the public https domain and a plain
 # http://<lan-ip> endpoint. true (default) sets Secure only on requests that
@@ -298,10 +314,18 @@ TMDB_API_KEY = env.str("REELTALK_TMDB_API_KEY", default="")
 # Content Security Policy. img-src allows the TMDB poster CDN from day one —
 # the legacy project learned the hard way that adding it later breaks every
 # page that shows search results (PLAN.md §3.4).
-CSP_DEFAULT_SRC = ["'self'"]
-CSP_IMG_SRC = ["'self'", "https://image.tmdb.org", "data:"]
-CSP_STYLE_SRC = ["'self'", "'unsafe-inline'"]
-CSP_SCRIPT_SRC = ["'self'"]
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "default-src": ["'self'"],
+        "img-src": ["'self'", "https://image.tmdb.org", "data:"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "script-src": ["'self'"],
+        "object-src": ["'none'"],
+        "base-uri": ["'self'"],
+        "form-action": ["'self'"],
+        "frame-ancestors": ["'none'"],
+    },
+}
 
 # Email: SMTP when configured, console backend otherwise (safe dev default).
 # Django 6.1's MAILERS setting replaces the deprecated EMAIL_* settings —

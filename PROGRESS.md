@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-19
+**Last updated:** 2026-10-20
 
 ---
 
@@ -9,6 +9,40 @@
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
 
+- **THE VPS HARDENING PASS IS NOW THE SHIPPED CODE (2026-10-20, security
+  increment S1, closes F4 + F5).** Production code and the shipped tree
+  were different programs; `security-plan.md` S1 landed the captured VPS
+  diff plus its review fixes. `reeltalk/public_http.py` now fronts every
+  outbound fetch (delivery, mirrors, statuses, tmdb): one DNS resolution,
+  the socket pinned to the checked literal, redirects re-checked, 8 MiB
+  cap after decompression, env proxies off, signed POSTs never follow
+  redirects. **Private destinations are refused unless their CIDR is named
+  in `FEDERATION_ALLOWED_NETWORKS`** (default empty; parsed like
+  `TRUSTED_PROXIES`; cloud metadata stays blocked even with a LAN range
+  listed - an allowlist entry only rescues the addresses it names).
+  django-csp is wired for the first time: `CSPMiddleware` sits **above**
+  `SecurityMiddleware` so the SSL redirect carries the header too;
+  `SECURE_SSL_REDIRECT`/`SECURE_HSTS_SECONDS` ship default-off. Both
+  compose files: db gets only `POSTGRES_*` env; web/worker get `cap_drop`,
+  `no-new-privileges`, pids/mem/cpu caps; the published port is
+  `${WEB_BIND:-}${WEB_BIND:+:}${WEB_PORT:-3030}:3030` - default all
+  interfaces, `WEB_BIND=127.0.0.1` for a same-host proxy; the healthcheck
+  sends `X-Forwarded-Proto: https` so it survives `SECURE_SSL_REDIRECT`.
+  Pillow 13.0.0, urllib3 2.8.0, certifi 2026.10.19. **Owner follow-ups at
+  the VPS redeploy:** set `WEB_BIND=127.0.0.1` and
+  `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24` in its `.env` (the old
+  compose hardcoded loopback; the repo default is all interfaces), then
+  one live exchange with the LAN Mastodon peer as the guard's first real
+  test. Findings: `SECURITY-AUDIT.md`; plan: `security-plan.md`.
+- **THIS DEV BOX'S `.env` AND THE RUNNING DB DISAGREE ON
+  `POSTGRES_PASSWORD` (found 2026-10-20, pre-existing, untouched).** `.env`
+  was edited 2026-10-20 15:52; the live `reeltalk-db-1` volume holds the
+  older password (hash-compared, not guessed). The running web container
+  still serves because its env predates the edit, but **any new container
+  gets `FATAL: password authentication failed for user "reeltalk"`** -
+  which is why S1's suite ran against a throwaway Postgres. Reconcile
+  before the next local `up -d`: `ALTER ROLE` the db to the `.env` value
+  and recreate web/worker, or restore the old value into `.env`.
 - **THE HOME FEED'S SHELF N+1 IS GONE (2026-10-19, R157, §2S).** The item
   that sat here unread from 2026-09-23 ("1,378 of the home page's ~1,397
   queries") had one cause: `feed_entries` did
@@ -26,10 +60,15 @@ disagrees with this block, this block is current and the other is history.**
   whole feed in Python per request, because §2I decision 1 pages the
   computed list on a real correctness break. SQL aggregation needs its own
   section and brief.
-- **CURRENT GATE: 2498 passed, 5 skipped, all five markers `0`, 35:17
-  (2026-10-19).** Delta on the R156 baseline is **+3 = 2 new tests + 1
-  clean-room param** for `tests/test_feed_query_count.py`; counted as
-  collected items, not `def test` lines. Full detail in **§2S**.
+- **GATE STATE (2026-10-20).** Last full-suite run: **2498 passed, 5
+  skipped, all five markers `0`, 35:17 (2026-10-19, pre-S1).** S1 was
+  verified targeted per the plan: **622 collected, 622 passed** across the
+  19 touched test files - including **24 new** in `test_public_http.py`
+  (17 from the VPS capture + 5 LAN opt-in + scoped-IPv6 + invalid-CIDR)
+  and `test_csp.py` (200 + 301) - with ruff check + format green, all on
+  the rebuilt baked image. **The full gate has not been re-run since S1**;
+  owner's signal. For reference the VPS ran the full suite on the captured
+  hardening code: 2524 passed, 5 skipped (`HARDENING.md`).
 - **REELTALK INSTALLS ON aarch64, NOT JUST amd64 (verified 2026-10-16).**
   Not manifest-listed-only: the published `linux/arm64` variant was
   *booted* under QEMU in an isolated Compose project and came up fully -

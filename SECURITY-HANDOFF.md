@@ -1,5 +1,9 @@
 # Security audit handoff
 
+> Status: S1 was executed on 2026-10-20 by the session this file handed off
+> to. The `## NOW` block in `PROGRESS.md` is the current source of truth;
+> everything below is the handoff as written at the audit session's close.
+
 Point the next session at this file. Everything needed is in the repo; no
 production access is required to start increment S1.
 
