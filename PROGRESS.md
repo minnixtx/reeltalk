@@ -10,7 +10,11 @@
 disagrees with this block, this block is current and the other is history.**
 
 - **REMOTE HTML IS SANITIZED ON INGEST (2026-10-21, security increment S2,
-  closes F1).** The federation ingest path stored a remote Note's `content`,
+  closes F1). FULL GATE GREEN ON IT: 2541 passed, 5 skipped**, all four
+  markers 0. The count moved 2528 to 2541, not the predicted 2540, because
+  `test_clean_room.py` parametrizes one case per file and a new test file
+  adds a collected item of its own. The federation ingest path stored a
+  remote Note's `content`,
   a Film document's `summary`, and a list extension's `summary` **exactly as
   they arrived**, and every read path prints those fields with `|safe` - the
   feed, the film page, the list page, the status page, and the moderator's

@@ -1,10 +1,9 @@
 # Security audit handoff
 
-> Status: S2 landed 2026-10-21 (F1 closed) with targeted pytest and ruff green
-> on the rebuilt baked image. The **full gate has not been run for S2** - it
-> runs only on the owner's explicit signal. The `## NOW` block in
-> `PROGRESS.md` is the current source of truth; everything below is the
-> handoff as written at S2's close.
+> Status: S2 landed 2026-10-21 (F1 closed) and the **full gate is green on it:
+> 2541 passed, 5 skipped** (2026-10-21, all four markers 0). The `## NOW`
+> block in `PROGRESS.md` is the current source of truth; everything below is
+> the handoff as written at S2's close.
 
 Point the next session at this file. Everything needed is in the repo; no
 production access is required to start S3.
@@ -37,8 +36,11 @@ production access is required to start S3.
   2026-10-21).** reeltalk.dev still runs pre-S1 code. When it eventually
   redeploys from the repo, its `.env` needs `WEB_BIND=127.0.0.1` and
   `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24`.
-- Gate baseline: **2528 passed, 5 skipped** (2026-10-21, measured on S1).
-  S2 adds 12 collected items, so a green full gate on S2 should read 2540.
+- Gate baseline: **2541 passed, 5 skipped** (2026-10-21, measured on S2, all
+  four markers 0). The count moved 2528 to 2541, not the predicted 2540:
+  `test_clean_room.py` parametrizes one case per file, so a new test file
+  adds a collected item beyond its own tests (12 + 1). Count collected
+  items, never `def test` lines.
 - Open findings: **F2 + F3 (S3, next)**, F6 (S4), F7-F9 (S5), F10-F12 (S6).
   The DB role split ships in the default deploy flow and lands with S4
   (owner decision).
