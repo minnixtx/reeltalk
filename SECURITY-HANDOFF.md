@@ -1,86 +1,114 @@
 # Security audit handoff
 
-> Status: S1 landed 2026-10-20 (`1b4ec4b`) and runs live on the dev box;
-> the full gate is green as of 2026-10-21 (**2528 passed, 5 skipped**).
-> This file now hands off increment **S2**. The `## NOW` block in
+> Status: S2 landed 2026-10-21 (F1 closed) with targeted pytest and ruff green
+> on the rebuilt baked image. The **full gate has not been run for S2** - it
+> runs only on the owner's explicit signal. The `## NOW` block in
 > `PROGRESS.md` is the current source of truth; everything below is the
-> handoff as written at S1's close.
+> handoff as written at S2's close.
 
 Point the next session at this file. Everything needed is in the repo; no
-production access is required to start S2.
+production access is required to start S3.
 
-## State (as of the S1 close, 2026-10-21)
+## State (as of the S2 close, 2026-10-21)
 
-- S1 closed **F4 (SSRF)** and **F5 (CSP never sent)**:
-  `reeltalk/public_http.py` fronts every outbound fetch (one DNS
-  resolution, socket pinned to the checked literal, 8 MiB cap, redirects
-  re-checked, signed POSTs never follow them); non-global destinations
-  need a `FEDERATION_ALLOWED_NETWORKS` CIDR (default deny, multicast
-  always refused, cloud metadata stays blocked); django-csp wired with
-  `CSPMiddleware` above `SecurityMiddleware`; compose hardening plus
-  parameterized `WEB_BIND`; Pillow 13 / urllib3 2.8.0 / certifi bump.
-  The owner's four S1 decisions are recorded in `security-plan.md`
-  ("Decisions", 2026-10-20).
-- The dev-box instance (`reeltalk.minnix.dev`) runs S1 live: CSP header
-  observed on real responses, worker qcluster proven by a consumed task,
-  `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24` set in this box's `.env`.
+- S2 closed **F1 (stored XSS from any peer)**. `reeltalk/activitypub/statuses.py`
+  now runs every remote HTML field through `core.utils.sanitize_html` at the
+  single place it is read off the wire, via a module-level `_remote_html`
+  (line 142) beside the other wire normalizers: Note `content` in
+  `_mirror_status`, Film `summary` in `_mirror_film`, list extension
+  `summary` in `_mirror_list`. Because each field is sanitized once at its
+  read, the create branch and the update helpers (`_apply_note_fields`,
+  `_apply_list_fields`) store the identical checked bytes - the audit's
+  "create and update branches alike" is satisfied by construction, not by
+  two call sites that can drift.
+- Two consequences worth knowing before touching this file again. **One:**
+  bleach escapes what it refuses rather than stripping it, so a hostile body
+  stays readable as inert text and a non-empty field stays non-empty - which
+  matters because the shape mapping in `_mirror_status` reads `content` to
+  choose the status type. **Two:** remote bodies now pass the local
+  outbound-link rule, so an `href` to a domain outside `LinkDomain` loses
+  its href exactly as a local member's would. Both are pinned by tests.
+- Tests: `reeltalk/tests/test_federation_sanitize.py` (12 collected), every
+  one delivered through the real signed `/inbox/` route, including the
+  moderation-queue render. Non-vacuity was checked by reverting the guard:
+  8 go red, the 4 controls stay green. Targeted set with the change in
+  place: **447 passed** (435 existing federation/moderation + 12 new).
 - **VPS redeploy is deferred until the whole audit is finished (owner,
   2026-10-21).** reeltalk.dev still runs pre-S1 code. When it eventually
   redeploys from the repo, its `.env` needs `WEB_BIND=127.0.0.1` and
   `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24`.
-- Gate baseline: **2528 passed, 5 skipped** (2026-10-21). One hermeticity
-  fix rode with it: the pytest-env block pins
-  `FEDERATION_ALLOWED_NETWORKS` empty (`92415ba`), because the gate
-  container inherits the env_file `.env` and an operator's allowlist must
-  never decide what the suite proves.
-- Open findings: **F1 (S2, next)**, F2 + F3 (S3), F6 (S4), F7-F9 (S5),
-  F10-F12 (S6). The DB role split ships in the default deploy flow and
-  lands with S4 (owner decision).
+- Gate baseline: **2528 passed, 5 skipped** (2026-10-21, measured on S1).
+  S2 adds 12 collected items, so a green full gate on S2 should read 2540.
+- Open findings: **F2 + F3 (S3, next)**, F6 (S4), F7-F9 (S5), F10-F12 (S6).
+  The DB role split ships in the default deploy flow and lands with S4
+  (owner decision).
 
 ## What the next session should do
 
-Execute increment **S2** from `security-plan.md`: F1, sanitize remote HTML
-on ingest - the worst open finding (stored XSS from any peer, including
-into the moderator queue).
+Execute increment **S3** from `security-plan.md`: F2 + F3, federation ingest
+integrity. Both are small diffs in two files that S2 also touched, so re-read
+the current state of those files rather than the audit's line numbers.
 
-- `reeltalk/activitypub/statuses.py` (line refs verified 2026-10-21):
-  run `sanitize_html()` on
-  (a) Note `content` in `_mirror_status` (line 419) and its update branch
-  `_apply_note_fields` (line 397),
-  (b) Film `summary` in `_mirror_film` (line 188),
-  (c) list extension `summary` in `_mirror_list` (line 725) and
-  `_apply_list_fields` (line 711).
-- Pattern to follow: `mirrors.py:281` - `user.summary =
-  sanitize_html(summary)`, imported from `reeltalk.core.utils`.
-- Tests (from the plan): inbox-deliver a Note with `<script>` and
-  `<img onerror>` and assert the stored row is escaped (bleach escapes
-  rather than strips); same for a Film mirror summary and a list
-  description; assert the moderation queue page renders the stored value
-  safely.
+- **F2 - `Update`/`Delete` do not check that the sender owns the object.**
+  `reeltalk/activitypub/statuses.py` (line refs verified 2026-10-21):
+  the update branch of `_mirror_status` starts at line 529
+  (`existing = Status.objects.filter(local=False, remote_url=home_url)`),
+  and `handle_delete` is at line 917. In both, drop the activity and log it
+  when `existing.user_id != sender.pk` - the same graceful-ignore posture
+  the module already uses for other unforged-but-unusable shapes. Note the
+  module's attribution rule protects who *created* a row and says nothing
+  about who may *mutate* one; that is the gap. `handle_update` (line 878)
+  dispatches into `_mirror_status`, so the guard belongs in the update
+  branch, not in the dispatcher.
+- **F3 - a fetched Person document's `id` is never checked against the URL
+  it was fetched from.** `reeltalk/activitypub/mirrors.py`:
+  `fetch_person_document` (line 71) already refuses a non-Person type and a
+  missing `publicKeyPem`, so the id check belongs beside those existing
+  guards and raises `RemoteFetchError`. Compare against the requested URL
+  with the fragment stripped - `mirror_user_from_person` (line 189) keys the
+  mirror on `doc["id"]` at line 198, which is how a mismatched document
+  would otherwise mint a mirror impersonating somebody else's actor URL and
+  occupy the unique `actor_url` slot against the real identity.
+- Tests (from the plan): a forged `Update` from a second verified sender is
+  ignored; a forged `Delete` is ignored; a Person doc whose `id` does not
+  match the fetched URL is rejected; and **honest `Update`/`Delete` still
+  work** - that last pair is the regression guard, and it is the one that
+  keeps this increment from being a fix that silently breaks federation.
+  Deliver through the real signed `/inbox/` route, as
+  `test_federation_inbound.py` and `test_federation_sanitize.py` do.
 
 ## Ground rules (full list in security-plan.md)
 
 - Rebuild the Docker image before running pytest; the gate runs the baked
   image.
-- Targeted pytest + ruff per increment. The full gate (~36 min) only on
-  the owner's explicit signal.
+- Targeted pytest + ruff per increment. The full gate (~36 min) only on the
+  owner's explicit signal.
 - One commit per increment, no co-author trailer. Rewrite the
   `PROGRESS.md` NOW block as the increment's last step.
 - Deployer-agnostic: safe no-config defaults in shipped code; host infra
   stays out of the repo.
-- The VPS is production: read-only unless the owner approves a change,
-  and all VPS work is deferred until the audit is complete.
+- The VPS is production: read-only unless the owner approves a change, and
+  all VPS work is deferred until the audit is complete.
 - No em dashes in user-facing text.
 - The suite must not inherit operator env: any setting `.env` may
   legitimately set that tests assume a default of belongs pinned in
   pyproject's pytest-env block.
 
+## Open items for the owner
+
+- **S2 live check (owner's keypress, not code):** post a status carrying
+  markup from the LAN Mastodon peer and confirm it arrives as text rather
+  than as a live tag. The suite proves the path with mocks only.
+- The full gate has not been run since S1. Say the word and a session runs
+  it; expect 2540 passed, 5 skipped if S2 is clean.
+
 ## Read in this order
 
-1. `security-plan.md` - ground rules first, then S2.
-2. `SECURITY-AUDIT.md` - F1 evidence with file:line.
-3. `reeltalk/activitypub/statuses.py` and the `mirrors.py` sanitize
-   pattern.
+1. `security-plan.md` - ground rules first, then S3.
+2. `SECURITY-AUDIT.md` - F2 and F3 evidence (its line numbers predate S2's
+   edit to `statuses.py`; use the ones above).
+3. `reeltalk/activitypub/statuses.py` (the update branch and
+   `handle_delete`) and `reeltalk/activitypub/mirrors.py`
+   (`fetch_person_document`, `mirror_user_from_person`).
 
-No open questions for the owner going into S2; the four S1 decisions are
-already recorded in `security-plan.md`.
+No open questions for the owner going into S3.

@@ -76,6 +76,7 @@ from reeltalk.core.models import (
     Status,
     resolve_film_id,
 )
+from reeltalk.core.utils import sanitize_html
 from reeltalk.lists.models import FilmList, ListItem
 from reeltalk.lists.services import soft_delete_list
 from reeltalk.mentions.models import sync_status_mentions
@@ -136,6 +137,28 @@ def _parse_time(value):
 def _as_list(value):
     """A wire array field as a Python list (non-lists read as empty)."""
     return list(value) if isinstance(value, list) else []
+
+
+def _remote_html(value) -> str:
+    """A wire HTML field, through the same sanitizer local content passes (F1).
+
+    Remote prose arrives already rendered and every read path prints it with
+    ``|safe``, so nothing off the wire may be stored unchecked — the gate
+    ``mirrors.py`` has always applied to a Person ``summary``, now on the
+    three sites that never got it. bleach *escapes* what it refuses rather
+    than stripping it, so a hostile body stays readable as inert text and a
+    field that was non-empty stays non-empty: the shape mapping in
+    ``_mirror_status`` reads this value to decide between a review and a
+    rating-only entry, and a stripper would silently retype the row.
+
+    Called once where the field is read, never again on the way in — a second
+    pass would escape the first pass's own entities. A non-string reads as
+    empty rather than raising: bleach takes only strings, and a TypeError
+    inside a handler rolls the activity back, so a peer sending
+    ``"content": 5`` would find a delivery it could never complete. §3.6 wants
+    a malformed-but-harmless shape ignored, not retried forever.
+    """
+    return sanitize_html(value) if isinstance(value, str) else ""
 
 
 # --- Film references ---------------------------------------------------------
@@ -214,7 +237,10 @@ def _mirror_film(doc: dict) -> Film:
     film = Film(
         title=doc["name"],
         subtitle=doc.get("subtitle") or "",
-        description=doc.get("summary") or "",
+        # F1: a remote summary is rendered HTML and ``film/detail.html``
+        # prints it with ``|safe``. Mirrors are create-only, so this one call
+        # covers every Film ingest path — there is no update branch to catch.
+        description=_remote_html(doc.get("summary")),
         year=year if isinstance(year, int) else None,
         runtime=runtime if isinstance(runtime, int) else None,
         genres=_as_list(doc.get("genres")),
@@ -439,7 +465,12 @@ def _mirror_status(sender, note: dict, request):
         # Without an id there is no origin identity to key on — ignore.
         return None
     parent = resolve_status_reference(reference_url(note.get("inReplyTo")), request)
-    content = note.get("content") or ""
+    # Read once, sanitized once: the create branch and ``_apply_note_fields``
+    # both store this exact value, so neither can disagree about what was
+    # checked. It is sanitized *before* the shape mapping below on purpose —
+    # that mapping reads ``content`` to choose a status type, and the row must
+    # be typed off the bytes it is about to store, not off the raw wire.
+    content = _remote_html(note.get("content"))
     list_ext = note.get(LIST_EXTENSION)
     if list_ext is not None:
         # L11: this Note is a list's post face. The extension is
@@ -757,9 +788,10 @@ def _mirror_list(sender, ext, face: Status, request) -> "FilmList | None":
     if not isinstance(title, str) or not title.strip():
         logger.info("List extension at %s carries no name; no list mirrored", home_url)
         return None
-    description = ext.get("summary")
-    if not isinstance(description, str):
-        description = ""
+    # Sanitized at this single read, which both the create branch below and
+    # ``_apply_list_fields`` take their value from — ``lists/detail.html``
+    # prints the description with ``|safe``.
+    description = _remote_html(ext.get("summary"))
 
     film_list = FilmList.objects.filter(remote_url=home_url).first()
     if film_list is not None:

@@ -9,6 +9,34 @@
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
 
+- **REMOTE HTML IS SANITIZED ON INGEST (2026-10-21, security increment S2,
+  closes F1).** The federation ingest path stored a remote Note's `content`,
+  a Film document's `summary`, and a list extension's `summary` **exactly as
+  they arrived**, and every read path prints those fields with `|safe` - the
+  feed, the film page, the list page, the status page, and the moderator's
+  queue. So any peer could post `<img src=x onerror=...>` and have it run on
+  this instance, including in front of a staff session reading the queue.
+  `reeltalk/activitypub/statuses.py` now runs each field through
+  `core.utils.sanitize_html` - the same allowlist local markdown passes, the
+  same gate `mirrors.py` has always applied to a Person `summary` - at the
+  **single place it is read off the wire**, so a create branch and an update
+  branch can never disagree about what was checked: Note `content` in
+  `_mirror_status` (before the shape mapping, which reads it to choose a
+  status type), Film `summary` in `_mirror_film` (create-only, so one call
+  covers both doors into it), list `summary` in `_mirror_list`. A non-string
+  wire value reads as empty rather than raising: a TypeError inside a handler
+  rolls the activity back, which would hand a peer a delivery it can never
+  complete. bleach **escapes** what it refuses rather than stripping it, so a
+  hostile body stays readable as inert text and a field that was non-empty
+  stays non-empty. **Consequence to own:** remote bodies now pass the local
+  outbound-link rule too - an `href` to a domain outside `LinkDomain` loses
+  its href, exactly as a local member's would. Tests:
+  `reeltalk/tests/test_federation_sanitize.py` (12), every one delivered
+  through the real signed `/inbox/` route, including the moderation-queue
+  render; the guard was reverted to confirm 8 go red while the 4 controls stay
+  green. **Owner live check:** post a status carrying markup from the LAN
+  Mastodon peer and confirm it arrives as text, not as a live tag.
+
 - **THE VPS HARDENING PASS IS NOW THE SHIPPED CODE (2026-10-20, security
   increment S1, closes F4 + F5).** Production code and the shipped tree
   were different programs; `security-plan.md` S1 landed the captured VPS
