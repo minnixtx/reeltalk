@@ -48,10 +48,11 @@ disagrees with this block, this block is current and the other is history.**
   containers. The damaged file is kept at `.env.bak-accidental-20261020`
   (git-ignored); a dead `REDIS_PASSWORD` rode along in the restore,
   nothing in the repo reads it. **The next local `up -d` is safe** and
-  will deploy S1: the running containers predate the S1 build. If this
-  instance is to exchange with the LAN Mastodon peer after that
-  restart, `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24` must be added
-  to `.env` first - S1 refuses private destinations by default.
+  will deploy S1: the running containers predate the S1 build.
+  `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24` is set in this box's
+  `.env` (2026-10-21), so the LAN Mastodon peer is reachable the
+  moment the containers recreate - until a range is named, S1 refuses
+  private destinations.
 - **THE HOME FEED'S SHELF N+1 IS GONE (2026-10-19, R157, §2S).** The item
   that sat here unread from 2026-09-23 ("1,378 of the home page's ~1,397
   queries") had one cause: `feed_entries` did
