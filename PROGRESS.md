@@ -10,10 +10,10 @@
 disagrees with this block, this block is current and the other is history.**
 
 - **FEDERATION INGEST NOW CHECKS WHO MAY MUTATE A MIRROR (2026-10-21,
-  security increment S3, closes F2 + F3). TARGETED GREEN: 652 passed** on
+  security increment S3, closes F2 + F3). TARGETED GREEN: 654 passed** on
   the rebuilt image (the federation/activitypub/moderation set); the full
-  gate has not been run since S2 - when it runs, expect **2551 passed, 5
-  skipped** (2541 + 9 new tests + 1 clean-room item). Both findings shared
+  gate has not been run since S2 - when it runs, expect **2553 passed, 5
+  skipped** (2541 + 11 new tests + 1 clean-room item). Both findings shared
   one shape: the signature proves *who sent* an activity, and nothing more.
   **F2:** `Update`/`Delete` looked a mirror up by its object url and applied
   the change without checking the verified sender against the row's author -
@@ -32,19 +32,31 @@ disagrees with this block, this block is current and the other is history.**
   occupy the unique `actor_url` slot the real actor needs to federate here
   at all. `fetch_person_document` now refuses the mismatch beside its other
   unusable-document guards, comparing against the requested URL
-  fragment-stripped. Tests: `reeltalk/tests/test_federation_integrity.py`
-  (7), every one delivered through the real signed `/inbox/` route - forged
+  fragment-stripped. **The live check then caught a pre-existing interop
+  gap:** Mastodon 4.7.2 spells a deleted status as a `Delete` whose object
+  is a `Tombstone` stub (`DeleteNoteSerializer`), and `handle_delete`
+  matched only `"Note"` - the delete arrived, logged as handled, and
+  changed nothing. The type gate now accepts `Note` or `Tombstone`; the id
+  lookup and the ownership check underneath are shared, so the widened
+  gate widens nothing else. Tests: `reeltalk/tests/test_federation_integrity.py`
+  (9), every one delivered through the real signed `/inbox/` route - forged
   Update and forged Delete from a second verified sender are ignored and
-  logged; the author's own Update/Delete still land (the regression guard);
-  a second sender still edits its own rows; first contact with a lying
-  Person document is refused and mints nothing, while honest first contact
-  still mirrors - plus two unit tests beside the existing
-  `fetch_person_document` guards. Non-vacuity: with the guards stashed,
-  exactly the four attack tests go red and every control stays green.
-  **Live check pending (owner):** an edit and a delete from a LAN Mastodon
-  post must arrive as update/tombstone, and a first contact from a new peer
-  must mint its mirror - the F3 id check has not yet met a real Mastodon
-  Person document.
+  logged, in both the Note and the Tombstone shape; the author's own
+  Update/Delete still land, in both shapes (the regression guard); a second
+  sender still edits its own rows; first contact with a lying Person
+  document is refused and mints nothing, while honest first contact still
+  mirrors - plus two unit tests beside the existing
+  `fetch_person_document` guards. Non-vacuity: with the F2/F3 guards
+  stashed, exactly the four attack tests go red and every control stays
+  green; with the Tombstone gate reverted, exactly the two tombstone tests
+  go red. **Live check done (owner, 2026-10-21):** the honest edit arrived
+  as an update and a new peer's first contact minted its mirror - the F3 id
+  check met a real Mastodon Person document and held. The honest delete
+  failed at first, and that failure is what surfaced the Tombstone gap; the
+  fix is deployed and the owner reruns a delete with a fresh post. The one
+  stale mirror the failed delete left behind (status 87, its upstream post
+  already gone) was tombstoned by hand - Mastodon does not resend a Delete
+  for a status that is already gone.
 
 - **REMOTE HTML IS SANITIZED ON INGEST (2026-10-21, security increment S2,
   closes F1). FULL GATE GREEN ON IT: 2541 passed, 5 skipped**, all four
@@ -153,7 +165,7 @@ disagrees with this block, this block is current and the other is history.**
   section and brief.
 - **GATE STATE (2026-10-21).** Last full-suite run: **2541 passed, 5
   skipped, all markers `0`** (on S2, owner's signal). S3 ran targeted only
-  (652); when the full gate next runs, expect 2551 passed, 5 skipped. The
+  (654); when the full gate next runs, expect 2553 passed, 5 skipped. The
   post-S1 run failed exactly one test,
   `test_private_destination_never_opens_socket[192.168.1.1]`, and the
   cause was environmental, not product: the gate container inherits the

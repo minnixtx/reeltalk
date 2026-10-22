@@ -165,6 +165,26 @@ def test_the_author_can_still_delete_her_mirror(carol):
     assert _mirrored_note().deleted is True
 
 
+@responses.activate
+@pytest.mark.django_db
+def test_a_delete_that_names_the_note_as_a_tombstone_still_lands(carol):
+    """Mastodon's real delete shape: the object is a Tombstone stub.
+
+    The live check found this: Mastodon 4.7.2 wraps a deleted status as
+    ``{"type": "Tombstone", "id": <status url>}`` (its
+    DeleteNoteSerializer), and a handler matching only ``"Note"`` logged
+    the arriving Delete as handled and changed nothing. The stub names the
+    same url, so the same door applies.
+    """
+    _carol_user, carol_key = carol
+    create = _activity("Create", _note("<p>Draft.</p>"), 1, CAROL)
+    assert _deliver(carol_key, CAROL_KEY_ID, create).status_code == 202
+    delete = _activity("Delete", {"id": NOTE_URL, "type": "Tombstone"}, 2, CAROL)
+    assert _deliver(carol_key, CAROL_KEY_ID, delete).status_code == 202
+
+    assert _mirrored_note().deleted is True
+
+
 # --- F2: a stranger's Update and Delete are dropped -------------------------
 
 
@@ -213,6 +233,31 @@ def test_a_forged_delete_from_another_sender_is_ignored(carol, mallory, caplog):
     assert _deliver(carol_key, CAROL_KEY_ID, create).status_code == 202
 
     forged = _activity("Delete", {"id": NOTE_URL, "type": "Note"}, 2, MALLORY)
+    with caplog.at_level(logging.INFO, logger=STATUSES_LOGGER):
+        response = _deliver(mallory_key, MALLORY_KEY_ID, forged)
+
+    assert response.status_code == 202
+    assert _mirrored_note().deleted is False
+    assert "not the author" in caplog.text
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_a_forged_tombstone_delete_from_another_sender_is_ignored(
+    carol, mallory, caplog
+):
+    """The widened type gate widens nothing else: the author check holds too.
+
+    A Tombstone stub is a new spelling of the same door, not a new door -
+    Mallory replaying Carol's url in Mastodon's shape lands exactly where
+    her Note-shaped replay does: nowhere.
+    """
+    _carol_user, carol_key = carol
+    _mallory_user, mallory_key = mallory
+    create = _activity("Create", _note("<p>Carol's own words.</p>"), 1, CAROL)
+    assert _deliver(carol_key, CAROL_KEY_ID, create).status_code == 202
+
+    forged = _activity("Delete", {"id": NOTE_URL, "type": "Tombstone"}, 2, MALLORY)
     with caplog.at_level(logging.INFO, logger=STATUSES_LOGGER):
         response = _deliver(mallory_key, MALLORY_KEY_ID, forged)
 

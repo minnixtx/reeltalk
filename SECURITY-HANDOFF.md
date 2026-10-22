@@ -1,12 +1,12 @@
 # Security audit handoff
 
-> Status: S3 landed 2026-10-21 (F2 + F3 closed) and the **targeted suite is
-> green on it: 652 passed** on the rebuilt image (the federation /
-> activitypub / moderation set). The full gate has not been run since S2
-> (**2541 passed, 5 skipped**, all four markers 0); when it next runs,
-> expect **2551 passed, 5 skipped**. The `## NOW` block in `PROGRESS.md` is
-> the current source of truth; everything below is the handoff as written at
-> S3's close.
+> Status: S3 landed 2026-10-21 (F2 + F3 closed, plus the Tombstone delete
+> gap its live check caught) and the **targeted suite is green on it: 654
+> passed** on the rebuilt image (the federation / activitypub / moderation
+> set). The full gate has not been run since S2 (**2541 passed, 5
+> skipped**, all four markers 0); when it next runs, expect **2553 passed,
+> 5 skipped**. The `## NOW` block in `PROGRESS.md` is the current source of
+> truth; everything below is the handoff as written at S3's close.
 
 Point the next session at this file. Everything needed is in the repo; no
 production access is required to start S4.
@@ -34,26 +34,39 @@ production access is required to start S4.
   refuses a document whose `id` is not the URL it was fetched from
   (fragment-stripped), beside its other unusable-document guards - that id
   is what `mirror_user_from_person` keys the mirror on, so a mismatch was
-  an impersonation lever against the unique `actor_url` slot.
-- Tests: `reeltalk/tests/test_federation_integrity.py` (7 collected), every
+  an impersonation lever against the unique `actor_url` slot. The live
+  check that closed S3 also caught a **pre-existing interop gap**: Mastodon
+  4.7.2 spells a deleted status as a `Delete` whose object is a `Tombstone`
+  stub (`DeleteNoteSerializer` emits `{"type": "Tombstone", "id": <status
+  url>}`), and `handle_delete` matched only `"Note"` - a real delete
+  arrived, logged as handled, and changed nothing. The type gate now
+  accepts `Note` or `Tombstone`; the id lookup and the F2 ownership check
+  underneath are shared, so the widened gate widens nothing else.
+- Tests: `reeltalk/tests/test_federation_integrity.py` (9 collected), every
   one delivered through the real signed `/inbox/` route, plus two unit
   tests beside the existing `fetch_person_document` guards in
   `test_activitypub_inbox.py`. The honest `Update`/`Delete` pair is the
   regression guard that keeps this from being a fix that silently breaks
-  federation. Non-vacuity was checked by stashing the guards: exactly the 4
-  attack tests go red, the controls stay green. Targeted set with the
-  change in place: **652 passed** (federation / activitypub / moderation /
-  mentions / public_http files).
-- **S3 live check pending (owner):** an edit and a delete of a LAN Mastodon
-  post must arrive here as an update and a tombstone, and a first contact
-  from a new peer must mint its mirror - the F3 id check has not yet met a
-  real Mastodon Person document. (Owner drives live federation checks.)
+  federation, in both the Note and the Tombstone spelling of a delete.
+  Non-vacuity was checked by stashing the guards: with the F2/F3 guards
+  stashed exactly the 4 attack tests go red; with the Tombstone gate
+  reverted exactly the 2 tombstone tests go red; the controls stay green
+  both times. Targeted set with the change in place: **654 passed**
+  (federation / activitypub / moderation / mentions / public_http / flag /
+  shelf files).
+- **S3 live check DONE (owner, 2026-10-21):** the honest edit arrived as an
+  update and a new peer's first contact minted its mirror - the F3 id check
+  met a real Mastodon Person document and held. The honest delete failed at
+  first, and that failure surfaced the Tombstone gap above; the fix is
+  deployed and the owner reruns a delete with a fresh post. The one stale
+  mirror the failed delete left behind (status 87, upstream post already
+  gone) was tombstoned by hand. (Owner drives live federation checks.)
 - **VPS redeploy is deferred until the whole audit is finished (owner,
   2026-10-21).** reeltalk.dev still runs pre-S1 code. When it eventually
   redeploys from the repo, its `.env` needs `WEB_BIND=127.0.0.1` and
   `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24`.
 - Gate baseline: full-suite **2541 passed, 5 skipped** (2026-10-21, on S2,
-  all four markers 0). S3 ran targeted only (652). Count collected items,
+  all four markers 0). S3 ran targeted only (654). Count collected items,
   never `def test` lines: `test_clean_room.py` parametrizes one case per
   file, so a new test file adds a collected item beyond its own tests.
 - Open findings: **F6 (S4, next)**, F7-F9 (S5), F10-F12 (S6). The DB role
@@ -81,8 +94,8 @@ Execute increment **S4** from `security-plan.md`: F6, fail-fast on
   installs land here, as deploy-flow scripts and docs (`setup.sh`,
   `DEPLOYING.md`, the compose files). Host-side infra stays out of the repo
   per the lean-scope decision.
-- The S3 live check (above) is the owner's; fold its result into the record
-  when it lands.
+- S3's live check is folded in (above): it passed for the honest edit and
+  the first contact, and its one failure produced the Tombstone fix.
 
 ## Ground rules (full list in security-plan.md)
 
@@ -103,14 +116,15 @@ Execute increment **S4** from `security-plan.md`: F6, fail-fast on
 
 ## Open items for the owner
 
-- **S3 live check (above):** edit and delete a LAN Mastodon post and watch
-  the update and tombstone arrive here; let a new peer first-contact this
-  box and confirm its mirror mints.
+- **S3 delete rerun:** with the Tombstone fix deployed, delete one LAN
+  Mastodon post and watch the tombstone arrive. The earlier failure's
+  record is above; the edit and first-contact checks already passed.
 - The full gate has not been run since S2. Say the word and a session runs
-  it; expect **2551 passed, 5 skipped** if S3 is clean.
-- S1's and S2's live checks are DONE (2026-10-21): the LAN peer federates
-  both ways through the SSRF guard, and S2's hostile payload rendered inert
-  on every surface including the moderation queue.
+  it; expect **2553 passed, 5 skipped** if S3 is clean.
+- S1's, S2's, and S3's live checks are DONE (2026-10-21): the LAN peer
+  federates both ways through the SSRF guard, S2's hostile payload
+  rendered inert on every surface including the moderation queue, and
+  S3's edit and first-contact checks passed on the real wire.
 
 ## Read in this order
 

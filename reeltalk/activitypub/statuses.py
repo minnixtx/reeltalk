@@ -934,7 +934,8 @@ def _tombstone_mirror(status: Status) -> None:
 def handle_delete(activity, sender, request):
     """A remote user deleted a Note or shelf event we mirror.
 
-    A Note becomes a soft-delete tombstone (identity intact — §3.2); a
+    A Note - or Mastodon's ``Tombstone`` stub naming one - becomes a
+    soft-delete tombstone (identity intact — §3.2); a
     ShelfEvent removes the mirrored ``ShelfFilm`` row. Film deletions are
     ignored gracefully in v0.1 (film rows are PROTECTed while referenced;
     removal is a merge/absorb concern). Redeliveries are no-ops: deleting an
@@ -944,7 +945,15 @@ def handle_delete(activity, sender, request):
     if obj is None:
         return
     obj_type = obj.get("type")
-    if obj_type == "Note":
+    if obj_type in ("Note", "Tombstone"):
+        # Mastodon spells a deleted status as a ``Tombstone`` stub rather
+        # than a Note - 4.7.2's DeleteNoteSerializer emits
+        # ``{"type": "Tombstone", "id": <status url>}`` - so both spellings
+        # open the same door. The live check caught this: a real Mastodon
+        # delete arrived, logged as handled, and changed nothing because
+        # only "Note" was matched. The id lookup and the ownership check
+        # below are what identify the row, so widening the type gate widens
+        # nothing else; a stub naming no mirror takes the silent exit.
         home_url = obj.get("id")
         if isinstance(home_url, str) and home_url:
             status = Status.objects.filter(local=False, remote_url=home_url).first()
