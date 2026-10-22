@@ -59,9 +59,17 @@ disagrees with this block, this block is current and the other is history.**
   suites; `ruff check` and `format --check` clean; `makemigrations --check`
   clean. The new suite collects 20 items, and the clean-room guard adds 6 more
   for the six new files, so the next full gate should land 2574 + 26 = **2600
-  passed, 5 skipped**. Count collected items, never `def test` lines. **The live
-  federation check is the owner's, per the standing rule, and the full gate has
-  not been run on this increment** (see GATE STATE below).
+  passed, 5 skipped**. Count collected items, never `def test` lines. **The
+  live federation check passed on the real wire (owner drove it, 2026-10-22,
+  after `docker compose up -d` put both app roles on the S5 image and applied
+  `0002`).** A favourite from `minnix@upallnight.minnix.dev` on a ReelTalk
+  review arrived as a dedup row (`.../users/minnix#likes/1386`) and became a
+  `core_like` on the post, with `activitypub_inboxattempt` **still at zero
+  rows**: Mastodon's signed `digest` satisfied the new requirement and an
+  honest delivery spent no throttle budget. **What it does not prove:** that an
+  uncovered body is refused (mock-only), and the 429 floor and 413 bound, which
+  no live test produces without attacking this instance deliberately. **The
+  full gate has still not been run on this increment** (see GATE STATE below).
 
 - **THE APP NO LONGER CONNECTS AS THE DATABASE SUPERUSER (2026-10-22, security
   increment S4 part 2, lands owner decision 4). FULL GATE GREEN ON IT:

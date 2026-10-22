@@ -1,11 +1,12 @@
 # Security audit handoff
 
-> Status: **S5 is landed and committed (`957eff7`), targeted-green but not
-> full-gated.** F7 (inbox body bound + per-source floor + retention prune) and
-> F8 (signatures must cover the body) are in the tree; ruff,
+> Status: **S5 is landed and committed (`957eff7`), targeted-green and
+> live-verified, but not full-gated.** F7 (inbox body bound + per-source floor +
+> retention prune) and F8 (signatures must cover the body) are in the tree; ruff,
 > `makemigrations --check`, and the neighbouring suites are green on a rebuilt
-> image. **Two things are outstanding and both are the owner's:** the full gate
-> (~36 min, on your signal) and the live federation check that F8 needs.
+> image, and a real Mastodon favourite arrived through the new body-coverage
+> gate on the live instance. **One thing is outstanding and it is the owner's:**
+> the full gate (~36 min, on your signal).
 >
 > The next increment is **S6: F10-F12 plus the surfaces the first pass did not
 > audit**. No open design questions block it. The `## NOW` block in
@@ -28,11 +29,15 @@ production access is required to start.
   2600 passed, 5 skipped** (2574 + the 20 items `test_inbox_hardening.py`
   collects + 6 clean-room items for the six new files). Count collected items,
   never `def test` lines.
-- **The live federation check F8 needs is not done.** The change asks peers to
-  sign the body they deliver; the reading of the reference peer says current
-  Mastodon already does that (below), but "the code says so" is not "the follow
-  landed". The owner drives: a real follow/like from the LAN Mastodon peer into
-  this instance must still arrive on a rebuilt image.
+- **The live federation check F8 needed is DONE (owner drove it 2026-10-22).**
+  Both app roles were recreated onto the S5 image with `0002` applied, then a
+  favourite from `minnix@upallnight.minnix.dev` on a ReelTalk review arrived: a
+  new `activitypub_deliveredactivity` row (`.../users/minnix#likes/1386`) and a
+  real `core_like` on the post, with `activitypub_inboxattempt` **still at zero
+  rows**. So the reference peer's signed `digest` satisfies the new requirement,
+  and honest traffic spent no throttle budget. **What it did not prove:** that an
+  uncovered body is refused (mock-only), and the 429 floor and 413 bound, which
+  no honest test produces.
 - **VPS redeploy stays deferred until the audit is finished (owner).**
   reeltalk.dev still runs pre-S1 code. When it redeploys its `.env` needs
   `WEB_BIND=127.0.0.1` and `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24`.
