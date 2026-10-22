@@ -1,12 +1,10 @@
 # Security audit handoff
 
-> Status: **S5 is landed and committed (`957eff7`), targeted-green and
-> live-verified, but not full-gated.** F7 (inbox body bound + per-source floor +
-> retention prune) and F8 (signatures must cover the body) are in the tree; ruff,
-> `makemigrations --check`, and the neighbouring suites are green on a rebuilt
-> image, and a real Mastodon favourite arrived through the new body-coverage
-> gate on the live instance. **One thing is outstanding and it is the owner's:**
-> the full gate (~36 min, on your signal).
+> Status: **S5 is landed, pushed, and FULL-GATE GREEN: 2600 passed, 5 skipped**
+> (all four markers `0`, 35:40). F7 (inbox body bound + per-source floor +
+> retention prune) and F8 (signatures must cover the body) are in the tree, on
+> the live instance, and verified against a real Mastodon peer. **Nothing is
+> outstanding on S5.**
 >
 > The next increment is **S6: F10-F12 plus the surfaces the first pass did not
 > audit**. No open design questions block it. The `## NOW` block in

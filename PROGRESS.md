@@ -68,8 +68,10 @@ disagrees with this block, this block is current and the other is history.**
   rows**: Mastodon's signed `digest` satisfied the new requirement and an
   honest delivery spent no throttle budget. **What it does not prove:** that an
   uncovered body is refused (mock-only), and the 429 floor and 413 bound, which
-  no live test produces without attacking this instance deliberately. **The
-  full gate has still not been run on this increment** (see GATE STATE below).
+  no live test produces without attacking this instance deliberately.
+  **FULL GATE GREEN ON IT: 2600 passed, 5 skipped** in 35:40, all four markers
+  `0` (`RUFF_CHECK`, `RUFF_FORMAT`, `MIGRATIONS`, `PYTEST`), on an image rebuilt
+  after the docs edits - and it landed exactly on the predicted 2600.
 
 - **THE APP NO LONGER CONNECTS AS THE DATABASE SUPERUSER (2026-10-22, security
   increment S4 part 2, lands owner decision 4). FULL GATE GREEN ON IT:
@@ -326,18 +328,18 @@ disagrees with this block, this block is current and the other is history.**
   whole feed in Python per request, because §2I decision 1 pages the
   computed list on a real correctness break. SQL aggregation needs its own
   section and brief.
-- **GATE STATE (2026-10-22).** Last **full-suite** run: **2574 passed, 5
-  skipped, all four markers `0`** (on S4 part 2, the DB role split, owner's
-  signal; 35:29). The count landed exactly as predicted: 2567 collected at the
-  S4 part 1 baseline plus 7 new tests plus the 5 clean-room items the five new
-  files add, so 2579 collected and 2574 passed with 5 skipped. **S5 (F7 + F8)
-  has not had a full gate** - per the standing rule that is the owner's signal,
-  and the increment landed on targeted runs instead: 104 green across the three
-  inbox/signature suites and 684 passed 5 skipped across the twelve neighbouring
-  suites, with ruff and `makemigrations --check` clean on the rebuilt image.
-  **Predicted next full gate: 2600 passed, 5 skipped** (2574 + the 20 items
-  `test_inbox_hardening.py` collects + 6 clean-room items for the six new files).
-  The
+- **GATE STATE (2026-10-22).** Last **full-suite** run: **2600 passed, 5
+  skipped, all four markers `0`** (on S5, F7 + F8, owner's signal; 35:40). It
+  landed exactly on the prediction made when the increment was committed: 2574
+  at the S4 part 2 baseline plus the 20 items `test_inbox_hardening.py`
+  collects plus the 6 clean-room items the six new files add. The run before
+  this was 2574 on S4 part 2 (35:29), whose count had likewise landed as
+  predicted (2567 + 7 + 5 = 2579 collected). Count collected items, never
+  `def test` lines. **S5's targeted pass preceded the full gate** - 104 green
+  across the three inbox/signature suites and 684 passed 5 skipped across the
+  twelve neighbouring suites - and the image was rebuilt once more before the
+  full run, because the record docs were edited after the last build and the
+  clean-room guard scans the baked tree. The
   post-S1 run failed exactly one test,
   `test_private_destination_never_opens_socket[192.168.1.1]`, and the
   cause was environmental, not product: the gate container inherits the
