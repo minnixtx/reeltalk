@@ -298,6 +298,27 @@ def _target_uri(request: Any) -> str:
     return f"{request.scheme}://{host}{request.get_full_path()}"
 
 
+def _body_must_be_covered(request: Any) -> bool:
+    """Whether this request's body has to be covered by its own signature (F8).
+
+    A signature that does not cover the body authenticates the *envelope* only:
+    the actor, the method, the target. The bytes inside can then be swapped by
+    anyone who can touch the request in flight, and the signature still
+    verifies — so the inbox would act on content nobody signed, attributed to
+    whoever did. The coverage cannot be inferred from the sender's own headers,
+    because those are the attacker's to write: the only shape that closes it is
+    refusing a request whose signature simply does not cover its body.
+
+    Only methods that carry content, and only when there is content to cover.
+    A GET has no body to swap, and an empty POST has nothing to authenticate —
+    requiring a digest of the empty string would refuse nothing an attacker
+    could use while risking a peer that signs a bodiless POST differently.
+    """
+    if request.method not in ("POST", "PUT", "PATCH"):
+        return False
+    return bool(request.body)
+
+
 def _verify_rfc9421(request: Any, public_key: Any) -> bool:
     signature_input = request.headers.get("Signature-Input")
     signature_value = request.headers.get("Signature")
@@ -305,6 +326,15 @@ def _verify_rfc9421(request: Any, public_key: Any) -> bool:
         return False
     label, components, params, serialization = parse_signature_input(signature_input)
     if not params.get("keyid"):
+        return False
+
+    # The covered components are the sender's own declaration, so "did it list
+    # content-digest" is a question about what the sender chose, not about what
+    # we require. Mastodon 4.7.2 sends no RFC 9421 at all (it speaks the cavage
+    # draft), so this gate is not what its deliveries pass — it is what a
+    # RFC 9421 peer must satisfy to have its body authenticated here.
+    covered = {name.split(";")[0] for name in components}
+    if _body_must_be_covered(request) and "content-digest" not in covered:
         return False
 
     # One signature per request; take the value for our label (a bare
@@ -349,14 +379,27 @@ def _verify_legacy(request: Any, public_key: rsa.RSAPublicKey) -> bool:
     joined by LF with no trailing newline; ``(request-target)`` is the
     lowercased method + space + path (query omitted — that is what current
     Mastodon signs). A covered ``digest`` must match the real body.
+
+    A POST with a body must *list* ``digest``, not merely be allowed to list it
+    (F8). This is the requirement Mastodon imposes on its own incoming
+    requests — its verifier raises "Mastodon requires the Digest header to be
+    signed when doing a POST request" — and it sends ``Digest`` on every POST
+    that has a body, so matching it here asks of a peer nothing the peer does
+    not already demand of us. The check is on the sender's declared list
+    because that is the only place the information exists; the value itself
+    was never trusted, only compared to the real bytes below.
     """
     value = request.headers.get("Signature")
     params = parse_legacy_signature(value)
     if params.get("algorithm") not in ("rsa-sha256", "hs2019"):
         return False
 
+    listed = params["headers"].split()
+    if _body_must_be_covered(request) and "digest" not in listed:
+        return False
+
     lines: list[str] = []
-    for name in params["headers"].split():
+    for name in listed:
         if name == "(request-target)":
             target = f"{request.method.lower()} {request.path}"
             lines.append(f"(request-target): {target}")

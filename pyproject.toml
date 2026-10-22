@@ -79,6 +79,11 @@ env = [
     # still exercising the real code path — which no longer reads the request
     # at all. Tests that need a different origin override it explicitly.
     "CANONICAL_ORIGIN = http://testserver",
+    # The inbox ceiling on one inbound body (S5/F7). The suite asserts an honest
+    # activity gets through, which is only true against the shipped default: an
+    # operator who lowered this for their own box would otherwise decide whether
+    # the inbox tests pass. Tests that need a small ceiling set it themselves.
+    "INBOX_MAX_BODY_BYTES = 1048576",
     # Private, throwaway MEDIA_ROOT: the suite saves tiny fake posters and
     # would otherwise litter the shared media volume (2026-09-10 poster
     # incident cleanup). /tmp is fresh per `docker compose run`.

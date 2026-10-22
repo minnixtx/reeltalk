@@ -331,6 +331,15 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = (
     env.int("DATA_UPLOAD_MAX_MEMORY_MiB", default=100) * 1024 * 1024
 )
 
+# F7: the ceiling on one inbound activity. The global cap above is sized for
+# poster uploads and is 100x too generous for an inbox POST, and it is not the
+# inbox's own bound: an operator without a proxy in front of the container has
+# no cap here at all. An ActivityPub delivery is a small JSON document — a
+# Follow is a few hundred bytes and a Create with a full review is a few
+# kilobytes — so a megabyte is already two orders of magnitude above anything
+# a conforming peer sends.
+INBOX_MAX_BODY_BYTES = env.int("INBOX_MAX_BODY_BYTES", default=1024 * 1024)
+
 # TMDB (M2, decision D8): the operator's API key, shared by all users and read
 # from .env. Unset means "not configured" — search degrades to local-library
 # search instead of erroring (D6). Never written to any tracked file.

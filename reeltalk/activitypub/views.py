@@ -22,8 +22,10 @@ from django.views.decorators.http import require_GET
 
 from reeltalk import __version__
 from reeltalk.core.models import Status
+from reeltalk.proxy_trust import client_ip
 from reeltalk.social.models import SiteSettings, User
 
+from . import inbox_throttle
 from .collections import PAGE_SIZE, collection_document, page_document, parse_page
 from .identity import (
     absolute_uri,
@@ -291,25 +293,78 @@ def following(request, localname):
     return _person_collection(request, user, url, user.follows.all())
 
 
+def _inbox_too_large(request) -> bool:
+    """Whether this inbox POST's body is over the instance's own bound (F7).
+
+    Two checks, because a declared length is a claim and not a fact. The header
+    is read first so an honest oversized POST is refused without ever buffering
+    it; the real bytes are checked after, because a caller that declares 200
+    bytes and sends 200 MB gets to send 200 MB, and the only thing between
+    that and a parsed-into-memory megabyte is this line. The global
+    ``DATA_UPLOAD_MAX_MEMORY_SIZE`` is two orders of magnitude larger and sized
+    for poster uploads, so it is a backstop and not the inbox's bound.
+    """
+    declared = request.META.get("CONTENT_LENGTH")
+    limit = settings.INBOX_MAX_BODY_BYTES
+    if declared and declared.isdigit() and int(declared) > limit:
+        return True
+    return len(request.body) > limit
+
+
 def _handle_inbox_post(request):
     """Verify + process one inbound activity delivery (M4 increment 4).
 
-    Order matters: the sender is resolved from the signature's keyid — a
-    first-contact remote user is mirrored from their Person document as part
-    of this — and the signature is verified against the resolved user's
-    public key before the body is parsed or anything is recorded. Status
-    codes: 401 for a missing, unresolvable, or invalid signature; 400 for a
-    signed but unparseable JSON body; 202 Accepted for everything else
-    (handled, gracefully ignored, or duplicate — the outcome is not exposed
-    to the sender).
+    Order is a security property here, not a preference. The two cheap refusals
+    come first, because everything after them costs more than the request is
+    worth: ``resolve_sender`` dials out to fetch a Person document for any
+    keyid it has not seen, so an unauthenticated caller used to be able to buy
+    an outbound fetch from us with a POST that had no chance of verifying (F7).
+    The body bound and the per-source floor are both answered before that
+    dial-out is even considered. Then the sender is resolved from the
+    signature's keyid — a first-contact remote user is mirrored from their
+    Person document as part of this — and the signature is verified against the
+    resolved user's public key before the body is parsed or anything is
+    recorded.
+
+    Status codes: 413 for a body over ``INBOX_MAX_BODY_BYTES``; 429 with
+    ``Retry-After`` once an address has spent its failure budget; 401 for a
+    missing, unresolvable, or invalid signature; 400 for a signed but
+    unparseable JSON body; 202 Accepted for everything else (handled,
+    gracefully ignored, or duplicate — the outcome is not exposed to the
+    sender).
+
+    The refusal for a spent address is 429 rather than a 4xx on purpose. A peer
+    treats 4xx as final and discards the activity — Mastodon's
+    ``response_error_unsalvageable?`` is "400-499 except 401, 408 and 429" —
+    so any other code here would delete the delivery on the sender's side and
+    turn a temporary rate refusal into permanent content loss.
     """
+    if _inbox_too_large(request):
+        return HttpResponse(status=413)
+
+    # The address comes from the trusted-proxy walk, never from a header read
+    # here: a budget keyed on a forgeable address punishes only the honest.
+    source = client_ip(request)
+    if inbox_throttle.inbox_blocked(source):
+        response = HttpResponse(status=429)
+        response["Retry-After"] = str(inbox_throttle.retry_after_seconds(source))
+        return response
+
     key_id = extract_key_id(request)
     if not key_id:
+        # Nothing was spent on this request — no fetch, no verification — so it
+        # is not counted. Charging free refusals would let noise spend the
+        # budget a real peer needs.
         return HttpResponse(status=401)
+
     sender = resolve_sender(key_id, request)
     if sender is None or not sender.public_key:
+        # This one cost an outbound fetch for an address we learned nothing
+        # about. That is the cost being bounded.
+        inbox_throttle.record_failure(source)
         return HttpResponse(status=401)
     if not verify_request(request, sender.public_key):
+        inbox_throttle.record_failure(source)
         return HttpResponse(status=401)
     try:
         activity = json.loads(request.body)

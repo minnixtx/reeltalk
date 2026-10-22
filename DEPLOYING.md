@@ -177,7 +177,7 @@ Django's CSRF check.
 
 | Variable | Value here | Notes |
 |---|---|---|
-| `REELTALK_TMDB_API_KEY` | set | Optional. Without it, film search is local-library only. Shared quota — see §10. |
+| `REELTALK_TMDB_API_KEY` | set | Optional. Without it, film search is local-library only. Shared quota - see §11. |
 | `EMAIL_*` | unset | Optional. Console backend when unset, so no mail is actually sent. |
 | `WEB_PORT` | `3030` | Host port published for the cleartext endpoint. See §5. |
 
@@ -459,7 +459,49 @@ in the response cookies, `COOKIES_FOLLOW_SCHEME` has been turned off.
 
 ---
 
-## 10. Known limits at this point
+## 10. Scheduled maintenance
+
+One command needs a recurring schedule, and the schedule belongs to the host,
+not to the stack: the app ships the tool and you wire the clock, exactly as with
+backups (§1).
+
+`prune_inbox` bounds the two tables the inbox would otherwise grow forever: the
+per-activity dedup log (one row per inbound activity id) and the per-address
+inbox throttle log. Both are load-bearing while young and pure weight once aged,
+so the command deletes aged rows and nothing else. Dedup rows go after 30 days
+by default, which is a wide margin over any peer's retry schedule; throttle rows
+go once they age out of their own 15-minute window, because past that instant
+nothing can read them again.
+
+```bash
+# See the size of the job first; deletes nothing.
+docker compose run --rm web python manage.py prune_inbox --dry-run
+
+# The run itself.
+docker compose run --rm web python manage.py prune_inbox
+```
+
+Deletion is batched, so the first run on an instance that has been federating
+for months does not hold a long lock on a busy table; it is safe against a live
+stack. A monthly schedule is enough at this scale - the retention default is a
+month, so anything older than the interval is collected on the next pass.
+Cron on the host that runs the compose stack:
+
+```cron
+# 04:40 on the first of every month
+40 4 1 * * cd /opt/reeltalk && docker compose run --rm web python manage.py prune_inbox >> /var/log/reeltalk-prune.log 2>&1
+```
+
+Adjust the path to wherever the checkout lives, and note this runs `web`'s
+image - see §7 before wondering why a `worker` run behaves differently.
+
+What you lose to the prune: if a peer redelivers an activity whose dedup row is
+already gone, it gets processed a second time. Thirty days makes that
+vanishingly unlikely, and it is the honest price of bounding the table.
+
+---
+
+## 11. Known limits at this point
 
 Named rather than hidden, so nobody discovers them in production:
 
@@ -472,7 +514,10 @@ Named rather than hidden, so nobody discovers them in production:
   content negotiation so a remote instance can resolve a referenced film by
   its id URL, and that fetch is anonymous. Gating it means gating only the
   HTML branch and leaving the AP branch open.
-- **No login brute-force throttling.**
+- **Login, admin login, and signup are throttled per source address** (10/5/5
+  attempts per window) and the inbox has its own per-address floor (§10). Behind
+  a CDN that is not in `TRUSTED_PROXIES` every visitor collapses onto one
+  address and shares one bucket - see §2.
 - **No HSTS preload.** Worth adding once the domain is stable.
 - **Invite-only has no invite mechanism** — no codes, no expiry, no email invites.
   It is a closed door plus manual account creation.

@@ -17,6 +17,14 @@ class DeliveredActivity(models.Model):
     the sender's instance, sometimes with a fragment). Unique: a redelivery
     hits the existing row and the inbox pipeline drops it as a duplicate
     instead of re-processing it.
+
+    The table only ever grew (F7): one row per activity id, forever, with no
+    retention at all. A dedup row earns its keep only while a legitimate
+    redelivery could still arrive — a peer's own retry schedule, which is
+    hours and not months — so ``reeltalk/activitypub/management/commands/
+    prune_inbox.py`` deletes them past an operator-set age. Pruning reopens
+    an old activity to reprocessing, which is why the retention default is
+    generous and why every handler has to stay safe to run twice.
     """
 
     activity_id = models.CharField(max_length=2048, unique=True)
@@ -24,6 +32,59 @@ class DeliveredActivity(models.Model):
 
     class Meta:
         verbose_name_plural = "delivered activities"
+        indexes = [
+            # The retention prune reads this column alone, and on the table's
+            # only other index (activity_id) a date range is unusable. Without
+            # this the prune is a sequential scan of every row ever written,
+            # which is a query that gets worse forever on the exact table F7
+            # says is already too big.
+            models.Index(fields=["delivered_date"]),
+        ]
 
     def __str__(self) -> str:
         return self.activity_id
+
+
+class InboxAttempt(models.Model):
+    """One counted inbox POST, keyed on the address it arrived from.
+
+    The inbox is the one unauthenticated write surface the instance has:
+    ``csrf_exempt`` by design, because the signature is the credential, and
+    before this table existed a POST was uncounted and unlimited no matter how
+    many of them arrived from one address. That is F7's amplification — an
+    unauthenticated caller presenting any syntactically valid keyid makes
+    ``resolve_sender`` dial out to fetch a Person document, so the cost of a
+    rejected request is not zero, and it is paid by our worker pool and by
+    the peer we were tricked into dialling.
+
+    Same shape as ``reeltalk.social.models.CredentialAttempt``, for the same
+    reasons: a Postgres table rather than a cache, because a LocMemCache
+    counter resets on every deploy and disagrees between workers, which is a
+    control that reads as protection and is not. One row per POST with the
+    window read from ``created_at`` at query time, so a spent address frees
+    itself the moment its oldest counted row ages out and there is no stored
+    lock for an admin to clear.
+
+    Deliberately **not** the ``CredentialAttempt`` table: that one counts
+    attempts at a credential, and its surfaces, its limits, and its
+    clear-on-success behavior all follow from that. Federation traffic is not
+    a credential attempt, and folding the two together would let a flood of
+    unsigned POSTs starve a real user's sign-in budget — the exact
+    shared-budget denial-of-service that §2G learned to separate.
+
+    ``source_ip`` is always the value from ``client_ip()``, never a raw
+    header; see :mod:`reeltalk.activitypub.inbox_throttle`.
+    """
+
+    source_ip = models.CharField(max_length=45)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            # Every read is "how many from this address since T", and the
+            # prune deletes "everything older than T" — both walk this index.
+            models.Index(fields=["source_ip", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return self.source_ip
