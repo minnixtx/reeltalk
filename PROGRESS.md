@@ -10,10 +10,9 @@
 disagrees with this block, this block is current and the other is history.**
 
 - **FEDERATION INGEST NOW CHECKS WHO MAY MUTATE A MIRROR (2026-10-21,
-  security increment S3, closes F2 + F3). TARGETED GREEN: 654 passed** on
-  the rebuilt image (the federation/activitypub/moderation set); the full
-  gate has not been run since S2 - when it runs, expect **2553 passed, 5
-  skipped** (2541 + 11 new tests + 1 clean-room item). Both findings shared
+  security increment S3, closes F2 + F3). FULL GATE GREEN ON IT: 2553
+  passed, 5 skipped**, all four markers 0 (2541 + 11 new tests + 1
+  clean-room item). Both findings shared
   one shape: the signature proves *who sent* an activity, and nothing more.
   **F2:** `Update`/`Delete` looked a mirror up by its object url and applied
   the change without checking the verified sender against the row's author -
@@ -164,9 +163,8 @@ disagrees with this block, this block is current and the other is history.**
   whole feed in Python per request, because §2I decision 1 pages the
   computed list on a real correctness break. SQL aggregation needs its own
   section and brief.
-- **GATE STATE (2026-10-21).** Last full-suite run: **2541 passed, 5
-  skipped, all markers `0`** (on S2, owner's signal). S3 ran targeted only
-  (654); when the full gate next runs, expect 2553 passed, 5 skipped. The
+- **GATE STATE (2026-10-21).** Last full-suite run: **2553 passed, 5
+  skipped, all markers `0`** (on S3, owner's signal). The
   post-S1 run failed exactly one test,
   `test_private_destination_never_opens_socket[192.168.1.1]`, and the
   cause was environmental, not product: the gate container inherits the

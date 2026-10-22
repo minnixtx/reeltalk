@@ -1,12 +1,10 @@
 # Security audit handoff
 
 > Status: S3 landed 2026-10-21 (F2 + F3 closed, plus the Tombstone delete
-> gap its live check caught) and the **targeted suite is green on it: 654
-> passed** on the rebuilt image (the federation / activitypub / moderation
-> set). The full gate has not been run since S2 (**2541 passed, 5
-> skipped**, all four markers 0); when it next runs, expect **2553 passed,
-> 5 skipped**. The `## NOW` block in `PROGRESS.md` is the current source of
-> truth; everything below is the handoff as written at S3's close.
+> gap its live check caught) and the **full gate is green on it: 2553
+> passed, 5 skipped**, all four markers 0 (owner's signal, 2026-10-21).
+> The `## NOW` block in `PROGRESS.md` is the current source of truth;
+> everything below is the handoff as written at S3's close.
 
 Point the next session at this file. Everything needed is in the repo; no
 production access is required to start S4.
@@ -65,10 +63,10 @@ production access is required to start S4.
   2026-10-21).** reeltalk.dev still runs pre-S1 code. When it eventually
   redeploys from the repo, its `.env` needs `WEB_BIND=127.0.0.1` and
   `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24`.
-- Gate baseline: full-suite **2541 passed, 5 skipped** (2026-10-21, on S2,
-  all four markers 0). S3 ran targeted only (654). Count collected items,
-  never `def test` lines: `test_clean_room.py` parametrizes one case per
-  file, so a new test file adds a collected item beyond its own tests.
+- Gate baseline: full-suite **2553 passed, 5 skipped** (2026-10-21, on S3,
+  all four markers 0). Count collected items, never `def test` lines:
+  `test_clean_room.py` parametrizes one case per file, so a new test file
+  adds a collected item beyond its own tests.
 - Open findings: **F6 (S4, next)**, F7-F9 (S5), F10-F12 (S6). The DB role
   split ships in the default deploy flow and lands with S4 (owner
   decision).
@@ -116,8 +114,6 @@ Execute increment **S4** from `security-plan.md`: F6, fail-fast on
 
 ## Open items for the owner
 
-- The full gate has not been run since S2. Say the word and a session runs
-  it; expect **2553 passed, 5 skipped** if S3 is clean.
 - S1's, S2's, and S3's live checks are DONE (2026-10-21): the LAN peer
   federates both ways through the SSRF guard, S2's hostile payload
   rendered inert on every surface including the moderation queue, and
