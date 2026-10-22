@@ -52,11 +52,12 @@ disagrees with this block, this block is current and the other is history.**
   go red. **Live check done (owner, 2026-10-21):** the honest edit arrived
   as an update and a new peer's first contact minted its mirror - the F3 id
   check met a real Mastodon Person document and held. The honest delete
-  failed at first, and that failure is what surfaced the Tombstone gap; the
-  fix is deployed and the owner reruns a delete with a fresh post. The one
-  stale mirror the failed delete left behind (status 87, its upstream post
-  already gone) was tombstoned by hand - Mastodon does not resend a Delete
-  for a status that is already gone.
+  failed at first, and that failure is what surfaced the Tombstone gap;
+  with the fix deployed the owner's rerun passed - a fresh delete on the
+  LAN peer tombstoned its mirror here. The one stale mirror the failed
+  delete left behind (status 87, its upstream post already gone) was
+  tombstoned by hand - Mastodon does not resend a Delete for a status
+  that is already gone.
 
 - **REMOTE HTML IS SANITIZED ON INGEST (2026-10-21, security increment S2,
   closes F1). FULL GATE GREEN ON IT: 2541 passed, 5 skipped**, all four

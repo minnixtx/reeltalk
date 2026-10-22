@@ -57,8 +57,8 @@ production access is required to start S4.
 - **S3 live check DONE (owner, 2026-10-21):** the honest edit arrived as an
   update and a new peer's first contact minted its mirror - the F3 id check
   met a real Mastodon Person document and held. The honest delete failed at
-  first, and that failure surfaced the Tombstone gap above; the fix is
-  deployed and the owner reruns a delete with a fresh post. The one stale
+  first, and that failure surfaced the Tombstone gap above; with the fix
+  deployed the owner's delete rerun passed on the live wire. The one stale
   mirror the failed delete left behind (status 87, upstream post already
   gone) was tombstoned by hand. (Owner drives live federation checks.)
 - **VPS redeploy is deferred until the whole audit is finished (owner,
@@ -116,15 +116,13 @@ Execute increment **S4** from `security-plan.md`: F6, fail-fast on
 
 ## Open items for the owner
 
-- **S3 delete rerun:** with the Tombstone fix deployed, delete one LAN
-  Mastodon post and watch the tombstone arrive. The earlier failure's
-  record is above; the edit and first-contact checks already passed.
 - The full gate has not been run since S2. Say the word and a session runs
   it; expect **2553 passed, 5 skipped** if S3 is clean.
 - S1's, S2's, and S3's live checks are DONE (2026-10-21): the LAN peer
   federates both ways through the SSRF guard, S2's hostile payload
   rendered inert on every surface including the moderation queue, and
-  S3's edit and first-contact checks passed on the real wire.
+  S3's edit, delete, and first-contact checks all passed on the real
+  wire.
 
 ## Read in this order
 
