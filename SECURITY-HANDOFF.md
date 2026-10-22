@@ -1,8 +1,8 @@
 # Security audit handoff
 
 > Status: **S4 is half landed.** F6 (fail-fast on `SECRET_KEY`) plus the
-> settings hygiene S1 left are committed and verified (6acc92b); the full gate
-> was **not** run for it (not signalled). The remaining S4 piece is the **DB
+> settings hygiene S1 left are committed and verified, **full gate green: 2562
+> passed, 5 skipped**, all five markers `0`. The remaining S4 piece is the **DB
 > role split**, and the one question that blocked its shape is now **settled**
 > (see `## Settled`): the test suite gets its own throwaway Postgres server,
 > so the app role is restricted with nothing traded away. No open questions

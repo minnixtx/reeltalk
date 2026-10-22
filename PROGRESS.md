@@ -10,9 +10,14 @@
 disagrees with this block, this block is current and the other is history.**
 
 - **A PRODUCTION BOOT NOW REFUSES A PUBLIC `SECRET_KEY` (2026-10-21, security
-  increment S4, closes F6 + the settings hygiene S1 left). Targeted set green:
-  **441 passed, 5 skipped**; the full gate was not run this increment (not
-  signalled).** The key signs session and CSRF cookies, and its fallback was a
+  increment S4, closes F6 + the settings hygiene S1 left). Full gate green:
+  **2562 passed, 5 skipped** in 35:20, all five markers `0` (`BUILD`,
+  `RUFF_CHECK`, `RUFF_FORMAT`, `MIGRATIONS`, `PYTEST`), on a current image with
+  no rebuild needed.** The count reconciles exactly against the S4 baseline of
+  2553: +8 from `test_secret_key.py` and +1 from the clean-room guard, which
+  is parametrised over every file in the repo and so collects one more item for
+  the new test file. Count collected items, never `def test` lines.** The key
+  signs session and CSRF cookies, and its fallback was a
   literal in `settings.py`, so an instance that came up on it had a secret
   everybody who reads the source knows, admin takeover included. Nothing
   enforced that `setup.sh` had run, and the prebuilt path never needed it to.
