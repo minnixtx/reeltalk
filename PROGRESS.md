@@ -9,6 +9,34 @@
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
 
+- **A PRODUCTION BOOT NOW REFUSES A PUBLIC `SECRET_KEY` (2026-10-21, security
+  increment S4, closes F6 + the settings hygiene S1 left). Targeted set green:
+  **441 passed, 5 skipped**; the full gate was not run this increment (not
+  signalled).** The key signs session and CSRF cookies, and its fallback was a
+  literal in `settings.py`, so an instance that came up on it had a secret
+  everybody who reads the source knows, admin takeover included. Nothing
+  enforced that `setup.sh` had run, and the prebuilt path never needed it to.
+  With `DEBUG` false, an unset, blank, whitespace-only, or fallback key now
+  raises `ImproperlyConfigured` naming `setup.sh`. **The empty case was live,
+  not paranoid, and it is not the case the finding described:** `.env.example`
+  ships `SECRET_KEY=` blank, and `environs` hands back the empty string
+  rather than the default (measured in the image), so the copy-the-template-
+  and-skip-`setup.sh` path was booting on an **empty** key, not the documented
+  fallback. The audit named a known-constant leak; the path most likely to be
+  taken was worse than the one described. Tests boot a real interpreter with a
+  scrubbed env and a cwd outside the repo, because `settings.py` is already
+  imported in-process and reloading it would rewrite the settings every other
+  test reads; each case asserts the *reason* for the outcome, since a bare
+  non-zero exit is also what a typo in the import path produces. Non-vacuity:
+  with the guard stashed exactly the 5 refusal cases go red and all 3 controls
+  (real key, `DEBUG=true`, constant pin) stay green. **Both documented deploy
+  paths verified on the rebuilt image:** a template-only env now refuses with
+  a message naming `setup.sh`, and `setup.sh`'s own output passes
+  `manage.py check` clean. Hygiene folded in: `POSTGRES_PORT` and the five
+  `*_LOG_LEVEL` knobs were read by `settings.py` and documented nowhere.
+  **S4 is not closed:** the DB role split (owner decision 4) is still open and
+  is the next session's work.
+
 - **FEDERATION INGEST NOW CHECKS WHO MAY MUTATE A MIRROR (2026-10-21,
   security increment S3, closes F2 + F3). FULL GATE GREEN ON IT: 2553
   passed, 5 skipped**, all four markers 0 (2541 + 11 new tests + 1
