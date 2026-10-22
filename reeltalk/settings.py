@@ -8,6 +8,7 @@ see PLAN.md §5.
 from pathlib import Path
 
 import environs
+from django.core.exceptions import ImproperlyConfigured
 
 env = environs.Env()
 # In containers the environment comes from docker compose's env_file; this is
@@ -16,8 +17,23 @@ env.read_env(".env")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = env.str("SECRET_KEY", default="insecure-dev-only-key-change-me")
 DEBUG = env.bool("DEBUG", default=False)
+
+# The fallback key is published in this file, so an instance that boots on it
+# has a secret everybody knows: session and CSRF cookies become forgeable,
+# which reaches the admin. DEBUG keeps the local-checkout convenience; anything
+# else has to name a real key. The empty check is not decoration --
+# `.env.example` ships `SECRET_KEY=` blank, so copying it and skipping setup.sh
+# lands here rather than starting on a silently public key.
+DEV_SECRET_KEY = "insecure-dev-only-key-change-me"
+SECRET_KEY = env.str("SECRET_KEY", default=DEV_SECRET_KEY)
+if not DEBUG and SECRET_KEY.strip() in ("", DEV_SECRET_KEY):
+    raise ImproperlyConfigured(
+        "SECRET_KEY is required when DEBUG is false. Copy .env.example to .env "
+        "and run ./setup.sh, which generates one; see the Deployment section "
+        "of README.md. Refusing to start rather than sign sessions with the "
+        "development key, which is public."
+    )
 
 # DOMAIN may carry an explicit port (an IP:port operator instance, R52); the
 # bare host is what ALLOWED_HOSTS and From addresses need.

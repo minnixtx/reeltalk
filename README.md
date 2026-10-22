@@ -66,6 +66,14 @@ Required:
 
 `POSTGRES_USER`, `POSTGRES_DB` and `POSTGRES_HOST=db` have working defaults.
 
+`SECRET_KEY` is not a formality: it signs session and CSRF cookies, and the
+built-in development value is published in the source, so an instance running
+on it has a secret everybody knows. With `DEBUG` off the app therefore refuses
+to start when the key is missing, blank, or still the development value, and
+tells you to run `setup.sh`. That refusal is the safety, not a bug: the
+alternative is coming up looking healthy while every session cookie is
+forgeable, admin included.
+
 Optional, and most installs want some of them:
 
 | Key | Default | Notes |

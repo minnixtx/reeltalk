@@ -73,7 +73,7 @@ for a public instance.
 | Variable | Value here | Notes |
 |---|---|---|
 | `DOMAIN` | `reeltalk.minnix.dev` | **Required.** The canonical public origin, no scheme. May carry a port for IP:port instances. Drives `ALLOWED_HOSTS` default and `DEFAULT_FROM_EMAIL`. |
-| `SECRET_KEY` | generated | **Required.** `./setup.sh` generates it. |
+| `SECRET_KEY` | generated | **Required.** `./setup.sh` generates it. With `DEBUG` off the app refuses to start when it is missing, blank, or still the published development value, because that key signs session and CSRF cookies, so running on it hands anyone who reads the source the ability to forge a session, the admin's included. The refusal is the control; a boot that prints nothing and serves traffic is the failure mode. |
 | `POSTGRES_PASSWORD` | generated | **Required.** |
 
 ### Hosts and origins
