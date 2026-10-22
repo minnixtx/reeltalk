@@ -9,6 +9,60 @@
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
 
+- **THE INBOX NOW BOUNDS ITS OWN BODY, ITS OWN ABUSERS, AND ITS OWN GROWTH
+  (2026-10-22, security increment S5, closes F7 + F8).** Four pieces, each
+  placed in front of the cost it bounds. **F7 body bound:**
+  `settings.INBOX_MAX_BODY_BYTES` (default 1 MiB, `INBOX_MAX_BODY_BYTES` in
+  `.env`) is checked on the declared `Content-Length` first, so an honest
+  oversized POST is refused without buffering, and then on the real bytes,
+  because a declared length is a claim and not a fact. The global
+  `DATA_UPLOAD_MAX_MEMORY_SIZE` stays what it was, a backstop sized for poster
+  uploads and two orders of magnitude too generous for an activity. Refusal is
+  **413**. **F7 per-source floor:** `reeltalk/activitypub/inbox_throttle.py` on
+  a new `InboxAttempt` table, same shape as `CredentialAttempt` for the same two
+  reasons (a Postgres table, not a cache; never keyed on an unparseable or empty
+  address). **It counts only POSTs that cost us work and then failed
+  authentication, not all POSTs.** That is a deliberate deviation from the plan's
+  literal wording, and the reason is that the shared inbox legitimately receives
+  a great many POSTs from honest peers, so a floor on all of them would let a
+  busy federation spend an address's budget for doing nothing wrong. Counting
+  only the failures keeps honest deliveries free (a test pins that a run of
+  successful deliveries writes zero rows) while still bounding the
+  amplification that made F7 worth fixing: `resolve_sender` dials out for any
+  unseen keyid, so a POST with no chance of verifying used to buy an outbound
+  fetch paid by our worker pool and by the peer we were tricked into calling.
+  **Both refusals answer before that dial-out**, which is the whole point.
+  Refusal is **429 with `Retry-After`**, measured rather than guessed: Mastodon
+  treats 4xx as final except 401/408/429, so any other code would tell a healthy
+  peer to discard the delivery. The floor is deliberately **not** the
+  `CredentialAttempt` table: folding them together lets a flood of unsigned
+  POSTs starve a real user's sign-in budget, the exact shared-budget denial that
+  §2G already learned to refuse. **F7 retention:** `prune_inbox` deletes dedup
+  rows past `--days` (default 30, `--days 0` refused as the typo with a bad first
+  run) and throttle rows past their own window, in batches of 10k with one short
+  transaction each so a first run against months of unpruned rows holds no long
+  lock; `--dry-run` reports and deletes nothing. It prunes the throttle table too
+  so the fix cannot ship a second unbounded table, and `delivered_date` gained an
+  index because otherwise the prune seq-scans the very table F7 says is too big.
+  Cron is documented in `DEPLOYING.md` §10, on the host, in keeping with backups:
+  the app ships the tool, the operator wires the clock. **F8:** a signature must
+  now cover the body it delivers. RFC 9421 POSTs with a body must list
+  `content-digest` among the covered components; the legacy path must list
+  `digest`. **The interop check the plan asked for was done against the running
+  Mastodon 4.7.2 on the LAN peer, not a GitHub tag,** and it settled the design:
+  Mastodon sends no RFC 9421 at all (so that gate cannot break it), sends
+  `Digest` on every POST with a body, and its own verifier refuses a POST whose
+  digest is unsigned. We now ask of peers exactly what the reference peer asks of
+  us. **Verified:** targeted pytest green on a rebuilt image, 104 in the three
+  inbox/signature suites and then **684 passed, 5 skipped** across the
+  neighbouring federation, proxy-trust, credential-throttle and clean-room
+  suites; `ruff check` and `format --check` clean; `makemigrations --check`
+  clean. The new suite collects 20 items, and the clean-room guard adds 6 more
+  for the six new files, so the next full gate should land 2574 + 26 = **2600
+  passed, 5 skipped**. Count collected items, never `def test` lines. **The live
+  federation check is the owner's, per the standing rule, and the full gate has
+  not been run on this increment** (see GATE STATE below).
+
 - **THE APP NO LONGER CONNECTS AS THE DATABASE SUPERUSER (2026-10-22, security
   increment S4 part 2, lands owner decision 4). FULL GATE GREEN ON IT:
   **2574 passed, 5 skipped** in 35:29, all four markers `0` (`RUFF_CHECK`,
@@ -264,11 +318,18 @@ disagrees with this block, this block is current and the other is history.**
   whole feed in Python per request, because §2I decision 1 pages the
   computed list on a real correctness break. SQL aggregation needs its own
   section and brief.
-- **GATE STATE (2026-10-22).** Last full-suite run: **2574 passed, 5
+- **GATE STATE (2026-10-22).** Last **full-suite** run: **2574 passed, 5
   skipped, all four markers `0`** (on S4 part 2, the DB role split, owner's
   signal; 35:29). The count landed exactly as predicted: 2567 collected at the
   S4 part 1 baseline plus 7 new tests plus the 5 clean-room items the five new
-  files add, so 2579 collected and 2574 passed with 5 skipped. The
+  files add, so 2579 collected and 2574 passed with 5 skipped. **S5 (F7 + F8)
+  has not had a full gate** - per the standing rule that is the owner's signal,
+  and the increment landed on targeted runs instead: 104 green across the three
+  inbox/signature suites and 684 passed 5 skipped across the twelve neighbouring
+  suites, with ruff and `makemigrations --check` clean on the rebuilt image.
+  **Predicted next full gate: 2600 passed, 5 skipped** (2574 + the 20 items
+  `test_inbox_hardening.py` collects + 6 clean-room items for the six new files).
+  The
   post-S1 run failed exactly one test,
   `test_private_destination_never_opens_socket[192.168.1.1]`, and the
   cause was environmental, not product: the gate container inherits the

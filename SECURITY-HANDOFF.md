@@ -1,154 +1,156 @@
 # Security audit handoff
 
-> Status: **S4 is fully landed.** Part 1 closed F6 (fail-fast on `SECRET_KEY`);
-> part 2 landed the **DB role split** (owner decision 4) on 2026-10-22, **full
-> gate green: 2574 passed, 5 skipped** in 35:29, all four markers `0`.
+> Status: **S5 is landed and committed (`957eff7`), targeted-green but not
+> full-gated.** F7 (inbox body bound + per-source floor + retention prune) and
+> F8 (signatures must cover the body) are in the tree; ruff,
+> `makemigrations --check`, and the neighbouring suites are green on a rebuilt
+> image. **Two things are outstanding and both are the owner's:** the full gate
+> (~36 min, on your signal) and the live federation check that F8 needs.
 >
-> The next increment is **S5: F7 + F8, inbox hardening**. No open design
-> questions block it. The `## NOW` block in `PROGRESS.md` is the current source
-> of truth; everything below is the handoff as written at the role split's close.
+> The next increment is **S6: F10-F12 plus the surfaces the first pass did not
+> audit**. No open design questions block it. The `## NOW` block in
+> `PROGRESS.md` is the current source of truth; everything below is the handoff
+> as written at S5's close.
 
 Point the next session at this file. Everything needed is in the repo; no
 production access is required to start.
 
-## State (as of the role-split close, 2026-10-22)
+## State (as of the S5 close, 2026-10-22)
 
 - Closed so far: S1 (F4, F5), S2 (F1), S3 (F2, F3 + the Tombstone gap), S4 part 1
-  (F6), **S4 part 2 (the DB role split)**. Open: **S5 (F7, F8)**, then S6
-  (F10-F12 + the surfaces the first pass did not cover).
-- **The app no longer connects as a superuser.** `db/role-split.sql` creates a
-  separate login with no superuser, no `CREATEROLE`, no `CREATEDB`, no
-  bypass-RLS and no replication, hands it the database and every object in it,
-  and retires the bootstrap password. It ends with a verification block that
-  raises if the app role still holds any of those privileges, so a half-landed
-  split fails the boot instead of coming up looking healthy.
-- **First boot vs upgrade.** The DDL runs from `/docker-entrypoint-initdb.d/`
-  (mounted in both compose files), which the postgres image only executes against
-  an empty data directory. An install whose volume already exists runs
-  `db/upgrade-role-split.sh`. Leaving `POSTGRES_APP_USER` empty is the supported
-  no-split posture: `settings.py` falls back to `POSTGRES_USER`.
-- **The test suite has its own throwaway server** (`docker-compose.test.yml`,
-  tracked). pytest-django creates and drops `test_reeltalk` on every run, which
-  needs `CREATEDB`, and the app role deliberately holds none. The known limit is
-  stated in that file: the suite runs as that throwaway server's superuser, so it
-  does not police the app role's floor.
-- **Gate invocation changed shape.** The suite now needs
-  `docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm web
-  pytest`. Without the second `-f` it points at the app's own server and dies on
-  `permission denied to create database`. `.qwen/tmp/run-gate.sh` is gitignored,
-  so **this session updated the local copy**; a fresh clone's gate script needs
-  the same two-line change, and it is not something the next session can see in
-  `git diff`.
+  (F6), S4 part 2 (the DB role split), **S5 (F7, F8)**. Open: **S6** (F10-F12 +
+  the unaudited surfaces).
+- **The full gate has not been run since S4 part 2.** S5 landed on targeted runs:
+  104 green in the three inbox/signature suites, then **684 passed, 5 skipped**
+  across twelve neighbouring suites (federation inbound/integrity/interactions/
+  sanitize, lists inbound, flag+domain-block, AP follow, suspension read sites,
+  proxy trust, credential throttle, clean room). **Predicted next full gate:
+  2600 passed, 5 skipped** (2574 + the 20 items `test_inbox_hardening.py`
+  collects + 6 clean-room items for the six new files). Count collected items,
+  never `def test` lines.
+- **The live federation check F8 needs is not done.** The change asks peers to
+  sign the body they deliver; the reading of the reference peer says current
+  Mastodon already does that (below), but "the code says so" is not "the follow
+  landed". The owner drives: a real follow/like from the LAN Mastodon peer into
+  this instance must still arrive on a rebuilt image.
 - **VPS redeploy stays deferred until the audit is finished (owner).**
   reeltalk.dev still runs pre-S1 code. When it redeploys its `.env` needs
   `WEB_BIND=127.0.0.1` and `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24`.
 
+## What landed in S5, and where
+
+- `settings.INBOX_MAX_BODY_BYTES` (default 1 MiB, documented in `.env.example`,
+  pinned in pyproject's pytest-env block). Checked in
+  `views._inbox_too_large`: declared `Content-Length` first, then the real
+  bytes. Refusal is **413**.
+- `reeltalk/activitypub/inbox_throttle.py` + the `InboxAttempt` model
+  (migration `0002_inboxattempt_and_more.py`). 60 counted failures per address
+  per 15 minutes; refusal is **429 with `Retry-After`**.
+- `reeltalk/activitypub/management/commands/prune_inbox.py` (`--days`,
+  `--dry-run`), cron documented in `DEPLOYING.md` §10 (the old §10 became §11).
+  `DeliveredActivity.delivered_date` gained an index so the prune is not a
+  sequential scan.
+- `signatures._body_must_be_covered` plus two gates: `_verify_rfc9421` refuses a
+  POST-with-body whose `Signature-Input` omits `content-digest`;
+  `_verify_legacy` refuses one whose `headers` list omits `digest`.
+- `reeltalk/tests/test_inbox_hardening.py`, 20 items. Every refusal in the file
+  is paired with its honest inverse, so a bound that refused everything would
+  not pass.
+
+### The one deliberate deviation from the plan
+
+The plan asked for "a per-source floor on inbox POSTs". **This floor counts only
+POSTs that cost us work and then failed authentication**, not all POSTs. The
+reason is that the shared inbox legitimately receives a great many POSTs from
+honest peers, so a floor on all of them would let a busy federation spend an
+address's budget for doing nothing wrong. Counting only the failures keeps
+honest deliveries free (pinned by a test asserting zero rows after successful
+deliveries) while still bounding the amplification that made F7 worth fixing:
+`resolve_sender` dials out for any unseen keyid, so a POST with no chance of
+verifying used to buy an outbound fetch paid by our worker pool and by the peer
+we were tricked into dialling. Both new refusals answer **before** that dial-out.
+
+If a future session "corrects" this toward the plan's literal wording, it will
+re-arm a denial in which a noisy but honest peer is throttled out of its own
+deliveries. The count is the design, not an oversight.
+
+### Measured facts for S5 (verified 2026-10-22, against the running peer)
+
+Read these before touching the signature gates; they came from the **running**
+Mastodon 4.7.2 on the LAN peer, not from a GitHub tag.
+
+- **Mastodon 4.7.2 sends no RFC 9421 at all.** It speaks the cavage draft, so
+  the `content-digest` gate cannot break it. That gate is for RFC 9421 peers.
+- **It sends `Digest` on every POST that has a body**, and its own verifier
+  refuses a POST whose digest is unsigned ("Mastodon requires the Digest header
+  to be signed when doing a POST request"). So the legacy gate asks of a peer
+  nothing the peer does not already demand of us.
+- **Mastodon treats 4xx as final except 401, 408 and 429.** That is why the
+  floor refuses with 429: any other code tells a healthy peer to discard the
+  delivery. 413 correctly stays permanent, because an oversized body is not
+  going to shrink on retry.
+- **`crypto.load_private_key(pem: str)` takes a `str` and no `password`** - it is
+  the project's Ed25519-only helper in `reeltalk/activitypub/crypto.py`, not
+  `cryptography`'s serialization function. Passing `.encode()` and
+  `password=None` raises `TypeError`.
+
 ## What the next session should do
 
-**S5: F7 + F8, inbox hardening** (see `security-plan.md` §S5). Four pieces:
+**S6: cleanup pass + finish the audit** (see `security-plan.md` §S6). Two halves.
 
-1. **An app-side bound on the inbox body**, applied before `json.loads`.
-2. **A per-source floor on inbox POSTs**, reusing the `attempts.py` table
-   pattern with a generous limit (the shared inbox legitimately receives from
-   many peers).
-3. **A `DeliveredActivity` retention prune** as a management command, with cron
-   documented.
-4. **Require body coverage in signatures**: `content-digest` among the covered
-   components for RFC 9421 POSTs with a body, and `Digest` required on the legacy
-   path. **Check Mastodon interop first** - the LAN peer is the reference, and the
-   owner drives the live federation check before merge.
+### Half 1: F10, F11, F12
 
-### Measured facts for S5 (verified 2026-10-22, this session)
+Premises below were re-verified against the tree on 2026-10-22, with the line
+that holds each one.
 
-Read these before designing; two of them correct a premise you might otherwise
-inherit.
+1. **F10, invite code in the query string.** `reeltalk/social/views.py:358`
+   ends the mint with `return redirect(f"{profile}?invite={invite.code}")`, so
+   the code lands in browser history, in any `Referer` the profile page leaks,
+   and in any proxy log that records query strings. There is already a comment
+   at `:346` reasoning about a bookmarked or forwarded `?invite=` on someone
+   else's profile, so the surface is understood; the fix is the shape the
+   finding names, a fragment (`#invite=`) instead of a query, since fragments
+   are not sent to servers. Check what reads the value on the other side before
+   changing how it is carried - the signup form prefills from it.
+2. **F11, CSV export formula injection.** `export_film_csv`
+   (`reeltalk/core/import_export.py:242`) writes `film.title` straight into a
+   cell via `csv.writer`, and titles are not always TMDB's: the manual
+   create-film path lets a member author one. A title beginning `=` (or `+`,
+   `-`, `@`) executes when the export is opened in a spreadsheet. Prefix the
+   cells that need it on the way out, and note the export is documented as
+   byte-identical across runs and as re-importing as a no-op - a guard that
+   changes bytes unconditionally breaks both, so it must trigger on the payload,
+   not on every cell.
+3. **F12, the three notes.** (a) Private keys sit unencrypted in the DB, which is
+   inherent to the design; the ask is to **say so** in `DEPLOYING.md` next to the
+   role split, since DB compromise is key compromise. (b) `nodeinfo_2_0`
+   (`reeltalk/activitypub/views.py:145`) publishes `software.version` from
+   `reeltalk.__version__`; the ask is a decision, not necessarily a change.
+   (c) `refresh_mirror_profile`'s throttle uses `cache.get` (`mirrors.py:280`)
+   against `LocMemCache` (`settings.py:224`), so it is per-process and resets on
+   deploy - the same two failures `attempts.py` exists to avoid. If S6 moves it,
+   `InboxAttempt` and `CredentialAttempt` are both existing table shapes to copy.
 
-- **The body is not uncapped today, it is capped at the wrong number.**
-  `settings.DATA_UPLOAD_MAX_MEMORY_SIZE` is `DATA_UPLOAD_MAX_MEMORY_MiB` with a
-  **100 MiB** default (`reeltalk/settings.py:330`), so Django already refuses an
-  oversized body - with a limit 100x too generous for an inbox POST, and global
-  rather than inbox-specific. The finding is still real (the nginx 1 MiB cap is
-  operator-side and the shipped app needs its own), but the fix is a
-  route-appropriate bound, not "add the first bound".
-- **F8 is confirmed on both paths, and it is the sender's own declaration that
-  decides.** In `_verify_rfc9421` (`reeltalk/activitypub/signatures.py:301`) the
-  covered components come from the sender's `Signature-Input`, and
-  `content-digest` is only checked *if the sender listed it*. Same shape in
-  `_verify_legacy` (`:347`): the `digest` branch runs only if `digest` appears in
-  the sender's own `headers` list. When a sender does list it, the value is
-  already checked against the real body and never trusted - so the gap is
-  precisely "coverage is optional", not "the digest is believed".
-- **The F7 amplification is real and sits before the signature check.**
-  `_handle_inbox_post` (`reeltalk/activitypub/views.py:305`) runs
-  `extract_key_id` → `resolve_sender` → `verify_request` → `json.loads`.
-  `resolve_sender` is `_resolve_actor(..., fetch=True)`
-  (`reeltalk/activitypub/mirrors.py:430`), so an unknown keyid triggers a
-  synchronous outbound fetch. Note the order: an unauthenticated caller with any
-  syntactically valid keyid makes us dial out before we know anything about them.
-- **Key any floor on `client_ip()`, never a header.** `reeltalk/proxy_trust.py:219`.
-  `reeltalk/social/attempts.py` is the pattern to copy, including its two
-  standing lessons: count in a Postgres table, not a cache (a LocMemCache counter
-  resets on deploy and disagrees between workers, which is a control that reads
-  as protection and is not), and never key a limit on an unparseable address (one
-  shared empty bucket lets one caller lock out every other).
-- **`DeliveredActivity`** (`reeltalk/activitypub/models.py:13`) is `activity_id`
-  (unique, `max_length=2048`) plus `delivered_date`. The prune keys on
-  `delivered_date`. Management-command precedents to follow:
-  `reeltalk/core/management/commands/check_client_ip.py` and
-  `reeltalk/lists/management/commands/rebroadcast_lists.py`.
-- **The dedup row and the handler run in one transaction**
-  (`reeltalk/activitypub/inbox.py`), so a handler failure rolls the dedup record
-  back and the sender's retry is not blocked by its own failed delivery. Any new
-  floor must not accidentally break that: a floor counted *inside* the
-  transaction would roll back its own counter.
+### Half 2: audit the surfaces the first pass did not cover
 
-## Deferred by the owner (2026-10-22): eliminate the bootstrap password entirely
+`social/admin.py` (811 lines), `lists/models.py` + `lists/services.py`,
+`mentions/parser.py`, the notifications views, `collections.py`, `objects.py`,
+`broadcast.py`, `verify.py`. Append anything found to `SECURITY-AUDIT.md` as
+F13+ and extend `security-plan.md` if material. `social/admin.py` is the one with
+history: the user admin was once a bare `ModelAdmin` whose add form wrote a
+plaintext password (R77), so admin forms are a known-fragile pattern here.
 
-Not this session. The idea came from the owner asking whether `POSTGRES_PASSWORD`
-could simply stop existing, and the answer measured out to yes. It is recorded
-here with its evidence so the next session does not re-derive it.
+## Deferred by the owner (from S4, still open): eliminate the bootstrap password
 
-What was measured, on throwaway `postgres:17` containers:
-
-- **The password requirement is the image's, not Postgres's.** The refusal comes
-  from `docker_verify_minimum_env` in `/usr/local/bin/docker-entrypoint.sh`
-  (line 106): it errors when `POSTGRES_PASSWORD` is empty **and**
-  `POSTGRES_HOST_AUTH_METHOD` is not `trust`, and only when the data directory is
-  uninitialised. Postgres itself creates a cluster whose superuser has no
-  password without complaint.
-- **Setting `POSTGRES_HOST_AUTH_METHOD=trust` satisfies the guard with no
-  password** (measured: `database system is ready to accept connections`). Do
-  not ship this: it writes trust rules for host connections, so any container on
-  the compose network could open the bootstrap login with no credential. That is
-  strictly worse than today.
-- **The seed is never reachable while it exists.** The entrypoint starts its
-  temporary server with `-c listen_addresses=''` (line 297), so during first boot
-  there is no network listener. Measured by probing TCP from a second container
-  while an init script slept: no response across 18 seconds.
-- **The credential can be destroyed rather than rotated.** `ALTER ROLE <boot>
-  PASSWORD NULL` leaves `pg_authid.rolpassword` NULL, after which scram refuses
-  every password including the original seed, while `docker compose exec db psql`
-  over the socket still works. That is stronger than what shipped: today the
-  verifier exists and is merely unrecorded.
-
-The shape of the change would be: compose supplies a fixed public literal for
-`POSTGRES_PASSWORD` purely to satisfy the image guard, the init script creates the
-app role over the socket, and then clears the bootstrap credential outright.
-`setup.sh` and `.env.example` would stop carrying a database secret that nobody
-can use.
-
-**The hazard that has to be closed in the same change, or the change is a
-regression.** The no-split posture (`POSTGRES_APP_USER` empty) makes the app
-connect as the bootstrap login over TCP using `POSTGRES_PASSWORD`. If that value
-becomes a published literal, the app's own database login is a publicly known
-superuser password. So the change is only safe if that posture is either dropped
-or made to fail loudly when `POSTGRES_APP_USER` is empty and `POSTGRES_PASSWORD`
-is the shipped literal. This is the standing pattern of a widening change
-silently deleting a guard that was doing real work by accident.
-
-Also load-bearing and easy to break later: the db container publishing **no port**
-is what makes "no password" safe. Anything that publishes 5432 turns this from a
-hardening into an exposure.
+Not yet done. Recorded in full in `PROGRESS.md`'s NOW block and in the S4
+handoff history: the password requirement comes from the postgres image's
+`docker_verify_minimum_env`, not from Postgres, and `ALTER ROLE ... PASSWORD
+NULL` destroys the verifier while socket maintenance keeps working. **The hazard
+that must be closed in the same change:** the no-split posture (`POSTGRES_APP_USER`
+empty) makes the app connect as the bootstrap login with `POSTGRES_PASSWORD`, so
+turning that value into a published literal would hand out a known superuser
+password. Also load-bearing: the db container publishes **no port**, which is what
+makes "no password" safe at all.
 
 ## Ground rules (full list in security-plan.md)
 
@@ -160,48 +162,53 @@ hardening into an exposure.
 - One commit per increment, no co-author trailer. Rewrite the `PROGRESS.md`
   NOW block as the increment's last step.
 - Deployer-agnostic: safe no-config defaults in shipped code; host infra stays
-  out of the repo.
+  out of the repo. The prune's cron lives on the host for exactly this reason,
+  in keeping with backups.
 - The VPS is production: read-only unless the owner approves a change, and all
   VPS work is deferred until the audit is complete.
 - No em dashes in user-facing text.
 - The suite must not inherit operator env: any setting `.env` may legitimately
   set that tests assume a default of belongs pinned in pyproject's pytest-env
-  block. **The role split added two such settings**: `POSTGRES_APP_USER` and
-  `POSTGRES_APP_PASSWORD`. `test_db_role_split.py` scrubs every `POSTGRES_*`
-  name from the inherited env in its subprocess boots, which is the pattern for
-  any future settings-level test.
+  block. **S5 added one:** `INBOX_MAX_BODY_BYTES`. (`POSTGRES_APP_USER` and
+  `POSTGRES_APP_PASSWORD` are the S4 examples; `test_db_role_split.py` scrubs
+  every `POSTGRES_*` name in its subprocess boots.)
 
-## Traps learned landing the role split, so you do not re-derive them
+## Traps learned landing S5, so you do not re-derive them
 
-- **`ALTER DATABASE ... OWNER TO` does not re-owner existing objects.** The
-  per-object `ALTER ... OWNER TO` loop is required, not an optimization; without
-  it migrations fail on the first `ALTER TABLE`.
-- **Django's auto-column sequences are *internally* dependent on their table**
-  (`pg_depend.deptype = 'i'`, not `'a'`). They move with `ALTER TABLE`, and
-  trying to re-own one on its own fails outright. A probe that queries only
-  `deptype = 'a'` reports a misleading count.
-- **The exec bit on `db/init-app-role.sh` is load-bearing.** The postgres
-  entrypoint *sources* a non-executable `.sh`, and the script's early `exit 0`
-  (the no-split path) would then abort Postgres's own first boot.
-- **`\getenv` needs a guaranteed exporter.** If the env var is unset the psql
-  variable stays unset, is not substituted, and the literal `:'name'` reaches the
-  server as a syntax error.
-- **`gen_random_bytes()` needs pgcrypto**, which this project installs nowhere.
-  The rotation uses two dash-stripped `gen_random_uuid()`s from pg_catalog.
-- **`pg_roles` columns are all `rol`-prefixed** (`rolsuper`, `rolcreaterole`,
-  `rolcreatedb`, `rolbypassrls`, `rolreplication`).
-- **Rebuild before recreating after a credential rotation.** The image bakes the
-  source, so a running container keeps the old `settings.py`; that is what
-  produced a `password authentication failed` unhealthy container here.
+- **The F8 refusal test is a vacuous-test trap.** A signature that omits body
+  coverage still has to be *otherwise valid* or the test proves nothing: sign
+  with the mirrored actor's own key, not a fresh one, or the request is refused
+  for the wrong reason and the test stays green with the gate deleted. This is
+  the same failure the R79 mutation pass caught, wearing a different hat.
+- **The floor's counter cannot be written inside the delivery transaction.** The
+  dedup row and the handler run in one transaction (`activitypub/inbox.py`), so
+  a counter written there would roll back its own rows on the failure it is
+  trying to record. `record_failure` is called from the view, outside it.
+- **A refusal that costs nothing must not be counted.** A POST with no signature
+  at all returns 401 and writes no row: it never reached `resolve_sender`, so it
+  never cost anything. Counting free refusals is how a floor becomes a
+  self-inflicted denial of service.
+- **Never key on an empty address.** `client_ip()` can come back empty; an empty
+  key is one shared bucket for every caller that gets one. `inbox_blocked` and
+  `record_failure` both no-op on empty, and `retry_after_seconds` returns 1.
+- **`ruff` on the bind-mounted host tree needs `--no-cache`**, or it dies with
+  `Failed to initialize cache at /host/.ruff_cache: Permission denied`. The
+  working invocation is
+  `docker compose run --rm --no-deps -v "$PWD":/host:z web sh -c "cd /host && ruff check --no-cache <paths>"`.
+  Same for `makemigrations`, which must run against the host tree because the
+  image bakes the source.
+- **`prune_inbox` prunes two tables, not one.** If a future change adds another
+  inbox-written table, the prune has to know about it or it becomes the second
+  unbounded one - which is the finding this increment just closed.
 
 ## Read in this order
 
-1. `security-plan.md` - ground rules first, then §S5.
-2. `SECURITY-AUDIT.md` - F7 and F8 as written, plus F9 (the replay window,
-   documented as accepted, which F7 makes cheap).
-3. `reeltalk/activitypub/views.py` (`_handle_inbox_post`), `signatures.py`
-   (`_verify_rfc9421`, `_verify_legacy`), `inbox.py`, `models.py`
-   (`DeliveredActivity`), and `reeltalk/social/attempts.py` as the throttle
-   pattern.
-4. `db/role-split.sql` and `docker-compose.test.yml` if the gate command or the
+1. `security-plan.md` - ground rules first, then §S6.
+2. `SECURITY-AUDIT.md` - F10, F11, F12, and the "Not yet audited in depth" list
+   that Half 2 works through.
+3. `reeltalk/tests/test_inbox_hardening.py` for what S5 actually enforces, then
+   `views._handle_inbox_post`, `inbox_throttle.py`, `signatures.py`,
+   `prune_inbox.py`.
+4. `reeltalk/social/attempts.py` before touching any throttle, including F12(c).
+5. `db/role-split.sql` and `docker-compose.test.yml` if the gate command or the
    DB identity comes up.
