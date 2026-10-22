@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ---
 
@@ -8,6 +8,74 @@
 
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
+
+- **THE APP NO LONGER CONNECTS AS THE DATABASE SUPERUSER (2026-10-22, security
+  increment S4 part 2, lands owner decision 4). FULL GATE GREEN ON IT:
+  **2574 passed, 5 skipped** in 35:29, all four markers `0` (`RUFF_CHECK`,
+  `RUFF_FORMAT`, `MIGRATIONS`, `PYTEST`), on a rebuilt image. The count landed
+  exactly as predicted: 2567 collected at the S4 part 1 baseline, plus 7 from
+  `reeltalk/tests/test_db_role_split.py`, plus 5 clean-room items for the five
+  new files, giving 2579 collected and 2574 passed. Count collected items,
+  never `def test` lines.** Before this, the app connected as
+  the login the postgres image creates, and that login is a superuser, always:
+  `POSTGRES_USER` is how the image names its superuser, no matter what it is
+  called. One SQL injection away from every database on the server. `db/role-split.sql`
+  now creates a separate application login with no superuser, no `CREATEROLE`,
+  no `CREATEDB`, no bypass-RLS and no replication, hands it the database and
+  every object in it, and then retires the bootstrap password. The file ends
+  with a verification block that raises if the app role still holds any of those
+  privileges, if the database is not owned by it, or if any table or sequence in
+  `public` still belongs to somebody else, so a split that half-lands fails the
+  boot instead of coming up looking healthy. **Fail-closed was observed, not
+  assumed:** during rehearsal, when the SQL errored the container exited rather
+  than coming up silently unsplit. First boot runs it from
+  `/docker-entrypoint-initdb.d/` (mounted in both compose files); an install
+  whose data directory already exists runs `db/upgrade-role-split.sh`, because
+  the image's init scripts never run on an initialised volume. Leaving
+  `POSTGRES_APP_USER` empty is the supported no-split posture and the app falls
+  back to `POSTGRES_USER`. **Two premises in the handoff were wrong, and both
+  were load-bearing.** (1) "Ownership is already clean, so `ALTER DATABASE ...
+  OWNER TO` transfers control with no per-object churn" - it does not. Re-owning
+  the database re-owns nothing that already exists; the per-object loop is
+  required, and migrations fail on the first `ALTER TABLE` without it. (2) The
+  probe that reported "34 standalone sequences" queried `pg_depend.deptype =
+  'a'`; Django's auto-column sequences are *internally* dependent
+  (`deptype = 'i'`) and move with their table, and trying to re-own one on its
+  own fails outright with "cannot change owner of sequence ... is linked to
+  table". The loop skips table-linked sequences and that error is gone. Three
+  more measured facts: the exec bit on `db/init-app-role.sh` is load-bearing
+  (the postgres entrypoint *sources* a non-executable `.sh`, where the script's
+  early `exit 0` would abort Postgres's own first boot); `gen_random_bytes()`
+  needs pgcrypto, which this project installs nowhere, so the rotation uses two
+  dash-stripped `gen_random_uuid()`s from pg_catalog; and every `\getenv` needs
+  a guaranteed exporter, because an unset psql variable is not substituted and
+  the literal `:'name'` reaches the server as a syntax error. **The bootstrap
+  password is rotated to a value recorded nowhere**, which is what makes the
+  split worth having: `.env` is the web container's whole environment, so a live
+  bootstrap password in it is a path from the app to a superuser. Maintenance
+  does not need it - the db container publishes no port and `docker compose exec
+  db psql -U reeltalk` goes over the unix socket, which `pg_hba` trusts.
+  **The test suite now gets its own throwaway server** (`docker-compose.test.yml`,
+  owner's decision) because pytest-django needs `CREATEDB` and the app role
+  deliberately holds none; the known limit is stated in that file - the suite
+  runs as that server's superuser, so it does not police the app role's floor,
+  which the SQL's own verification block does at boot on a real server. Same
+  pass closed the F5 leak in the file S1 missed: `docker-compose.prebuilt.yml`
+  was still handing the db container the whole app `env_file`. **Verified on the
+  real wire, both paths:** a fresh-install rehearsal in a throwaway container,
+  then the upgrade run against the live local stack - the app boots and migrates
+  as `reeltalk_app` (`APP_IDENTITY: ('reeltalk_app', 'reeltalk_app')`), home and
+  login both 200, five `qcluster` processes, and `\du` shows the app role with
+  no privileges while owning the database, 36 tables, 34 sequences and 136
+  indexes. The upgrade also cost a live lesson already written into `DEPLOYING.md`:
+  the image bakes the source, so the running container kept the old
+  `settings.py` reading only `POSTGRES_USER`, whose password had just rotated,
+  and came up unhealthy until `docker compose build`. **Disclosure:** rehearsing
+  the upgrade on this box's live local stack rotated its local `reeltalk`
+  bootstrap password to a random value that is not recorded anywhere and
+  appended `POSTGRES_APP_USER`/`POSTGRES_APP_PASSWORD` to the local `.env`; the
+  pre-change env is at `/tmp/env.backup`. The local instance is disposable, but
+  the rotation is stated, not buried.
 
 - **A PRODUCTION BOOT NOW REFUSES A PUBLIC `SECRET_KEY` (2026-10-21, security
   increment S4, closes F6 + the settings hygiene S1 left). Full gate green:
@@ -196,8 +264,11 @@ disagrees with this block, this block is current and the other is history.**
   whole feed in Python per request, because §2I decision 1 pages the
   computed list on a real correctness break. SQL aggregation needs its own
   section and brief.
-- **GATE STATE (2026-10-21).** Last full-suite run: **2553 passed, 5
-  skipped, all markers `0`** (on S3, owner's signal). The
+- **GATE STATE (2026-10-22).** Last full-suite run: **2574 passed, 5
+  skipped, all four markers `0`** (on S4 part 2, the DB role split, owner's
+  signal; 35:29). The count landed exactly as predicted: 2567 collected at the
+  S4 part 1 baseline plus 7 new tests plus the 5 clean-room items the five new
+  files add, so 2579 collected and 2574 passed with 5 skipped. The
   post-S1 run failed exactly one test,
   `test_private_destination_never_opens_socket[192.168.1.1]`, and the
   cause was environmental, not product: the gate container inherits the

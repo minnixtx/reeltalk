@@ -74,7 +74,80 @@ for a public instance.
 |---|---|---|
 | `DOMAIN` | `reeltalk.minnix.dev` | **Required.** The canonical public origin, no scheme. May carry a port for IP:port instances. Drives `ALLOWED_HOSTS` default and `DEFAULT_FROM_EMAIL`. |
 | `SECRET_KEY` | generated | **Required.** `./setup.sh` generates it. With `DEBUG` off the app refuses to start when it is missing, blank, or still the published development value, because that key signs session and CSRF cookies, so running on it hands anyone who reads the source the ability to forge a session, the admin's included. The refusal is the control; a boot that prints nothing and serves traffic is the failure mode. |
-| `POSTGRES_PASSWORD` | generated | **Required.** |
+| `POSTGRES_PASSWORD` | generated | **Required.** Seeds the bootstrap login on first boot; see "The two database roles" below. |
+
+### The two database roles
+
+ReelTalk runs on its own login, separate from the superuser the postgres image
+creates. `setup.sh` generates both secrets; nothing else needs to be configured.
+
+| Variable | Value here | Notes |
+|---|---|---|
+| `POSTGRES_USER` | `reeltalk` | The **bootstrap** login. The postgres image creates `POSTGRES_USER` as a superuser, always. Retained for maintenance; the app must not use it. |
+| `POSTGRES_APP_USER` | `reeltalk_app` | The **application** login. No superuser, no `CREATEROLE`, no `CREATEDB`, no bypass-RLS. Owns the ReelTalk database and every object in it, which is what lets it run migrations without elevated rights. |
+| `POSTGRES_APP_PASSWORD` | generated | **Required when `POSTGRES_APP_USER` is set.** `./setup.sh` generates it. |
+
+The floor is asserted, not assumed: `db/role-split.sql` ends with a verification
+block that raises if the app role still holds any of those privileges, if the
+database is not owned by it, or if any table or sequence in `public` still belongs
+to somebody else. A split that half-lands fails the boot instead of coming up
+looking healthy.
+
+**The bootstrap password is a first-boot seed, and it gets rotated away.** The
+postgres image needs a password to create its superuser, so `setup.sh` generates
+one into `.env`. But `.env` is the web container's entire environment, so a live
+bootstrap password in it is a path from the app to a superuser login. On first
+boot the init script rotates it to a random value that is **not recorded
+anywhere**. This is deliberate and it is not a lost credential: the db container
+publishes no port, and maintenance goes over the unix socket inside that
+container, which `pg_hba` trusts:
+
+```bash
+docker compose exec db psql -U reeltalk
+```
+
+If you would rather hold a recorded maintenance password, set one yourself after
+the split lands, through that same socket:
+
+```bash
+docker compose exec db psql -U reeltalk \
+  -c "ALTER ROLE reeltalk PASSWORD '...'"
+```
+
+**Upgrading an install that predates the split.** The init script only runs
+against an empty data directory, so pulling a new image does *not* split an
+existing database. On such an install the app keeps connecting as `POSTGRES_USER`
+(a supported fallback, not an error) until you run:
+
+```bash
+./db/upgrade-role-split.sh          # reads .env; generates the app password if blank
+docker compose build                # the image bakes the source, see §7
+docker compose up -d --force-recreate web worker
+```
+
+Skipping the rebuild leaves the old `settings.py` in the running container
+reading only `POSTGRES_USER`, whose password the script has just rotated, and the
+app then fails DB auth. Verify with:
+
+```bash
+docker compose exec db psql -U reeltalk_app -d reeltalk -c '\du'
+```
+
+`reeltalk_app` must show no privileges; `reeltalk` keeps them, and is used for
+maintenance only.
+
+**The test suite is the one place the floor does not apply.** pytest-django
+creates and drops a scratch database on every run, which needs `CREATEDB`. The
+suite therefore points at its own throwaway server through
+`docker-compose.test.yml`, with committed credentials and no secrets in it:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm web pytest
+```
+
+That server's login is a superuser, so a migration needing superuser-only DDL
+would still pass there. The role split's own verification block is what polices
+the app role, at boot, on a real server.
 
 ### Hosts and origins
 

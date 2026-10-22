@@ -199,8 +199,17 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": env.str("POSTGRES_DB", default="reeltalk"),
-        "USER": env.str("POSTGRES_USER", default="reeltalk"),
-        "PASSWORD": env.str("POSTGRES_PASSWORD", default=""),
+        # The app connects as its own login, which owns the ReelTalk database
+        # and holds no superuser, CREATEROLE or CREATEDB right (the DDL is
+        # db/role-split.sql). Falling back to POSTGRES_USER is what keeps an
+        # install that predates the split booting unchanged: there its only
+        # login is the one the postgres image created, and there is no app role
+        # to name. A deployer opts in by setting POSTGRES_APP_USER, which is
+        # what .env.example ships and setup.sh fills in.
+        "USER": env.str("POSTGRES_APP_USER", default="")
+        or env.str("POSTGRES_USER", default="reeltalk"),
+        "PASSWORD": env.str("POSTGRES_APP_PASSWORD", default="")
+        or env.str("POSTGRES_PASSWORD", default=""),
         "HOST": env.str("POSTGRES_HOST", default="db"),
         "PORT": env.int("POSTGRES_PORT", default=5432),
     }

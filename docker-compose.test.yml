@@ -1,0 +1,62 @@
+# ReelTalk test stack -- an opt-in override that gives the test suite its own
+# throwaway Postgres server.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm web pytest
+#
+# Why this exists
+# ---------------
+# The application's database role holds no CREATEDB (see db/role-split.sql), and
+# pytest-django needs to create and drop a `test_reeltalk` database on every
+# run. So the suite cannot point at the app's own server once the role split is
+# in place. Rather than trade the privilege floor away for test convenience, the
+# suite gets a disposable server with throwaway credentials and no production
+# secrets in it.
+#
+# What it does NOT change
+# -----------------------
+# Nothing here applies to a normal deploy. `docker compose up` never reads this
+# file; you have to name it with -f. The shipped stack is untouched.
+#
+# The known limit, stated rather than hidden
+# -----------------------------------------
+# The suite connects as this server's bootstrap superuser, so a migration that
+# quietly needed superuser-only DDL would still pass here. The role split's own
+# final check block (db/role-split.sql) is what polices the app role's privilege
+# floor, at boot, on a real server.
+name: reeltalk
+
+services:
+  db-test:
+    image: postgres:17
+    environment:
+      # Throwaway by design: these are committed on purpose, there is no secret
+      # here, and the container is deleted after the run.
+      POSTGRES_USER: reeltalk
+      POSTGRES_PASSWORD: reeltalk-test-only
+      POSTGRES_DB: reeltalk
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reeltalk -d reeltalk"]
+      interval: 5s
+      retries: 10
+      start_period: 5s
+      timeout: 5s
+    networks:
+      - main
+
+  web:
+    # `environment` wins over the base file's `env_file`, so these four keys are
+    # what the app actually sees: point it at the throwaway server, and leave
+    # POSTGRES_APP_USER empty so settings falls back to POSTGRES_USER (the only
+    # login this disposable server has, and the one allowed to hold CREATEDB).
+    environment:
+      POSTGRES_HOST: db-test
+      POSTGRES_USER: reeltalk
+      POSTGRES_PASSWORD: reeltalk-test-only
+      POSTGRES_DB: reeltalk
+      POSTGRES_APP_USER: ""
+      POSTGRES_APP_PASSWORD: ""
+    # Replace, do not append: without !override the app would also wait on the
+    # real db service, which is the very server this file exists to avoid.
+    depends_on: !override
+      db-test:
+        condition: service_healthy

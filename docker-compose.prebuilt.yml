@@ -45,8 +45,22 @@ services:
     image: postgres:17
     restart: unless-stopped
     shm_size: ${POSTGRES_SHM_SIZE:-128mb}
-    env_file: ${ENV_FILE:-.env}
+    # Same posture as docker-compose.yml: the db gets only the Postgres
+    # variables, never the app's SMTP or API secrets. These come from the
+    # interpolation layer (the project .env, or --env-file), not from
+    # ${ENV_FILE}.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_DB: ${POSTGRES_DB:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      # The application's own login, created once when the data directory is
+      # first initialised. Empty POSTGRES_APP_USER means "no split": the app
+      # keeps connecting as POSTGRES_USER. See db/role-split.sql.
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-}
     healthcheck:
+      # pg_isready never authenticates, so the init script rotating the
+      # bootstrap password cannot break this check.
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       retries: 5
@@ -54,6 +68,11 @@ services:
       timeout: 10s
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Only read on a first boot, against an empty data directory. An install
+      # that already has a database lands the split with db/upgrade-role-split.sh
+      # instead. The `,z` is SELinux relabelling; a no-op where SELinux is off.
+      - ./db/init-app-role.sh:/docker-entrypoint-initdb.d/60-reeltalk-app-role.sh:ro,z
+      - ./db/role-split.sql:/usr/local/share/reeltalk/role-split.sql:ro,z
     networks:
       - main
 

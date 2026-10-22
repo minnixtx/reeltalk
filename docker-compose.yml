@@ -21,16 +21,25 @@ services:
     image: postgres:17
     restart: unless-stopped
     shm_size: ${POSTGRES_SHM_SIZE:-128mb}
-    # The db receives only the three Postgres variables, never the app's SMTP
-    # or API secrets. These come from the interpolation layer (the project
-    # .env, or --env-file), not from ${ENV_FILE}: a second local instance
-    # (federation testing, R45) whose DB credentials differ from the project
-    # .env must also pass --env-file .env.b, not just -e ENV_FILE=.env.b.
+    # The db receives only the Postgres variables, never the app's SMTP or API
+    # secrets. These come from the interpolation layer (the project .env, or
+    # --env-file), not from ${ENV_FILE}: a second local instance (federation
+    # testing, R45) whose DB credentials differ from the project .env must also
+    # pass --env-file .env.b, not just -e ENV_FILE=.env.b.
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?required}
       POSTGRES_DB: ${POSTGRES_DB:?required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      # The application's own login, created once when the data directory is
+      # first initialised. Empty POSTGRES_APP_USER means "no split": the app
+      # keeps connecting as POSTGRES_USER, which is what installs predating the
+      # change do. See db/role-split.sql and DEPLOYING.md.
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-}
     healthcheck:
+      # pg_isready only asks whether the server accepts connections; it never
+      # authenticates, so rotating the bootstrap password (which the init script
+      # does) cannot break this check.
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       retries: 5
@@ -38,6 +47,11 @@ services:
       timeout: 10s
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Only read on a first boot, against an empty data directory. An install
+      # that already has a database lands the split with db/upgrade-role-split.sh
+      # instead. The `,z` is this box's SELinux label; it is a no-op elsewhere.
+      - ./db/init-app-role.sh:/docker-entrypoint-initdb.d/60-reeltalk-app-role.sh:ro,z
+      - ./db/role-split.sql:/usr/local/share/reeltalk/role-split.sql:ro,z
     networks:
       - main
 

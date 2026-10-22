@@ -62,9 +62,19 @@ Required:
 |---|---|
 | `DOMAIN` | Your public hostname, no scheme. Drives `ALLOWED_HOSTS` and the default mail domain. |
 | `SECRET_KEY` | Django secret. `setup.sh` generates one. |
-| `POSTGRES_PASSWORD` | Database password. `setup.sh` generates one. |
+| `POSTGRES_PASSWORD` | Database password. `setup.sh` generates one. Seeds the bootstrap login; see `DEPLOYING.md`. |
+| `POSTGRES_APP_USER` | The login the app connects as: no superuser, no `CREATEROLE`, no `CREATEDB`. Defaults to `reeltalk_app`. |
+| `POSTGRES_APP_PASSWORD` | That login's password. `setup.sh` generates it when `POSTGRES_APP_USER` is set. |
 
 `POSTGRES_USER`, `POSTGRES_DB` and `POSTGRES_HOST=db` have working defaults.
+
+The app runs on its own database role, not the superuser the postgres image
+creates. On a first boot the db container creates that role, hands it the
+database, and rotates the bootstrap password to a value that is not recorded
+anywhere, because `.env` is the web container's whole environment. Maintenance
+does not need it: `docker compose exec db psql -U reeltalk` connects over the
+unix socket. See "The two database roles" in `DEPLOYING.md`, which also has the
+upgrade path for an install that predates the split.
 
 `SECRET_KEY` is not a formality: it signs session and CSRF cookies, and the
 built-in development value is published in the source, so an instance running

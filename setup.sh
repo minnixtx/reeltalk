@@ -54,6 +54,16 @@ for var in SECRET_KEY POSTGRES_PASSWORD; do
     fi
 done
 
+# The application's own database login. Only fill its password when the login
+# is actually named: an install that predates the split has no POSTGRES_APP_USER
+# line at all, and inventing a password for a role that does not exist would
+# point the app at a login that cannot authenticate. Those installs opt in with
+# db/upgrade-role-split.sh instead.
+if [ -n "$(get_var POSTGRES_APP_USER)" ] && [ -z "$(get_var POSTGRES_APP_PASSWORD)" ]; then
+    echo "Generating POSTGRES_APP_PASSWORD..."
+    set_var POSTGRES_APP_PASSWORD "$(gen_secret)"
+fi
+
 echo
 # Enable the versioned git hooks (blocks co-author trailers, which GitHub would
 # otherwise turn into contributor-graph entries for accounts we don't control).
