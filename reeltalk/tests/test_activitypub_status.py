@@ -31,6 +31,7 @@ from reeltalk.activitypub.inbox import process_inbound_activity
 from reeltalk.activitypub.models import DeliveredActivity
 from reeltalk.activitypub.statuses import RemoteObjectError
 from reeltalk.core.models import Film, Shelf, ShelfFilm, Status
+from reeltalk.mentions.models import sync_status_mentions
 from reeltalk.social.models import User
 from reeltalk.tests.members import member
 
@@ -866,6 +867,38 @@ def test_broadcast_status_delete_shape():
     assert sent["object"]["id"] == f"http://testserver/status/{status.pk}/"
     # A stable id: a status is deleted at most once in v0.1.
     assert json.loads(responses.calls[1].request.body)["id"] == first_id
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_broadcast_status_delete_reaches_a_mentioned_non_follower():
+    """F14: a remote the review *mentioned* gets the tombstone even without
+    following the author. The Create reached them because a mention is an
+    address, so a Delete that reached only followers left them holding a full
+    copy of a post the rest of the network was told is gone. The audience is
+    now ``_status_targets``, matching create/update and the list family."""
+    alice = member(localname="alice", password="p")
+    carol = _carol()
+    carol.save()
+    # Deliberately NOT carol.follows.add(alice) -- she is in the audience only
+    # because the review mentions her, which is the case the old
+    # followers-only helper silently dropped.
+    film = Film.objects.create(title="Arrival", year=2016)
+    status = Status.objects.create(
+        user=alice,
+        film=film,
+        status_type=Status.Type.REVIEW,
+        content="Great.",
+        raw_content="Great.",
+    )
+    sync_status_mentions(status, [carol])
+    status.delete()  # soft-delete — the tombstone keeps its identity
+    responses.add(responses.POST, REMOTE_INBOX)
+    broadcast_status_delete(_request_with_host(), status)
+
+    assert len(responses.calls) == 1
+    assert responses.calls[0].request.url == REMOTE_INBOX
+    assert json.loads(responses.calls[0].request.body)["type"] == "Delete"
 
 
 @responses.activate

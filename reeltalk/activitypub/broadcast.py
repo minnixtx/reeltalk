@@ -177,14 +177,19 @@ def broadcast_status_update(request, status) -> None:
 
 
 def broadcast_status_delete(request, status) -> None:
-    """Broadcast a deleted review to the author's remote followers.
+    """Broadcast a deleted review to the author's remote followers and its mentions.
+
+    The audience is ``_status_targets``, the same one create and update use.
+    A remote user the post *mentioned* was sent the Create precisely because
+    they might not follow the author; a Delete that reaches only followers
+    leaves them holding a full copy of a post the rest of the network has
+    been told is gone. (F14.)
 
     The tombstone keeps its identity (soft-delete — §3.2), so the Note rides
     inline and the receiver keys the deletion by origin id.
     """
-    return _deliver_to_followers(
-        request, status.user, delete_activity(status, status.user, request)
-    )
+    activity = delete_activity(status, status.user, request)
+    return _deliver_signed(request, status.user, activity, _status_targets(status))
 
 
 def broadcast_shelf_event(request, user, film, identifier: str, *, added: bool) -> None:
@@ -206,11 +211,11 @@ def broadcast_shelf_event(request, user, film, identifier: str, *, added: bool) 
 # what composes the body, and these only decide who hears about it. Nothing
 # here builds a document.
 #
-# **All three share one audience, and it is ``_status_targets``.** That is
-# not the same helper ``broadcast_status_delete`` uses: that one delivers to
-# ``_deliver_to_followers`` alone, so a remote user *named* in a post never
-# receives that post's tombstone and keeps a copy of something the network
-# has been told is gone.
+# **All three share one audience, and it is ``_status_targets``** -- the same
+# helper ``broadcast_status_create``/``update``/``delete`` all use now (F14
+# closed the last gap: the status-Delete path used to deliver to followers
+# alone, so a remote user *named* in a post never received that post's
+# tombstone and kept a copy of something the network had been told was gone).
 #
 # For a list the two sets are equal **today** -- ``create_list`` renders the
 # description with ``mentions=False``, so a list face carries no mention
