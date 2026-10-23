@@ -170,6 +170,29 @@ def test_a_staff_helper_cannot_delete_the_site_admin(db, site_admin):
     assert User.objects.filter(pk=site_admin.pk).exists()
 
 
+def test_a_staff_helper_cannot_delete_the_instance_representative(db):
+    """The representative holds no role, so the role test alone would miss it (F18b).
+
+    Deleting it is not a tidy-up: it orphans every ``Flag`` already signed with
+    that keypair, and a fresh recreation gets a new key that cannot re-sign
+    them (R111). The site admin can still reach the row; a helper cannot.
+    """
+    from reeltalk.moderation.representative import instance_representative
+
+    rep = instance_representative()
+    assert not (rep.is_superuser or rep.is_staff or rep.is_moderator)
+    deleter = grant(
+        create_member(localname="deleter", password=PASSWORD, is_staff=True),
+        "change_user",
+        "delete_user",
+    )
+    resp = as_client(deleter).post(
+        f"/admin/social/user/{rep.pk}/delete/", {"post": "yes"}
+    )
+    assert resp.status_code == 403
+    assert User.objects.filter(pk=rep.pk).exists()
+
+
 # --- the support flow still works -----------------------------------------
 
 

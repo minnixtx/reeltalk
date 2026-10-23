@@ -338,15 +338,22 @@ class UserAdmin(admin.ModelAdmin):
         the site admin is the one person who has to be able to reach that row,
         so this is deliberately *not* ``can_act_on``, which shields the
         representative from everyone. A non-superuser may touch only a regular
-        member: never a row that already holds a role. The support flow this
-        admin exists to serve — reset a member's password, correct an address
-        (R124) — is always aimed at a member, and a row that can open the admin
-        or moderate is exactly the row that must not be handed to a helper.
-        This is the same line ``can_act_on`` draws for the moderation views;
-        the admin surface simply never consulted it.
+        member: never a row that already holds a role, and never the instance
+        representative. The support flow this admin exists to serve — reset a
+        member's password, correct an address (R124) — is always aimed at a
+        member, and a row that can open the admin or moderate is exactly the
+        row that must not be handed to a helper. The representative holds no
+        role at all, so the role test on its own would leave it reachable, and
+        a delete there is not harmless: it orphans every ``Flag`` already
+        signed with that keypair, which a fresh recreation cannot re-sign
+        (R111). So it is named here rather than left to a role it does not
+        carry. This is the same line ``can_act_on`` draws for the moderation
+        views; the admin surface simply never consulted it.
         """
         if request.user.is_superuser:
             return True
+        if is_instance_actor(obj):
+            return False
         return not (obj.is_superuser or obj.is_staff or obj.is_moderator)
 
     def has_change_permission(self, request, obj=None):
@@ -484,13 +491,18 @@ class UserAdmin(admin.ModelAdmin):
         pressing send in one save mails the **corrected** address — which is
         precisely R124's recovery flow, and works because ``change_email``
         has already run and left ``obj.email`` at the new value.
+
+        **The guard is the button's own predicate, not a weaker copy of it.**
+        The send button only renders when ``_may_send_verification`` holds,
+        but a hand-crafted POST skips the rendering and reaches this handler
+        directly. Checking only ``obj.email`` here let that POST mint a token
+        against a remote mirror or an already-verified account, and every
+        send supersedes the live link the member actually holds — so the
+        refusal has to run the same test that hid the button, not a subset of
+        it. ``_why_not`` is the sentence that goes with that test.
         """
-        if not obj.email:
-            self.message_user(
-                request,
-                "Nothing sent: this account has no email address to verify.",
-                messages.ERROR,
-            )
+        if not self._may_send_verification(obj):
+            self.message_user(request, _why_not(obj), messages.ERROR)
             return
         result = send_verification_email(obj, request_ip=client_ip(request))
         if result["enqueued"]:
@@ -873,7 +885,13 @@ class InviteAdmin(admin.ModelAdmin):
 
     list_display = ["short_code", "created_by", "created_at", "state", "used_by"]
     list_filter = ["created_by"]
-    search_fields = ["code", "created_by__localname", "used_by__localname"]
+    # ``code`` is deliberately absent (F18d). The list shows only a truncated
+    # prefix for the same reason the verification token does -- a full live
+    # code is a credential. Leaving it searchable would hand anyone with
+    # view-on-invite an icontains oracle: search one character at a time and
+    # reconstruct a live code by whether a row comes back, undoing the
+    # truncation above. Searching the who-columns is all this page needs.
+    search_fields = ["created_by__localname", "used_by__localname"]
     date_hierarchy = "created_at"
     readonly_fields = [
         "code",

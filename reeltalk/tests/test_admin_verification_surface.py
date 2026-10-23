@@ -266,6 +266,57 @@ def test_a_non_staff_member_cannot_trigger_a_send(client, stuck):
     assert not EmailVerificationToken.objects.filter(user=stuck).exists()
 
 
+# --- the send guard is the button's guard, not a weaker copy (F18c) -------
+
+
+@pytest.mark.django_db
+def test_a_crafted_send_post_is_refused_for_a_remote_mirror(admin_client):
+    """The button never renders for a mirror; the POST must agree (F18c).
+
+    The old handler checked only ``obj.email``, and a mirror can carry one, so
+    a hand-crafted POST -- which skips the rendering that hid the button --
+    minted a token and superseded whatever the account held. The fix runs the
+    button's own predicate, so the same POST now mints nothing.
+    """
+    mirror = User.objects.create_user(
+        localname="faraway@example.org",
+        password=STRONG,
+        email="faraway@example.org",
+        local=False,
+    )
+    press_send(admin_client, mirror)
+    assert not EmailVerificationToken.objects.filter(user=mirror).exists()
+
+
+@pytest.mark.django_db
+def test_a_crafted_send_post_is_refused_for_a_verified_account(admin_client):
+    """A verified account has nothing to verify; the POST must not mint anyway.
+
+    Same shape as the mirror case: the button is hidden because the address is
+    already proven, but the old guard did not look at ``email_verified``, so a
+    crafted POST minted a fresh token for no reason. The member arrives here
+    already carrying one used token -- the fixture spent it to verify them --
+    so the assertion is that the refused send adds none, not that none exists.
+    """
+    verified = create_member(localname="solid", password=STRONG)
+    assert verified.email_verified is True
+    before = EmailVerificationToken.objects.filter(user=verified).count()
+    press_send(admin_client, verified)
+    assert EmailVerificationToken.objects.filter(user=verified).count() == before
+
+
+@pytest.mark.django_db
+def test_a_crafted_send_post_is_refused_for_the_instance_representative(
+    admin_client,
+):
+    """The representative has no address to verify and must stay that way."""
+    from reeltalk.moderation.representative import instance_representative
+
+    rep = instance_representative()
+    press_send(admin_client, rep)
+    assert not EmailVerificationToken.objects.filter(user=rep).exists()
+
+
 # --- the status line -----------------------------------------------------
 
 

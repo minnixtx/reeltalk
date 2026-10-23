@@ -448,6 +448,30 @@ def test_the_detail_page_shows_the_full_code_read_only(client, owner):
 
 
 @pytest.mark.django_db
+def test_a_live_invite_code_is_not_a_search_oracle(client, owner):
+    """``code`` is out of ``search_fields`` so search cannot rebuild one (F18d).
+
+    The list truncates the code to a prefix for the same reason the token
+    inline does -- a full live code is a credential. Leaving it searchable
+    would undo that: an ``icontains`` hit reveals a guessed character, so a
+    live code could be reconstructed one character at a time by whether a
+    row comes back. The who-columns stay searchable, which is the control
+    that the search itself still works and only the code was dropped.
+    """
+    client.force_login(owner)
+    invite = Invite.mint(owner)
+    row = f"/admin/social/invite/{invite.pk}/change/"
+
+    by_code = client.get("/admin/social/invite/", {"q": invite.code}).content.decode()
+    assert row not in by_code
+
+    by_creator = client.get(
+        "/admin/social/invite/", {"q": owner.localname}
+    ).content.decode()
+    assert row in by_creator
+
+
+@pytest.mark.django_db
 def test_invites_cannot_be_added_from_the_admin(client, owner):
     client.force_login(owner)
     assert client.get("/admin/social/invite/add/").status_code == 403
