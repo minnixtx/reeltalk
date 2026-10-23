@@ -56,8 +56,21 @@ MENTION_RE = re.compile(rf"(?<![=/\w])@({_HANDLE}(?:@{_DOMAIN})?)")
 #
 # Order matters: fenced blocks are blanked first so a backtick inside one is
 # already gone before the inline-code pass looks for backticks.
+#
+# The fence-opener run is possessive (`` `{3,}+ ``) on purpose (F16). A plain
+# `` `{3,} `` admits every length from 3 up to the whole run, so when a body
+# opens a fence that never closes the engine retries the opener at each shorter
+# backtick count, and the `` .*? `` then rescans to end-of-text for each one --
+# quadratic in the length of the run, and `` raw_content `` is an unbounded
+# TextField. Possessive means "match the maximal run and never give it back":
+# a fence is a run of three or more of the same marker, so the only opener worth
+# trying is the whole run. Measured on a 32k-backtick body this drops ~3.9s to
+# under 1ms. The inline-code pass below is left alone because it is not
+# independently super-linear -- a long backtick run with no clean close fails
+# its `` .+? `` in one step rather than rescanning -- so making it possessive
+# only slows the common case without closing anything the fence fix did not.
 _FENCED_CODE_RE = re.compile(
-    r"^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1",
+    r"^[ \t]*(`{3,}+|~{3,}+).*?^[ \t]*\1",
     re.DOTALL | re.MULTILINE,
 )
 _CODE_SPAN_RE = re.compile(r"`+.+?`+", re.DOTALL)

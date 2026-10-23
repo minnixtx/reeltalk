@@ -14,6 +14,8 @@ therefore paired with a string differing only in the guarded property,
 asserted *to* match.
 """
 
+import time
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, connection, transaction
@@ -226,6 +228,26 @@ def test_a_fenced_block_is_not_a_mention(alice):
         assert _handles(fenced) == [], fence
         # Control: the same fence, with a mention outside it.
         assert _handles(fenced + " @alice outside it") == ["alice"], fence
+
+
+def test_an_unclosable_fence_does_not_burn_cpu(alice):
+    # F16: a body that is one long run of backticks is an unclosable fence.
+    # The plain `` `{3,} `` opener retried the fence at every shorter backtick
+    # count and rescanned `` .*? `` to end-of-text for each -- quadratic in the
+    # run length, and raw_content is unbounded. The possessive opener matches
+    # the whole run once and never gives it back.
+    #
+    # The assertion is a time bound because that is the only observable
+    # difference: the result is [] on both the old and new regex, so a
+    # correctness check alone would pass even if the quadratic behaviour came
+    # back. 40k backticks measured ~6s on the old opener and well under 1ms on
+    # the new one, so a 1s ceiling fails the regression by a wide margin
+    # without being tight enough to flake on a loaded runner.
+    body = "`" * 40000
+    start = time.perf_counter()
+    assert mentions_from_text(body) == []
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0, f"unclosable fence took {elapsed:.3f}s -- backtracking?"
 
 
 def test_a_mention_inside_a_link_label_is_not_a_mention(alice):
