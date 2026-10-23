@@ -62,10 +62,37 @@ TOKEN_INLINE_LIMIT = 15
 RED = "#b3261e"
 GREEN = "#237a4b"
 
+# The three columns that decide what an account is allowed to do. A
+# non-superuser must never read or write them: ticking ``is_superuser`` on one's
+# own row is the whole privilege escalation (F13), and the support flow this
+# admin exists to serve — reset a member's password, correct an address — never
+# needs to touch them.
+ROLE_FIELDS = ("is_staff", "is_superuser", "is_moderator")
+
 
 def redirect_to_user_change(obj):
     """Back to this account's own change page."""
     return redirect(reverse("admin:social_user_change", args=[obj.pk]))
+
+
+def _without_role_fields(fieldsets):
+    """Drop every role column from a change-form fieldset structure.
+
+    Used for a non-superuser requester (F13). Removing a field from the
+    fieldset removes it from the form — Django builds the change form from
+    ``flatten_fieldsets(get_fieldsets(...))`` — so a hand-crafted POST that
+    still carries ``is_superuser=on`` is ignored by the form rather than
+    merely hidden by the template. Hiding is presentation; this is the write
+    path, and it is the write path that has to refuse.
+    """
+    stripped = []
+    for name, opts in fieldsets:
+        opts = dict(opts)
+        opts["fields"] = tuple(
+            field for field in opts.get("fields", ()) if field not in ROLE_FIELDS
+        )
+        stripped.append((name, opts))
+    return stripped
 
 
 class InviteUserCreationForm(UserCreationForm):
@@ -277,7 +304,60 @@ class UserAdmin(admin.ModelAdmin):
     def get_fieldsets(self, request, obj=None):
         if obj is None:
             return self.add_fieldsets
-        return super().get_fieldsets(request, obj)
+        fieldsets = super().get_fieldsets(request, obj)
+        # Strip only for a positively-known non-superuser requester. A request
+        # with no user (a direct get_fieldsets probe, not a real admin view)
+        # gets the full structure; the security boundary is the permission
+        # methods below, which always run with a real request.user.
+        user = getattr(request, "user", None)
+        if user is None or user.is_superuser:
+            return fieldsets
+        # A non-superuser never sees the role columns (F13). They cannot grant
+        # a role they do not hold, and the field being absent from the form is
+        # what turns a hand-crafted POST that carries one into a no-op: the
+        # field is not bound, not validated, and not saved.
+        return _without_role_fields(fieldsets)
+
+    def _may_touch(self, request, obj) -> bool:
+        """Whether this requester may change or delete ``obj`` at all (F13).
+
+        A superuser may touch anyone, including the instance representative —
+        the site admin is the one person who has to be able to reach that row,
+        so this is deliberately *not* ``can_act_on``, which shields the
+        representative from everyone. A non-superuser may touch only a regular
+        member: never a row that already holds a role. The support flow this
+        admin exists to serve — reset a member's password, correct an address
+        (R124) — is always aimed at a member, and a row that can open the admin
+        or moderate is exactly the row that must not be handed to a helper.
+        This is the same line ``can_act_on`` draws for the moderation views;
+        the admin surface simply never consulted it.
+        """
+        if request.user.is_superuser:
+            return True
+        return not (obj.is_superuser or obj.is_staff or obj.is_moderator)
+
+    def has_change_permission(self, request, obj=None):
+        # obj is None for the changelist and add views, where the model-level
+        # permission is the whole question; the per-object refusal is for an
+        # existing row.
+        if obj is not None and not self._may_touch(request, obj):
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_view_permission(self, request, obj=None):
+        # Refusing change alone would leave a non-superuser able to *open* an
+        # admin-side row read-only, which is still a read of the site admin's
+        # address and (until F15) their hash. The coherent rule is that a
+        # non-superuser cannot open an admin-side row at all, so the same
+        # per-object gate applies to the read path.
+        if obj is not None and not self._may_touch(request, obj):
+            return False
+        return super().has_view_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and not self._may_touch(request, obj):
+            return False
+        return super().has_delete_permission(request, obj)
 
     def get_readonly_fields(self, request, obj=None):
         readonly = list(self.readonly_fields)
