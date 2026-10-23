@@ -520,6 +520,18 @@ def list_add_film(request, list_id):
     Duplicate adds are a no-op with an "already in here" message rather than
     an error: ``add_films`` skips what is already present, so a double-click
     cannot fail, and the member still gets told why the row count did not move.
+
+    A film the member has blocked is refused here too, the same exclusion the
+    two search doors apply while building their rows. Without it the block list
+    was a display rule rather than a rule: the typeahead hides the film, and a
+    hand-typed ``film_id`` would put it in the list anyway and
+    ``broadcast_list_update`` would federate contents the member asked never to
+    be shown. Only the local-id axis is needed, unlike the doors: both arms
+    above arrive at a local row (``create_or_match_film`` returns the row that
+    already carries a given ``tmdb_id``, and that field is unique), so a blocked
+    TMDB hit reaches here *as* the blocked row. The harm is self-directed (the
+    actor is the blocker), so the answer names the member's own unblock control
+    rather than answering 404 the way a stranger's request does.
     """
     film_list = _owned_list(request, list_id)
     tmdb_id = request.POST.get("tmdb_id")
@@ -544,6 +556,13 @@ def list_add_film(request, list_id):
             film = Film.objects.get(pk=key)
         except Film.DoesNotExist:
             raise Http404 from None
+
+    if film.pk in _local_film_ids(request.user):
+        messages.error(
+            request,
+            f"You have blocked “{film.title}”. Unblock it on its film page to add it.",
+        )
+        return _editor_redirect(request, film_list)
 
     if add_films(film_list, [film]):
         # Inside the ``if`` rather than after it: ``add_films`` returns the

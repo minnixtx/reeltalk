@@ -432,6 +432,57 @@ def test_a_malformed_add_is_refused_not_crashed(listing):
     assert response.status_code == 400
 
 
+def test_a_blocked_film_cannot_be_added_through_the_add_route(listing, alice):
+    """The block list is a rule, not only a filter on the typeahead.
+
+    Both search doors drop a blocked film from their rows, but the add route
+    behind them took any ``film_id``, so a hand-typed post could put a film the
+    member had asked never to see into a list -- and the broadcast that follows
+    would then federate it. The route has to apply the same exclusion the doors
+    do, or the exclusion is decoration (R85's shape again).
+    """
+    hidden = Film.objects.create(title="The Thing", year=1982)
+    alice.blocked_films.add(hidden)
+    response = _login("alice").post(
+        reverse("list-add-film", args=[listing.pk]), {"film_id": hidden.pk}
+    )
+    assert response.status_code == 302
+    assert not ListItem.objects.filter(film_list=listing, film=hidden).exists()
+
+
+def test_a_blocked_tmdb_hit_cannot_be_added_through_the_add_route(listing, alice):
+    """The TMDB arm is covered by the same check, with no second axis.
+
+    ``create_or_match_film`` returns the row that already carries a given
+    ``tmdb_id`` and that field is unique, so a blocked TMDB hit arrives at the
+    route *as* the blocked local row rather than as a fresh one the local-id
+    check would wave through. No network call here for the same reason: the
+    find-or-create stops at the existing row.
+    """
+    hidden = Film.objects.create(title="Alien 3", year=1992, tmdb_id=12345)
+    alice.blocked_films.add(hidden)
+    response = _login("alice").post(
+        reverse("list-add-film", args=[listing.pk]), {"tmdb_id": 12345}
+    )
+    assert response.status_code == 302
+    assert not ListItem.objects.filter(film_list=listing, film=hidden).exists()
+
+
+def test_an_unblocked_film_still_adds_after_the_block_check(listing, alice):
+    """The refusal is scoped to the blocked row, not to the route.
+
+    The companion to the two tests above: without it they would pass just as
+    well on a version that refused every add.
+    """
+    extra = Film.objects.create(title="The Thing", year=1982)
+    alice.blocked_films.add(Film.objects.create(title="Something else", year=1971))
+    response = _login("alice").post(
+        reverse("list-add-film", args=[listing.pk]), {"film_id": extra.pk}
+    )
+    assert response.status_code == 302
+    assert ListItem.objects.filter(film_list=listing, film=extra).exists()
+
+
 def test_adding_both_ids_at_once_is_refused(listing, dune):
     response = _login("alice").post(
         reverse("list-add-film", args=[listing.pk]),

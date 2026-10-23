@@ -7,6 +7,14 @@ rank or a face maintained in two places is where a feature like this rots. Each
 function is small, atomic, and idempotent where the door that calls it can be
 pressed twice.
 
+Two invariants hold that sentence up, and they are enforced in two places. The
+*live* half is asserted here — ``_require_live`` refuses to edit a soft-deleted
+list, because a tombstone whose face is being stamped as edited is a
+contradiction the wire would happily publish. The *owner* half is the doors':
+every write view resolves through ``views._owned_list``, and a service function
+has no actor to compare against, so ownership is proven at the route (and by
+the stranger-posts-every-write-route tests) rather than pretended to here.
+
 Every function that changes something also stamps the post face's
 ``edited_date`` — see ``_stamp_edited`` for why that belongs on the face rather
 than only on ``FilmList.updated_date``, and why a call that changed nothing
@@ -90,6 +98,27 @@ def _stamp_edited(film_list: FilmList) -> None:
     face.save(update_fields=["edited_date"])
 
 
+def _require_live(film_list: FilmList) -> None:
+    """Refuse to edit a list that is not a live row. Raises rather than no-ops.
+
+    ``views._owned_list`` already scopes every write route to ``deleted=False``,
+    so nothing on the current doors can reach this. The check is here because a
+    soft delete *hides* a list instead of removing it: the row and its face both
+    survive with their identities, so an edit that got through would stamp a
+    tombstone's face as edited and put that stamp on the wire as an update to
+    an object the network was told is gone. A no-op return would look like the
+    caller had edited something, which is the same confusion in a quieter form.
+
+    The owner half of ``_owned_list`` is deliberately **not** duplicated here.
+    A service function is handed a list and has no actor to compare it against,
+    so an ownership check would either need a parameter every caller can omit or
+    a ``request`` the service layer should not know about. Ownership is the
+    doors' job and is tested there, by a stranger posting to each write route.
+    """
+    if film_list.pk is None or film_list.deleted:
+        raise ValueError(f"cannot edit list {film_list.pk}: it is not a live row")
+
+
 def _append_films(film_list: FilmList, films: Iterable[Film]) -> list[ListItem]:
     """Append films in the order given, skipping any already in the list.
 
@@ -126,6 +155,7 @@ def add_films(film_list: FilmList, films: Iterable[Film]) -> list[ListItem]:
     Returns the rows it actually created, which is empty when every film was
     already in the list, and nothing is stamped in that case.
     """
+    _require_live(film_list)
     created = _append_films(film_list, films)
     if created:
         _stamp_edited(film_list)
@@ -140,6 +170,7 @@ def remove_film(film_list: FilmList, film: Film) -> bool:
     gap would rewrite every row below the removal on each one, for a tidy
     column of integers nobody is allowed to depend on.
     """
+    _require_live(film_list)
     deleted, _ = ListItem.objects.filter(film_list=film_list, film=film).delete()
     if deleted:
         _stamp_edited(film_list)
@@ -163,6 +194,7 @@ def move(item: ListItem, direction: str) -> bool:
     outcome of pressing the button, not a caller error. An unrecognised
     direction *is* a caller error and raises.
     """
+    _require_live(item.film_list)
     if direction == MOVE_UP:
         neighbour = (
             ListItem.objects.filter(film_list_id=item.film_list_id, rank__lt=item.rank)
@@ -194,6 +226,7 @@ def rename(film_list: FilmList, title: str) -> FilmList:
     Only the title. The post face carries no text of its own, so there is
     nothing to keep in step here — which is the point of that choice (§2K L9).
     """
+    _require_live(film_list)
     film_list.title = title
     film_list.save(update_fields=["title", "updated_date"])
     _stamp_edited(film_list)
@@ -215,6 +248,7 @@ def set_description(film_list: FilmList, description: str) -> FilmList:
     Clearing the description is a legal edit and takes both halves to blank, so
     a cleared list renders no description block rather than a stale one.
     """
+    _require_live(film_list)
     film_list.description = render_markdown(description)
     film_list.raw_description = description
     film_list.save(update_fields=["description", "raw_description", "updated_date"])
@@ -236,6 +270,14 @@ def soft_delete_list(film_list: FilmList) -> FilmList:
     reads that surviving pointer: the Saved tab shows the deleted list with a
     dismissible notice instead of filtering it out, so a saver learns their
     pointer went dead rather than watching it disappear.
+
+    This is the one mutator with no ``_require_live`` guard, and that is the
+    correct shape rather than an oversight: taking down a list that is already
+    down is the same outcome as taking it down once, reached by pressing a
+    button twice or by a second ``Delete`` on the wire. ``FilmList.delete()``
+    already keeps the *first* deletion's timestamp and returns quietly, so the
+    idempotence lives in the model and a guard here would only turn a repeat
+    into an error.
     """
     film_list.delete()
     film_list.status.delete()

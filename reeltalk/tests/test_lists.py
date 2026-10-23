@@ -36,6 +36,7 @@ from reeltalk.lists.services import (
     move,
     remove_film,
     rename,
+    set_description,
     soft_delete_list,
 )
 from reeltalk.tests.members import member
@@ -458,6 +459,44 @@ def test_deleting_a_deleted_list_twice_keeps_the_first_deletion(alice):
     film_list.refresh_from_db()
     assert film_list.deleted_date == first_deleted_date
     assert film_list.status.deleted_date == face_deleted_date
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "op",
+    ["rename", "set_description", "add_films", "remove_film", "move"],
+)
+def test_a_mutator_refuses_a_soft_deleted_list(alice, dune, alien, op):
+    """The service refuses what every write route already refuses.
+
+    ``views._owned_list`` filters ``deleted=False``, so no door reaches this
+    today; the guard is what stops that one filter being the only thing holding
+    the line. A soft delete marks the list *and* its face deleted and leaves both
+    rows in place, so an edit that got through would stamp a tombstone's face as
+    edited and put that stamp on the wire as an update to an object the network
+    was told is gone.
+
+    ``move`` is in the list with the rest although one item cannot move: the
+    guard runs before the direction logic, so the refusal is about the list
+    rather than about the position within it.
+    """
+    film_list = create_list(alice, title="Doomed", films=[dune])
+    soft_delete_list(film_list)
+    with pytest.raises(ValueError):
+        if op == "rename":
+            rename(film_list, "Resurrected")
+        elif op == "set_description":
+            set_description(film_list, "New prose")
+        elif op == "add_films":
+            add_films(film_list, [alien])
+        elif op == "remove_film":
+            remove_film(film_list, dune)
+        else:
+            move(film_list.items.first(), MOVE_UP)
+    film_list.refresh_from_db()
+    assert film_list.title == "Doomed"
+    assert film_list.status.edited_date is None
+    assert ListItem.objects.filter(film_list=film_list).count() == 1
 
 
 @pytest.mark.django_db
