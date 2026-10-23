@@ -471,6 +471,26 @@ def list_note_content(film_list) -> str:
     return "".join(parts)
 
 
+def _require_actor_is_author(status, user) -> None:
+    """Refuse an activity whose envelope actor is not the object's author (F18j).
+
+    The builders take a ``user`` to mint the envelope ``actor`` and the id's
+    outbox path from, while the Note's ``attributedTo`` is minted independently
+    from ``status.user``. Every call site passes the author today, so the two
+    agree -- but nothing *enforced* that they agree. A future caller that passed
+    some other local account would mint a ``Create`` whose actor claims to be
+    someone who did not write the post, signed with this instance's key: a
+    same-origin forge. The check turns that latent surface into a loud error at
+    the call site rather than a document that says one thing in the envelope and
+    another in the object.
+    """
+    if user.pk != status.user_id:
+        raise ValueError(
+            "activity actor must be the object's author: "
+            f"status {status.pk} belongs to {status.user_id}, not {user.pk}"
+        )
+
+
 def create_activity(status, user, request) -> dict:
     """A ``Create`` activity wrapping a status's Note — one outbox item (R41).
 
@@ -487,6 +507,7 @@ def create_activity(status, user, request) -> dict:
     so the two levels cannot disagree and the note's single mention read
     serves both.
     """
+    _require_actor_is_author(status, user)
     note = note_document(status, request)
     return {
         "id": f"{absolute_uri(outbox_path(user.localname))}"
@@ -512,6 +533,7 @@ def update_activity(status, user, request) -> dict:
     the same way the delivery list is, so an edit that changes who is
     mentioned changes who the post is addressed to.
     """
+    _require_actor_is_author(status, user)
     note = note_document(status, request)
     return {
         "id": f"{absolute_uri(outbox_path(user.localname))}"
@@ -539,6 +561,7 @@ def delete_activity(status, user, request) -> dict:
     audience says, and naming a follower collection would imply the removal
     was aimed at those accounts rather than at the world.
     """
+    _require_actor_is_author(status, user)
     return {
         "id": f"{absolute_uri(outbox_path(user.localname))}"
         f"#delete-{note_local_id(status)}",

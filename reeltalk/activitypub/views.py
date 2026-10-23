@@ -145,7 +145,10 @@ def nodeinfo_2_0(request):
         "software": {"name": "reeltalk", "version": __version__},
         "protocols": ["activitypub"],
         # The instance's open-registration policy follows the signup policy.
-        "openRegistration": SiteSettings.get_instance().signup_policy
+        # The key is the NodeInfo 2.0 spelling -- plural -- because a
+        # spec-conformant reader (Mastodon included) looks for
+        # ``openRegistrations`` and reads nothing at all from a singular one.
+        "openRegistrations": SiteSettings.get_instance().signup_policy
         == SiteSettings.OPEN,
         "metadata": {},
     }

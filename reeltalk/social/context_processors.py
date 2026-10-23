@@ -11,7 +11,7 @@ makes the policy visible everywhere so those CTAs can disappear with it.
 Only the boolean is exposed, not the ``SiteSettings`` row: the CTAs need
 one bit, and handing a template the settings object invites it to render
 whatever the view never approved. The value is derived exactly as the
-signup view gates it and as nodeinfo already derives ``openRegistration``,
+signup view gates it and as nodeinfo already derives ``openRegistrations``,
 so the three cannot drift.
 
 The first-run wizard needs no special case here. A fresh instance defaults

@@ -67,6 +67,28 @@ def test_soft_delete_keeps_tombstone_and_clears_content(user, film):
 
 
 @pytest.mark.django_db
+def test_soft_delete_clears_the_rating(user, film):
+    # F18a: a deleted review must not keep republishing its star score.
+    # ``delete_activity`` embeds the whole ``note_document``, which carries
+    # ``rating`` whenever it is set -- so a tombstone that kept the score would
+    # keep the rating live on the wire after the member withdrew the review.
+    # A rating-only entry is the sharp case: clearing its score would trip the
+    # "must carry a rating" save invariant unless a tombstone is exempt, so this
+    # one delete proves both halves at once.
+    status = Status.objects.create(
+        user=user,
+        film=film,
+        status_type=Status.Type.REVIEW_RATING,
+        rating=Decimal("4"),
+    )
+    assert status.rating == Decimal("4")
+    status.delete()
+    status.refresh_from_db()
+    assert status.deleted is True
+    assert status.rating is None
+
+
+@pytest.mark.django_db
 def test_soft_delete_is_idempotent(user, film):
     status = comment(user, film)
     status.delete()

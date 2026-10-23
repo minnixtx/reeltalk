@@ -491,7 +491,18 @@ class Status(models.Model):
 
     def save(self, *args, **kwargs):
         creating = self.pk is None
-        if self.status_type == Status.Type.REVIEW_RATING and not self.rating:
+        if (
+            self.status_type == Status.Type.REVIEW_RATING
+            and not self.rating
+            and not self.deleted
+        ):
+            # The invariant is about a live rating-only entry: it exists to
+            # carry a score, so a scoreless one is a mistake. A soft-deleted
+            # tombstone is exempt, because ``delete()`` deliberately clears the
+            # rating (F18a) and a tombstone is not a live review. The partial
+            # unique constraint right below already scopes itself to
+            # ``deleted=False`` for the same reason: the integrity rule is about
+            # the row a reader can still see, not the identity kept for federation.
             raise ValueError("A rating-only entry must carry a star rating")
         # A typed status must be anchored to a film, with exactly one
         # exemption: a list's post face (L9) is not about one film, so it has
@@ -522,14 +533,32 @@ class Status(models.Model):
 
     def delete(self, *args, **kwargs):
         """Soft-delete (§3.2): keep the row as a tombstone with its identity
-        intact (M4 federation consistency) and clear the user content."""
+        intact (M4 federation consistency) and clear the user content.
+
+        The rating is cleared alongside the text (F18a). ``delete_activity``
+        embeds the whole ``note_document``, and that document carries ``rating``
+        whenever it is set — so a tombstone that kept the score would keep
+        republishing a deleted review's star rating to the whole network, which
+        is exactly the content a delete is meant to withdraw. The identity the
+        tombstone must keep (author, film, origin id) is untouched; only the
+        user-authored content and score go.
+        """
         if self.deleted:
             return
         self.deleted = True
         self.content = ""
         self.raw_content = ""
+        self.rating = None
         self.deleted_date = timezone.now()
-        self.save(update_fields=["deleted", "content", "raw_content", "deleted_date"])
+        self.save(
+            update_fields=[
+                "deleted",
+                "content",
+                "raw_content",
+                "rating",
+                "deleted_date",
+            ]
+        )
 
     @classmethod
     def feed_for(cls, user):

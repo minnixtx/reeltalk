@@ -451,8 +451,10 @@ def test_nodeinfo_2_0_document(client):
     assert doc["protocols"] == ["activitypub"]
     # A fresh instance is invite-only, so nodeinfo reports registration
     # closed. A peer or directory reading this must not see an open door that
-    # the instance's own /signup/ page refuses to open.
-    assert doc["openRegistration"] is False
+    # the instance's own /signup/ page refuses to open. The key is the
+    # NodeInfo 2.0 plural spelling -- a reader that looks for the plural finds
+    # nothing in a singular one, so the spelling is part of the contract.
+    assert doc["openRegistrations"] is False
 
 
 @pytest.mark.django_db
@@ -461,7 +463,7 @@ def test_nodeinfo_open_registration_follows_signup_policy(client):
     # hardcoded to the shipped default.
     open_signup()
     response = client.get("/nodeinfo/2.0")
-    assert response.json()["openRegistration"] is True
+    assert response.json()["openRegistrations"] is True
 
 
 # --- Key backfill (users created before the key fields) -------------------------

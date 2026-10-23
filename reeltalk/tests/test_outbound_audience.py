@@ -242,6 +242,25 @@ def test_delete_activity_is_public_and_carries_no_cc(req, alice, zed, film):
     assert "cc" not in activity
 
 
+def test_an_activity_refuses_an_actor_who_is_not_the_author(req, alice, carol, film):
+    """The envelope actor must be the object's author (F18j).
+
+    The builders mint the actor from a passed ``user`` while the Note's
+    ``attributedTo`` comes from ``status.user`` independently. Every real call
+    site passes the author, so the two agree -- but a caller that passed some
+    other local account would mint a ``Create`` signed with our key whose actor
+    claims to be someone who did not write the post: a same-origin forge. The
+    guard turns that into a loud refusal at the call rather than a document that
+    contradicts itself.
+    """
+    status = _status(alice, film)
+    with pytest.raises(ValueError):
+        create_activity(status, carol, req)
+    # The author still builds cleanly, so the guard refuses the mismatch rather
+    # than the whole path.
+    assert create_activity(status, alice, req)["actor"].endswith("/user/alice/")
+
+
 # --- what stays address-less, on purpose -----------------------------------
 
 
