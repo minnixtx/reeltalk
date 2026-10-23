@@ -149,6 +149,24 @@ That server's login is a superuser, so a migration needing superuser-only DDL
 would still pass there. The role split's own verification block is what polices
 the app role, at boot, on a real server.
 
+### What the role split does not protect: keys at rest
+
+Each local account holds an ActivityPub keypair, and the private half is stored
+in the `social_user.private_key` column as plain text. This is inherent to the
+design, not an oversight: signing an outbound activity needs the key at request
+time, so it cannot be hashed the way a password is. The consequence is worth
+stating plainly: a compromise of the database is a compromise of every local
+account's signing key, and with it the ability to forge activity as that account
+to the rest of the federation.
+
+The role split above narrows what the *application* can reach (its login can no
+longer read other databases or grant itself rights), but it does nothing at rest.
+Anyone who can read the data directory or a raw backup holds those keys no matter
+which role they connect as. Treat the Postgres data volume and every backup as
+secrets: restrict host access to them, and if a backup leaves this machine,
+encrypt it in transit and at rest. There is no in-app switch for this; the
+protection is the operator's, not the code's.
+
 ### Hosts and origins
 
 `ALLOWED_HOSTS` defaults to `[DOMAIN_HOST, "localhost"]` — which means that once

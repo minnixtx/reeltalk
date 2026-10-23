@@ -239,6 +239,29 @@ def import_film_csv(user, rows: list[dict]) -> dict:
     return {"results": results, "summary": summary, "backfill_queued": backfill_queued}
 
 
+# A spreadsheet evaluates a cell as a formula when it begins with one of these
+# (or a tab / carriage return). A member-authored title is the only free-text
+# column in the export, so a film named ``=cmd|...`` would execute the moment
+# someone opened the download in Excel or LibreOffice (F11). The guard prefixes
+# a single quote — the spreadsheet's "treat this as text" marker — only when a
+# cell actually leads with a dangerous character, so every ordinary title stays
+# byte-for-byte what it was and the export keeps re-importing as a no-op.
+FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def guard_formula(value: str) -> str:
+    """Neutralize spreadsheet formula injection in one exported cell (F11).
+
+    Returns ``value`` untouched unless it begins with a formula lead character,
+    in which case it is prefixed with ``'`` so a spreadsheet shows the text
+    literally instead of evaluating it. Deterministic, so a repeated export is
+    still byte-identical.
+    """
+    if value[:1] in FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
+
 def export_film_csv(user) -> str:
     """D10: the user's film list as a canonical TMDB-format CSV.
 
@@ -250,6 +273,10 @@ def export_film_csv(user) -> str:
     carries ratings, not reviews — which is what lets an export re-import as
     a no-op: unrated rows re-shelve onto an already-filled Watchlist, rated
     rows meet the existing-review guard.
+
+    The title is the one member-authored column, so it passes through
+    :func:`guard_formula` to defuse a formula-leading name before it can
+    execute in a spreadsheet on open (F11).
     """
     films = user.all_films()
 
@@ -275,7 +302,7 @@ def export_film_csv(user) -> str:
                 film.tmdb_id or "",
                 film.imdb_id or "",
                 "movie",
-                film.title,
+                guard_formula(film.title),
                 # Only the year is stored: emit it as a Jan 1 date so a
                 # round-trip import can read it back.
                 f"{film.year}-01-01T00:00:00Z" if film.year else "",

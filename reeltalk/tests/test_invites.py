@@ -217,7 +217,10 @@ def test_an_admin_mints_a_link_onto_their_own_profile(client, owner):
     resp = client.post("/invite/create/")
     invite = Invite.objects.get()
     assert invite.created_by == owner
-    assert resp["Location"] == f"/user/{owner.localname}/?invite={invite.code}"
+    # F10: the code travels in the session, never the URL. The redirect is the
+    # bare profile path, so the minted code is in no query string to leak.
+    assert resp["Location"] == f"/user/{owner.localname}/"
+    assert invite.code not in resp["Location"]
     body = client.get(resp["Location"]).content.decode()
     assert PITCH in body
     assert invite.code in body
@@ -379,27 +382,37 @@ def test_the_box_is_hidden_for_anonymous(client, owner):
 
 
 @pytest.mark.django_db
-def test_a_code_renders_only_for_the_member_who_minted_it(client, owner, member):
-    # Scope opened so `can` is not what is doing the work here — this is
-    # the ownership check, which stops the profile from becoming an oracle
-    # that confirms whether a guessed code exists.
+def test_a_minted_code_shows_only_in_the_minters_own_session(client, owner, member):
+    # Scope opened so `can` is not what is doing the work here. The minted code
+    # reaches the profile through the minter's own session and nowhere else:
+    # handing the same code in through the URL renders nothing, so the profile
+    # is not an oracle that confirms whether a guessed code exists (F10).
     site = SiteSettings.get_instance()
     site.invite_scope = SiteSettings.INVITE_ALL
     site.save()
-    invite = Invite.mint(owner)
 
-    client.force_login(member)
-    body = client.get(
-        f"/user/{member.localname}/?invite={invite.code}"
-    ).content.decode()
+    mint = Client()
+    mint.force_login(owner)
+    mint.post("/invite/create/")
+    invite = Invite.objects.get()
+
+    # The minter sees it on their own profile: absolute, and built from the
+    # request's own scheme + host.
+    own = mint.get(f"/user/{owner.localname}/").content.decode()
+    assert "invite-url" in own
+    assert f'value="http://testserver/invite/{invite.code}/"' in own
+
+    # A second visit does not re-show it: the session value is consumed once.
+    again = mint.get(f"/user/{owner.localname}/").content.decode()
+    assert "invite-url" not in again
+
+    # Another member's own session carries no code, and the same code handed in
+    # through the URL renders nothing on their profile.
+    other = Client()
+    other.force_login(member)
+    body = other.get(f"/user/{member.localname}/?invite={invite.code}").content.decode()
     assert "invite-url" not in body
     assert invite.code not in body
-
-    client.force_login(owner)
-    own = client.get(f"/user/owner/?invite={invite.code}").content.decode()
-    assert "invite-url" in own
-    # Absolute, and built from the request's own scheme + host.
-    assert f'value="http://testserver/invite/{invite.code}/"' in own
 
 
 @pytest.mark.django_db

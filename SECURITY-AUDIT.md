@@ -134,6 +134,25 @@ setup.sh.
   disclose the version; `refresh_mirror_profile`'s throttle is LocMemCache,
   so it is per-process.
 
+### F12 resolutions (S6)
+
+- **(a) Private keys at rest.** Documented in DEPLOYING.md under "What the role
+  split does not protect: keys at rest". The role split limits what the app can
+  reach; it does not encrypt anything at rest, so a database or backup
+  compromise is a signing-key compromise. The protection is the operator's
+  (guard the data volume and backups), not the code's.
+- **(b) Version disclosure.** Decision: keep publishing it, in nodeinfo and on
+  `/about`. The reference implementation does the same: a live Mastodon peer
+  measured 2026-10-22 reports `"software": {"name": "mastodon", "version":
+  "4.7.3"}` in its nodeinfo, plainly, and ReelTalk's `/about` already shows the
+  version to any visitor. Suppressing it would be security-by-obscurity that
+  costs an attacker nothing (the source is public under AGPL) while removing the
+  software/version hints peers use for compatibility. No code change.
+- **(c) Per-process throttle.** Fixed. `refresh_mirror_profile`'s throttle moved
+  from LocMemCache to a one-row-per-actor Postgres table
+  (`MirrorProfileAttempt`), so the window is shared across workers and survives
+  a deploy rather than resetting per-process.
+
 ## What held up well
 
 `proxy_trust.py` (the right-to-left XFF walk and the scheme gate), the

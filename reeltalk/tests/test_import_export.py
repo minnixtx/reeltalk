@@ -25,6 +25,7 @@ from reeltalk.core.import_export import (
     TmdbCsvError,
     export_film_csv,
     find_or_create_film_stub,
+    guard_formula,
     import_film_csv,
     import_row,
     parse_release_year,
@@ -395,6 +396,40 @@ def test_export_unrated_film_row_is_byte_exact(user):
     assert lines[0] == ",".join(TMDB_CSV_HEADER)
     # Five empty trailing columns: season, episode, rating, your rating, date.
     assert lines[1] == "42,tt0075344,movie,Test Film,1976-01-01T00:00:00Z,,,,,"
+
+
+@pytest.mark.parametrize(
+    ("raw", "guarded"),
+    [
+        ("=1+1", "'=1+1"),
+        ("+1", "'+1"),
+        ("-2", "'-2"),
+        ("@SUM(A1)", "'@SUM(A1)"),
+        ("\tcmd", "'\tcmd"),
+        ("\rcmd", "'\rcmd"),
+        # An ordinary title is returned byte-for-byte, which is what keeps a
+        # repeated export identical and a re-import a no-op (F11).
+        ("Dune", "Dune"),
+        ("", ""),
+        ("1900", "1900"),
+        # Only the leading character matters: a formula char mid-title is inert.
+        ("A = B", "A = B"),
+    ],
+)
+def test_guard_formula_prefixes_only_a_formula_lead(raw, guarded):
+    assert guard_formula(raw) == guarded
+
+
+@pytest.mark.django_db
+def test_export_neutralizes_a_formula_title(user):
+    # A member can author a film title through the manual create path, so a
+    # title can begin with a formula lead. Left raw it executes on open in a
+    # spreadsheet; the export prefixes it (F11).
+    film = Film.objects.create(title="=cmd|'/C calc'!A0", year=2001, tmdb_id=7)
+    watchlist = shelf_of(user, Shelf.TO_READ)
+    ShelfFilm.objects.create(shelf=watchlist, film=film, user=user)
+    _, rows = _export_rows(user)
+    assert rows[0]["Name"] == "'=cmd|'/C calc'!A0"
 
 
 @pytest.mark.django_db

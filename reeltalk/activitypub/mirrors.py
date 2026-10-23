@@ -15,14 +15,15 @@ carry ``publicKeyPem``.
 
 import logging
 import re
+from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import requests
-from django.core.cache import cache
 from django.core.files.base import ContentFile
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
+from django.utils import timezone
 from PIL import Image
 
 from reeltalk import __version__, public_http
@@ -31,6 +32,7 @@ from reeltalk.moderation.models import blocked_domain_for
 from reeltalk.social.models import User
 
 from .identity import LOCALNAME_RE
+from .models import MirrorProfileAttempt
 
 logger = logging.getLogger(__name__)
 
@@ -261,6 +263,33 @@ def ensure_mirror(actor_url: str) -> User:
     return mirror_user_from_person(doc)
 
 
+def _profile_refresh_throttled(actor_url: str) -> bool:
+    """Whether this actor was refreshed inside the window; else mark it now.
+
+    The attempt is recorded before the caller fetches, so a home instance that
+    errors or never fills the fields still counts against the window and can't
+    be re-dialled on the next page view (the ordering the LocMemCache version
+    had, kept deliberately). One row per actor is updated in place, so the
+    window is shared across every worker and survives a deploy (F12c).
+    """
+    now = timezone.now()
+    row = MirrorProfileAttempt.objects.filter(actor_url=actor_url).first()
+    if row is not None and row.attempted_at > now - timedelta(
+        seconds=PROFILE_REFRESH_THROTTLE
+    ):
+        return True
+    try:
+        with transaction.atomic():
+            MirrorProfileAttempt.objects.update_or_create(
+                actor_url=actor_url, defaults={"attempted_at": now}
+            )
+    except IntegrityError:
+        # A concurrent view won the insert and is doing the fetch; treat this
+        # one as throttled so two page views never dial the same peer at once.
+        return True
+    return False
+
+
 def refresh_mirror_profile(user) -> None:
     """Best-effort fill of a mirror's display name, summary, and avatar (M5).
 
@@ -276,10 +305,8 @@ def refresh_mirror_profile(user) -> None:
         return
     if user.avatar and user.summary:
         return  # nothing to fill — no fetch
-    cache_key = f"mirror-profile-refresh:{user.actor_url}"
-    if cache.get(cache_key) is not None:
+    if _profile_refresh_throttled(user.actor_url):
         return
-    cache.set(cache_key, True, PROFILE_REFRESH_THROTTLE)
     try:
         doc = fetch_person_document(user.actor_url)
     except RemoteFetchError:

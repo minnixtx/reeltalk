@@ -88,3 +88,30 @@ class InboxAttempt(models.Model):
 
     def __str__(self) -> str:
         return self.source_ip
+
+
+class MirrorProfileAttempt(models.Model):
+    """The last time we tried to fill a given remote actor's profile (F12c).
+
+    ``refresh_mirror_profile`` fetches a mirror's home Person document to fill
+    a missing avatar or bio, and must not do it on every page view of a mirror
+    whose home instance never fills those fields. The throttle used to live in
+    LocMemCache, which is per-process and clears on deploy: N web workers could
+    each fetch once per window, and a restart reopened every window at once. A
+    row per actor is shared by every process and survives a deploy, so the
+    window is a real window and not a per-worker suggestion.
+
+    Deliberately **not** the append-only shape of ``InboxAttempt``. That table
+    counts distinct events, so it grows one row per event and leans on a
+    retention prune; here the question is only "did we try this actor recently",
+    so one row per actor is updated in place. An append-only log keyed on actor
+    would grow one row per page view of an un-fillable mirror forever — exactly
+    the unbounded table F7 was raised for. ``actor_url`` is unique for that
+    reason: the row is the throttle, not a record of each attempt.
+    """
+
+    actor_url = models.TextField(unique=True)
+    attempted_at = models.DateTimeField()
+
+    def __str__(self) -> str:
+        return self.actor_url

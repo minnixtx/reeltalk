@@ -37,7 +37,7 @@ from django.http import (
     HttpResponseNotAllowed,
     JsonResponse,
 )
-from django.shortcuts import redirect, render, reverse
+from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
 import reeltalk
@@ -330,6 +330,15 @@ def setup(request):
     return render(request, "social/setup.html", {"form": form})
 
 
+# Session key carrying a freshly minted invite code from the mint to the
+# profile that renders it. A code is a bearer credential for exactly one
+# account, so it travels in the member's own session (HttpOnly, never logged)
+# rather than in a URL, where it would land in browser history, in any Referer
+# the profile leaks, and in every proxy log between the browser and this
+# server (F10).
+INVITE_SESSION_KEY = "invite_just_minted"
+
+
 @require_POST
 @login_required
 def invite_create(request):
@@ -339,12 +348,11 @@ def invite_create(request):
     and a GET that mints would let a link on a page (or a browser prefetch)
     spend the inviter's allowance by accident.
 
-    The new code comes back on the inviter's *own* profile as a query
-    param rather than being rendered here, so the mint follows the same
-    redirect-then-render shape the rest of the POST surfaces use. Rendering
-    it is gated again in ``_invite_context`` on the code belonging to the
-    requester, so a bookmarked or forwarded ``?invite=`` on someone else's
-    profile shows nothing at all.
+    The new code is handed to the inviter's *own* profile through the session
+    rather than the URL, so the mint keeps the same redirect-then-render shape
+    the rest of the POST surfaces use without putting the code in a query
+    string (F10). ``_invite_context`` renders it once and consumes it, gated
+    again on the code belonging to the profile's owner.
     """
     if not SiteSettings.get_instance().may_send_invites(request.user):
         messages.error(
@@ -354,8 +362,8 @@ def invite_create(request):
         )
         return redirect("user-profile", localname=request.user.localname)
     invite = Invite.mint(request.user)
-    profile = reverse("user-profile", kwargs={"localname": request.user.localname})
-    return redirect(f"{profile}?invite={invite.code}")
+    request.session[INVITE_SESSION_KEY] = invite.code
+    return redirect("user-profile", localname=request.user.localname)
 
 
 def invite_accept(request, code):
@@ -675,15 +683,18 @@ def password_reset_confirm(request, code):
 def _invite_context(request, profile_user) -> dict:
     """The invite block for a profile the visitor owns (R82).
 
-    ``invite_link`` is only ever built for a code the requesting user
-    minted themselves. That scoping is not cosmetic: without it this becomes
-    an oracle that renders any code handed to it, and an attacker could use
-    the rendered link to confirm a code they guessed actually exists.
+    The freshly minted code is read from the requester's own session, where
+    ``invite_create`` left it, and consumed here so a later visit does not keep
+    re-showing a spent or expired link. ``invite_link`` is still built only for
+    a code the profile's owner minted: that scoping is not cosmetic, because
+    without it the block could confirm whether an arbitrary code exists. The
+    code is never read from the URL, so a forwarded or guessed ``?invite=``
+    renders nothing on any profile (F10).
     """
     can = SiteSettings.get_instance().may_send_invites(request.user)
     out = {"can_invite": can}
-    code = request.GET.get("invite", "").strip()
-    if not can or not code:
+    code = request.session.pop(INVITE_SESSION_KEY, "") if can else ""
+    if not code:
         return out
     invite = Invite.objects.filter(code=code, created_by=profile_user).first()
     if invite is not None:
