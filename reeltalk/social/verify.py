@@ -237,13 +237,34 @@ def ip_budget_spent(ip: str) -> bool:
     deploy and is shared by every web process — see
     ``EmailVerificationToken.request_ip`` for why that mattered more than the
     simplicity of ``cache.incr``.
+
+    **Every mint counts here, including sends the far end later refused
+    (F18e).** This axis bounds how often one source can make us *attempt* a
+    send — the queue slot and the SMTP connection are spent whether or not the
+    mail lands. Filtering on ``send_error=""`` here left a bypass: a caller
+    cycling addresses at a domain that refuses at RCPT time accrued only
+    failed sends, none of which counted, so the budget never filled. The
+    per-address cooldown keeps ignoring failures — that axis protects a member
+    from waiting out a window for mail that never arrived, and a bounced send
+    must not lock them out of a retry — but the two axes bound different
+    things and must not share the filter.
+
+    **An empty source is not bucketed, on purpose.** ``client_ip`` falls back
+    to ``REMOTE_ADDR``, which the server sets from the TCP peer and a caller
+    cannot force empty, so an empty value here is a misconfiguration or a
+    non-request context, not an attacker choosing to hide. Bucketing those
+    sends together would collapse every real user on a deploy whose source
+    resolution has broken into one throttled source — the same failure the
+    collapse diagnostic in :mod:`reeltalk.proxy_trust` warns about. Declining
+    to count an unattributable source is the safer error, and the per-address
+    axis still applies to it.
     """
     if not ip:
         return False
     since = timezone.now() - timedelta(minutes=RESEND_IP_WINDOW_MINUTES)
     return (
         EmailVerificationToken.objects.filter(
-            request_ip=ip, created_at__gt=since, send_error=""
+            request_ip=ip, created_at__gt=since
         ).count()
         >= RESEND_IP_LIMIT
     )
@@ -381,17 +402,32 @@ def change_email(user, new_email, *, changed_by) -> dict:
         user.save(update_fields=["email"])
         return {"changed": True, "notified": "", "reason": "no-prior-row"}
 
-    old_email = User.objects.filter(pk=user.pk).values_list("email", flat=True).first()
-    old_email = old_email or ""
-    if old_email == new_email:
-        # No write, no supersede, no alert. A form that resubmits an
-        # unchanged address must not produce a tamper notice, or the admin
-        # saving an unrelated field would mail the member a false alarm
-        # about a change that never happened.
-        return {"changed": False, "notified": "", "reason": "unchanged"}
-
     now = timezone.now()
     with transaction.atomic():
+        # The prior address is read here, under the account's row lock (F18k).
+        # Reading it above the transaction made this a check-then-write with
+        # nothing between the read and the write: two concurrent admin
+        # address-writes both read the same old value, both write, and both
+        # fire a tamper notice for a value only one of them actually replaced.
+        # The lock serialises them the same way ``Invite.lock_live`` and the
+        # token ``consume`` do — the second writer waits, then reads the value
+        # the first committed, so it either sees no change or notifies the
+        # address that is genuinely being replaced. The lock is on the same row
+        # the write below touches, so it is the row that has to be locked.
+        old_email = (
+            User.objects.select_for_update()
+            .filter(pk=user.pk)
+            .values_list("email", flat=True)
+            .first()
+            or ""
+        )
+        if old_email == new_email:
+            # No write, no supersede, no alert. A form that resubmits an
+            # unchanged address must not produce a tamper notice, or the admin
+            # saving an unrelated field would mail the member a false alarm
+            # about a change that never happened.
+            return {"changed": False, "notified": "", "reason": "unchanged"}
+
         user.email = new_email
         user.save(update_fields=["email"])
         closed = (

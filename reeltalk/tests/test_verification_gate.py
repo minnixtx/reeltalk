@@ -555,6 +555,25 @@ def test_a_different_source_is_not_blocked_by_another_ones_budget(db):
 
 
 @pytest.mark.django_db
+def test_the_ip_axis_counts_sends_the_far_end_refused(db):
+    # F18e: a caller cycling addresses at a domain that rejects at RCPT time
+    # accrues only failed sends. If the budget skipped them, that caller could
+    # mint without limit -- every send it makes is one the far end refused.
+    # Each token here is marked failed the way the worker marks a real refusal,
+    # so the budget is being asked about a window of nothing but failures.
+    for i in range(RESEND_IP_LIMIT):
+        local = f"refuser{i}"
+        email = f"{local}@reject.example.test"
+        unverified_member(localname=local, email=email)
+        request_resend(email, "10.61.1.1")
+        token = EmailVerificationToken.objects.get(email=email)
+        token.send_error = f"550 5.1.1 <{email}>: Recipient address rejected"
+        token.save(update_fields=["send_error"])
+
+    assert ip_budget_spent("10.61.1.1") is True
+
+
+@pytest.mark.django_db
 def test_an_unknown_ip_is_not_a_free_pass(db):
     # An empty source must not silently skip the axis by being uncountable in
     # the wrong direction: with no source recorded, nothing accumulates, so
@@ -609,6 +628,52 @@ def test_a_concurrent_resend_waits_and_then_sees_the_firsts_token(db):
     assert outcome["result"]["reason"] == "address-cooldown"
     minted = EmailVerificationToken.objects.filter(email="victim@example.test")
     assert minted.count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_concurrent_address_write_notifies_the_committed_address(db):
+    # F18k: change_email read the prior address above its transaction, so two
+    # concurrent admin writes both saw the same old value and both fired a
+    # tamper notice for a value only one of them actually replaced. The fix
+    # reads the prior address inside the transaction under the row lock, so
+    # the second writer waits and then notifies the address the first one
+    # committed.
+    #
+    # The main thread stands in for the first write: it takes the account's row
+    # lock and moves the address to "moved@..." while holding it, exactly the
+    # window a real first write occupies between its read and its commit. The
+    # worker is the second write, moving to "second@...". Unfixed, it reads the
+    # stale "first@..." before the first write commits and notifies that; the
+    # load-bearing assertion below is that it instead notifies "moved@..." --
+    # the value it could only see by waiting for the lock and re-reading.
+    admin = site_admin(localname="root", password=PASSWORD)
+    victim = unverified_member(localname="target", email="first@example.test")
+    started = threading.Event()
+    outcome = {}
+
+    def second_write():
+        started.set()
+        fresh = User.objects.get(pk=victim.pk)
+        outcome["result"] = change_email(fresh, "second@example.test", changed_by=admin)
+        connections.close_all()
+
+    with transaction.atomic():
+        User.objects.select_for_update().filter(pk=victim.pk).first()
+        User.objects.filter(pk=victim.pk).update(email="moved@example.test")
+        worker = threading.Thread(target=second_write)
+        worker.start()
+        assert started.wait(5)
+        worker.join(timeout=1.0)
+        blocked = worker.is_alive()
+    # Leaving the atomic commits the first write and releases the lock at once.
+    worker.join(timeout=10)
+
+    assert blocked, "the second write did not wait on the account row lock"
+    assert not worker.is_alive(), "the second write never completed"
+    assert outcome["result"]["changed"] is True
+    assert outcome["result"]["notified"] == "moved@example.test"
+    victim.refresh_from_db()
+    assert victim.email == "second@example.test"
 
 
 # --- the response never reveals whether the address exists ------------
