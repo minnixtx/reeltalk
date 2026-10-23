@@ -87,12 +87,16 @@ disagrees with this block, this block is current and the other is history.**
   misconfiguration and bucketing it would collapse a broken deploy's entire user
   base onto one throttled source. That early return stays, now with its reasoning
   on the record.
-  **Verified: targeted suites green per group, FULL GATE NOT RE-RUN.** 74 passed
-  (admin group), 128 then 40 (verify group), 276 (core + activitypub group), 271
-  (six lists suites), 145 (four mention suites plus inbound federation); ruff
-  check and format clean on every touched file. The last green full gate is S6's
-  (2619 passed, 5 skipped); the ~36-minute gate runs on the owner's signal, not
-  on this agent's. Ten commits, local only, not pushed.
+  **Verified: FULL GATE GREEN 2026-10-23 - 2654 passed, 5 skipped in 37:28, all
+  four markers `0`** (ruff check, ruff format, `makemigrations --check`, pytest).
+  The count is S6's 2619 plus the 35 items S7's new tests added. Targeted suites
+  were green per group before that - 74 (admin group), 128 then 40 (verify
+  group), 276 (core + activitypub group), 271 (six lists suites), 145 (four
+  mention suites plus inbound federation) - and ruff check and format were clean
+  on every touched file at each group. The gate ran against a rebuilt image, which
+  matters here because the doc edits land in the baked tree that
+  `test_clean_room.py` scans. Ten fix commits plus this record, committed locally
+  and pushed to `origin/main`.
 
 - **THE AUDIT'S LEFTOVER CLEANUP LANDED AND THE FIRST PASS'S BLIND SPOTS GOT
   AUDITED (2026-10-22, security increment S6, closes F10 + F11 + F12 and adds
