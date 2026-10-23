@@ -1,8 +1,12 @@
 # Security audit (2026-10-20)
 
 Read-only audit of the federation, auth, moderation, and deploy surfaces.
-Nothing here has been fixed yet; each finding lists a suggested fix. Line
-numbers are as of the audit date.
+Every finding F1-F18 is now fixed: F1-F12 landed in increments S1-S6 and F13-F18
+in S7, so this file is the record of what was found rather than a to-do list.
+Each finding still lists its suggested fix, which is not always the fix that
+landed - PROGRESS.md's `## NOW` block is authoritative on what was actually
+done, and on the three places where measurement overrode the suggestion here.
+Line numbers are as of the audit date and were not maintained as the code moved.
 
 ## High
 

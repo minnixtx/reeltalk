@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 ---
 
@@ -8,6 +8,91 @@
 
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
+
+- **EVERY FINDING FROM BOTH AUDIT PASSES IS NOW FIXED (2026-10-23, security
+  increment S7, closes F13 + F14 + F15 + F16 + F17 + F18).** All six second-pass
+  findings landed, in ten commits - one per finding or per module group.
+  **F13 (High), the escalation:** the user admin was a plain `ModelAdmin` that
+  re-implemented none of stock Django's role guards, so any staff account granted
+  change-on-users - the support flow the admin exists to serve - could tick
+  `is_superuser` on its own row, or overwrite the real admin's password.
+  `_may_touch` is now the single answer to "does this staff user hold this row",
+  and all four of `has_change_permission`/`has_view_permission`/
+  `has_delete_permission`/`delete_model` go through it. The four role fields are
+  read-only for a non-superuser and `user_permissions` is excluded from every
+  fieldset, which is not decoration: Django does not write back what a change
+  form omitted, so a hand-crafted POST that leaves out a read-only field writes
+  that field's model default - the edit that silently demotes the site admin and
+  deactivates the account it is editing. So `save_model` re-fetches the persisted
+  row and restores the protected columns, and `log_action` records only fields
+  the form actually held, so the audit trail stops blaming a staff user for a
+  demotion the form could not perform. `get_deleted_objects` refuses rather than
+  raising `ProtectedError` as a 500. **F14:** `broadcast_delete` now delivers to
+  `_status_targets(status)`, the same helper `broadcast_list_delete` already
+  used, so a deleted review's tombstone reaches the remote users the post
+  mentioned instead of only the author's followers. **F15:** the password field
+  is read-only unless the viewer could set a password anyway, so the full hash
+  (argon2 params and all) no longer renders to view-only staff. **F16:** the
+  parser's fenced-code regex was super-linear against an unbounded `raw_content`;
+  see the measurement below, because the fix is not where the finding pointed.
+  **F17:** `EmailVerificationToken.lock_live` (SELECT ... FOR UPDATE inside
+  `atomic`, the same shape `Invite.lock_live` already used) closes the
+  check-then-mint window, so concurrent resends can no longer burn the 5-per-
+  address budget twice and leave a member with a dead token. **F18, the minor
+  bucket, all eleven items:** (a) `Status.delete()` now clears `rating` too, so a
+  tombstone stops republishing a deleted review's star score inside
+  `delete_activity`'s embedded `note_document`, and the rating-only save
+  invariant is scoped to live rows so the delete is not blocked by the value it
+  just cleared; (b) the admin refuses to delete the instance representative -
+  the site-admin half was already closed by F13's `_may_touch`, and the rep holds
+  *no* role, so a role-only test misses it; (c) `send_verification_now` calls
+  `_may_send_verification` instead of checking only `obj.email`, so a crafted
+  POST can no longer mint a token against a remote mirror or an already-verified
+  account and supersede the token the member holds; (d) `code` is out of
+  `InviteAdmin.search_fields`, which had handed any staff user an `icontains`
+  oracle over the credential the changelist deliberately truncates (search is
+  now by `created_by`/`used_by` localname); (e) the per-source resend budget
+  counts every attempt rather than only `send_error=""`, so cycling addresses at
+  a domain that refuses at RCPT time no longer accrues nothing, while the
+  per-address cooldown keeps ignoring failures so a member never waits on mail
+  that never left; (f) nodeinfo publishes the plural `openRegistrations`, the key
+  a spec-conformant reader actually looks for; (g) `_require_live` asserts the
+  live half of `_owned_list`'s filter inside the lists mutators, so editing a
+  soft-deleted list raises instead of stamping a tombstone's face as edited and
+  broadcasting it - `soft_delete_list` deliberately keeps no guard, because
+  taking a list down twice is the same outcome as once; (h) the add-film route
+  refuses a film on the member's own block list, which makes the block list a
+  rule rather than a display filter the route behind the search box could step
+  around (one local-id check covers both arms, since `create_or_match_film`
+  returns the row already carrying a `tmdb_id` and that field is unique);
+  (i) `MENTION_LIMIT = 20` caps what one inbound activity may resolve, so a
+  signed Note can no longer mint a notification per tag entry up to the
+  megabyte-scale body cap - Mastodon's extractor caps at the same 20; (j)
+  `create_activity`/`update_activity`/`delete_activity` refuse a caller whose
+  actor is not the object's author, closing the latent same-origin forge where
+  the envelope `actor` and the Note's `attributedTo` were derived
+  independently; (k) `change_email` reads the prior address inside its
+  transaction under the account's row lock, so two concurrent admin writes can
+  no longer both mail a tamper notice for an address only one of them replaced.
+  **Three places the finding's premise did not survive measurement, and the
+  measurement won.** F16 implied the `.*?` rescan was the ReDoS; profiling showed
+  the `` `{3,} `` opener was the super-linear half (every shorter backtick run
+  retried against an unclosed fence), so the opener is now possessive - 32k
+  backticks went from ~3.9s to under 1ms - and `_CODE_SPAN_RE` was left alone
+  because it is not independently super-linear and making it possessive only
+  slows the common case. F18(b) implied a live site-admin hole; F13 had already
+  closed it, and the gap that remained was the instance representative. F18(e)
+  implied the empty-IP early return was a hole; `client_ip()` falls back to
+  `REMOTE_ADDR`, which a caller cannot force empty, so an empty address is a
+  misconfiguration and bucketing it would collapse a broken deploy's entire user
+  base onto one throttled source. That early return stays, now with its reasoning
+  on the record.
+  **Verified: targeted suites green per group, FULL GATE NOT RE-RUN.** 74 passed
+  (admin group), 128 then 40 (verify group), 276 (core + activitypub group), 271
+  (six lists suites), 145 (four mention suites plus inbound federation); ruff
+  check and format clean on every touched file. The last green full gate is S6's
+  (2619 passed, 5 skipped); the ~36-minute gate runs on the owner's signal, not
+  on this agent's. Ten commits, local only, not pushed.
 
 - **THE AUDIT'S LEFTOVER CLEANUP LANDED AND THE FIRST PASS'S BLIND SPOTS GOT
   AUDITED (2026-10-22, security increment S6, closes F10 + F11 + F12 and adds
