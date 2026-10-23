@@ -1,18 +1,20 @@
 # Security audit handoff
 
-> Status: **S6 is landed on two commits (Half 1 the fixes, Half 2 this record),
-> targeted-green but NOT yet full-gate.** Half 1 closed **F10** (invite code now
-> rides the minter's session, never the query string), **F11** (CSV export
-> formula guard on the title cell), and **F12** (a: DEPLOYING.md at-rest key note;
-> b: version-disclosure decision recorded - keep publishing; c: the mirror
-> profile throttle moved off LocMemCache to a `MirrorProfileAttempt` table,
-> migration `0003`). Half 2 audited the surfaces the first pass missed and
-> appended **F13-F18** to `SECURITY-AUDIT.md`.
+> Status: **S6 is landed on two commits (Half 1 the fixes, Half 2 this record)
+> and FULL-GATE GREEN: 2619 passed, 5 skipped (all four markers `0`, 36:36).**
+> Half 1 closed **F10** (invite code now rides the minter's session, never the
+> query string), **F11** (CSV export formula guard on the title cell), and
+> **F12** (a: DEPLOYING.md at-rest key note; b: version-disclosure decision
+> recorded - keep publishing; c: the mirror profile throttle moved off
+> LocMemCache to a `MirrorProfileAttempt` table, migration `0003`). Half 2
+> audited the surfaces the first pass missed and appended **F13-F18** to
+> `SECURITY-AUDIT.md`.
 >
-> Targeted runs: **106 passed** across `test_invites`, `test_import_export`,
-> `test_mirror_profile_throttle`; `makemigrations --check` clean; ruff clean on
-> the six checked files. **The full gate (~36 min) has not been run since S4 part
-> 2 and needs the owner's explicit signal.**
+> The first gate run caught one real defect in Half 1 - the F10 edit left
+> `reverse` imported but unused in `social/views.py` (ruff F401), which the
+> targeted pass had skipped because it did not name that file. It was removed and
+> folded into the Half 1 commit, and the gate was re-run green. The two commits
+> are local, **not yet pushed**.
 >
 > The next increment is **S7: fix F13-F18** (see `security-plan.md` and the
 > second-pass section of `SECURITY-AUDIT.md`). No open design questions block it.

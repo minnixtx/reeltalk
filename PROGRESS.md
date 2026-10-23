@@ -55,13 +55,16 @@ disagrees with this block, this block is current and the other is history.**
   block; uncapped remote mentions; the activity-builder actor/author split;
   `change_email` reads the old address outside its transaction). **These are
   recorded, not fixed - fixing F13-F18 is the next increment (S7).**
-  **Verified:** targeted pytest green on a rebuilt image, **106 passed** across
-  the three touched suites (`test_invites`, `test_import_export`,
-  `test_mirror_profile_throttle`); `makemigrations --check` clean (the
-  hand-written `0003` matches Django's output); `ruff check` and `format --check`
-  clean on the six ruff-checked files (the migration is excluded by
-  `extend-exclude`). **The full gate was not run** - it is the owner's signal to
-  give. Two commits: Half 1 (the fixes) and Half 2 (this record).
+  **Verified: FULL GATE GREEN 2026-10-23 - 2619 passed, 5 skipped in 36:36, all
+  four markers `0`** (ruff check, ruff format, `makemigrations --check`, pytest).
+  The count is S5's 2600 plus S6's new items: 6 from
+  `test_mirror_profile_throttle.py`, 11 from `test_import_export.py`, net-flat
+  `test_invites.py`, and 2 clean-room items for the two new files. The first gate
+  run caught one real defect in Half 1 - the F10 edit left `reverse` imported but
+  unused in `social/views.py` (ruff F401), which my targeted pass had skipped
+  because it did not name that file; removed it and folded the fix into the Half 1
+  commit. Two commits: Half 1 (the fixes) and Half 2 (this record), committed
+  locally, not yet pushed.
 
 - **THE INBOX NOW BOUNDS ITS OWN BODY, ITS OWN ABUSERS, AND ITS OWN GROWTH
   (2026-10-22, security increment S5, closes F7 + F8).** Four pieces, each
