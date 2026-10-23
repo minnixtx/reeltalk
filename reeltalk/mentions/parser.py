@@ -80,6 +80,21 @@ _CODE_SPAN_RE = re.compile(r"`+.+?`+", re.DOTALL)
 # an <a> nested inside an <a>.
 _LINK_RE = re.compile(r"!?\[[^\]]*\]\([^)]*\)")
 
+# How many mentions one inbound activity may resolve (F18 i). A ``tag`` array is
+# whatever a peer says it is, and the only bound on its length upstream is the
+# inbox body cap -- which is megabytes, so a thousand-entry array of resolvable
+# actor URLs is a thousand notification rows minted by one signed request. The
+# typed path needs no such number because the member is addressing people they
+# can see; this path answers to a stranger.
+#
+# 20 is Mastodon's number for the same job, its inbox extractor's
+# ``ActivityPub::MentionsExtractor::MAX_MENTIONS``, so a peer that packs a Note
+# past the cap is truncated the same way by both implementations rather than
+# finding one of them more generous. A real post that genuinely addresses more
+# than twenty members is rare enough that losing the tail is the right trade
+# against a control that can be pressed for free by anyone with a signing key.
+MENTION_LIMIT = 20
+
 
 def _blanked(match: "re.Match[str]") -> str:
     """Replace a matched span with same-length filler.
@@ -199,9 +214,16 @@ def mentions_from_tags(tag_value, request):
     resolver, one answer. It never fetches (M-b), so an unknown href is
     dropped rather than chased and nothing a stranger posted can put an
     external round-trip into our request path.
+
+    At most ``MENTION_LIMIT`` mentions come back, which the typed path has no
+    need of: a member addressing thirty people in their own post is one
+    member's decision, while a ``tag`` array is unbounded input from a stranger
+    and every entry it resolves is a notification row in somebody's inbox.
     """
     found = []
     for entry in _as_list(tag_value):
+        if len(found) >= MENTION_LIMIT:
+            break
         if not isinstance(entry, dict):
             continue
         if not _is_mention(entry.get("type")):

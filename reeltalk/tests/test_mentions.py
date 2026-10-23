@@ -23,7 +23,11 @@ from django.test import RequestFactory
 
 from reeltalk.core.models import Film, Status
 from reeltalk.mentions.models import StatusMention
-from reeltalk.mentions.parser import mentions_from_tags, mentions_from_text
+from reeltalk.mentions.parser import (
+    MENTION_LIMIT,
+    mentions_from_tags,
+    mentions_from_text,
+)
 
 User = get_user_model()
 
@@ -373,6 +377,35 @@ def test_non_mention_tag_types_are_skipped(mirror):
     assert mentions_from_tags(
         {"type": "Mention", "href": mirror.actor_url}, _request()
     ) == [mirror]
+
+
+def test_a_packed_tag_array_is_capped_at_the_limit(db):
+    """One activity cannot mint more than ``MENTION_LIMIT`` notifications.
+
+    A ``tag`` array is whatever the sending peer says it is, and the only bound
+    upstream is the inbox body cap -- measured in megabytes, so an array of
+    resolvable actor URLs long enough to matter is well within what a stranger
+    can sign and post. The cap is what turns "one request, N notifications" into
+    "one request, at most 20".
+
+    The control is the same array one entry shorter: without it the count below
+    would read just as well on a resolver that had stopped working entirely.
+    """
+    names = [f"packed{i}" for i in range(MENTION_LIMIT + 5)]
+    for name in names:
+        User.objects.create_user(localname=name, password="s3cretpass")
+    tags = [
+        {"type": "Mention", "href": f"https://{HOST}/user/{name}/"} for name in names
+    ]
+
+    resolved = mentions_from_tags(tags, _request())
+    assert len(resolved) == MENTION_LIMIT
+    # The head of the array wins, so the truncation is predictable rather than
+    # whichever resolutions happened to land first.
+    assert [user.localname for user in resolved] == names[:MENTION_LIMIT]
+
+    under = tags[: MENTION_LIMIT - 1]
+    assert len(mentions_from_tags(under, _request())) == MENTION_LIMIT - 1
 
 
 def test_missing_or_empty_tag_shapes_yield_nothing():
