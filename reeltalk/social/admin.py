@@ -68,6 +68,7 @@ GREEN = "#237a4b"
 # admin exists to serve — reset a member's password, correct an address — never
 # needs to touch them.
 ROLE_FIELDS = ("is_staff", "is_superuser", "is_moderator")
+PASSWORD_FIELDS = ("password_hash",)
 
 
 def redirect_to_user_change(obj):
@@ -75,21 +76,21 @@ def redirect_to_user_change(obj):
     return redirect(reverse("admin:social_user_change", args=[obj.pk]))
 
 
-def _without_role_fields(fieldsets):
-    """Drop every role column from a change-form fieldset structure.
+def _without_fields(fieldsets, drop):
+    """Drop the named fields from a change-form fieldset structure.
 
-    Used for a non-superuser requester (F13). Removing a field from the
-    fieldset removes it from the form — Django builds the change form from
-    ``flatten_fieldsets(get_fieldsets(...))`` — so a hand-crafted POST that
-    still carries ``is_superuser=on`` is ignored by the form rather than
-    merely hidden by the template. Hiding is presentation; this is the write
-    path, and it is the write path that has to refuse.
+    Removing a field from the fieldset removes it from the form — Django
+    builds the change form from ``flatten_fieldsets(get_fieldsets(...))`` —
+    so a hand-crafted POST that still carries one of them is ignored by the
+    form rather than merely hidden by the template. Hiding is presentation;
+    this is the write path, and it is the write path that has to refuse. Used
+    for the role columns (F13) and the password hash (F15).
     """
     stripped = []
     for name, opts in fieldsets:
         opts = dict(opts)
         opts["fields"] = tuple(
-            field for field in opts.get("fields", ()) if field not in ROLE_FIELDS
+            field for field in opts.get("fields", ()) if field not in drop
         )
         stripped.append((name, opts))
     return stripped
@@ -215,11 +216,13 @@ class UserAdmin(admin.ModelAdmin):
             {
                 "fields": (
                     "localname",
-                    # The hash stays visible because it is the read the
-                    # previous page had — "is a password set, and which
-                    # one" — and removing it would take something away that
-                    # nobody asked to lose. It is not the write path, and
-                    # it cannot be: it is a display method, not a field.
+                    # The hash is the read the previous page had — "is a
+                    # password set, and which one" — kept for the account that
+                    # can already set one. get_fieldsets drops it for a
+                    # requester without social.change_user (F15), so the
+                    # premise holds instead of merely being asserted. It is a
+                    # display method, not a field, so it can never be a write
+                    # path regardless of who sees it.
                     "password_hash",
                     "password1",
                     "password2",
@@ -305,10 +308,10 @@ class UserAdmin(admin.ModelAdmin):
         if obj is None:
             return self.add_fieldsets
         fieldsets = super().get_fieldsets(request, obj)
-        # Strip only for a positively-known non-superuser requester. A request
-        # with no user (a direct get_fieldsets probe, not a real admin view)
-        # gets the full structure; the security boundary is the permission
-        # methods below, which always run with a real request.user.
+        # Strip only for a positively-known requester. A request with no user
+        # (a direct get_fieldsets probe, not a real admin view) gets the full
+        # structure; the security boundary is the permission methods below,
+        # which always run with a real request.user.
         user = getattr(request, "user", None)
         if user is None or user.is_superuser:
             return fieldsets
@@ -316,7 +319,17 @@ class UserAdmin(admin.ModelAdmin):
         # a role they do not hold, and the field being absent from the form is
         # what turns a hand-crafted POST that carries one into a no-op: the
         # field is not bound, not validated, and not saved.
-        return _without_role_fields(fieldsets)
+        fieldsets = _without_fields(fieldsets, ROLE_FIELDS)
+        # The full hash is a crackable secret, so it is shown only to someone
+        # who can already write a password (F15). Since Django 2.1 the
+        # view_user permission alone opens the change page read-only, where a
+        # display method renders -- so the old "whoever reaches this page can
+        # set a password anyway" premise was false for a view-only helper.
+        # Tying the read to social.change_user makes that premise true again:
+        # the viewer can now actually set the password the hash stands for.
+        if not user.has_perm("social.change_user"):
+            fieldsets = _without_fields(fieldsets, PASSWORD_FIELDS)
+        return fieldsets
 
     def _may_touch(self, request, obj) -> bool:
         """Whether this requester may change or delete ``obj`` at all (F13).
@@ -711,10 +724,14 @@ class UserAdmin(admin.ModelAdmin):
         tampered with and no way for this row to put anything into the
         column.
 
-        Shown whole rather than truncated. It is already one-way, and an
-        admin who can reach this page can already set a new password
-        through the writer above, so nothing is disclosed here that the
-        page does not already grant the power to do.
+        Shown whole rather than truncated, and shown only to an account that
+        can already write a password: ``get_fieldsets`` drops this field for a
+        requester without ``social.change_user`` (F15). That gate is what makes
+        the old justification true instead of merely asserted -- "an admin who
+        can reach this page can already set a new password" was false for a
+        view-only helper, since Django 2.1 lets ``view_user`` alone open this
+        page read-only. With the read tied to the write permission, nothing is
+        disclosed here that the viewer cannot already do.
         """
         if not obj.pk or not obj.password:
             return format_html(
