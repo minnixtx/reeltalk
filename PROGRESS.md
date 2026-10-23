@@ -9,6 +9,60 @@
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
 
+- **THE AUDIT'S LEFTOVER CLEANUP LANDED AND THE FIRST PASS'S BLIND SPOTS GOT
+  AUDITED (2026-10-22, security increment S6, closes F10 + F11 + F12 and adds
+  F13-F18).** Two halves. **Half 1, the fixes.** **F10:** a freshly minted
+  invite code no longer rides a query string to the profile, where it would
+  settle into browser history, any `Referer` the profile leaks, and every proxy
+  log in between; it travels in the minter's own session (`INVITE_SESSION_KEY`)
+  and is consumed on the one render that shows it. The profile never reads
+  `?invite=` now, so a forwarded or guessed code renders nothing - the profile
+  stopped being an oracle for whether an arbitrary code exists. **F11:** the CSV
+  export's one member-authored column (the title) runs through `guard_formula`,
+  which prefixes a leading `=`, `+`, `-`, `@`, tab or CR with `'` so a
+  spreadsheet shows it as text instead of evaluating it on open; ordinary titles
+  are untouched, so a repeated export stays byte-identical and re-imports as a
+  no-op - the guard fires on the payload, not on every cell. **F12:** (a)
+  DEPLOYING.md now says plainly that private signing keys sit in
+  `social_user.private_key` unencrypted, so a DB or backup compromise is a key
+  compromise and the role split does nothing at rest; (b) the version-disclosure
+  decision is recorded - keep publishing it, matching the live reference peer,
+  which reported `mastodon 4.7.3` in its nodeinfo and shows the version on
+  `/about` too, so hiding it is obscurity that costs an attacker nothing; (c)
+  `refresh_mirror_profile`'s throttle moved off LocMemCache (per-process, cleared
+  on deploy) to a new `MirrorProfileAttempt` table (migration `0003`), one row
+  per actor upserted - deliberately not the append-only shape of `InboxAttempt`,
+  because an append-only log keyed on actor would re-arm the unbounded-growth
+  finding F7 just closed. **Half 2, finish the audit.** The surfaces the first
+  pass left unaudited - `social/admin.py`, `lists/models.py` + `services.py`,
+  `mentions/parser.py`, the notifications views, `collections.py`, `objects.py`,
+  `broadcast.py`, `verify.py` - are now covered, findings appended as F13+ in
+  SECURITY-AUDIT.md. The headline is **F13 (High): the user admin is a plain
+  `ModelAdmin` that re-implements none of stock Django's role guards, so any
+  staff account granted change-on-users - the support flow the admin exists to
+  serve - can tick `is_superuser` on its own row and become a superuser, or
+  overwrite the real admin's password.** Then F14-F17 (Medium): a status `Delete`
+  never reaches the remotes the post mentioned (the file's own comment admits the
+  list path was fixed and the status path left behind); the full password hash
+  renders to view-only staff; the mention parser backtracks super-linearly on
+  crafted markdown against an unbounded `raw_content`; the verification-resend
+  throttles are check-then-mint with no lock, so concurrency defeats them. F18 is
+  a minor bucket (soft-delete tombstone still publishes the rating; admin delete
+  bypasses the moderation immunity; the admin send button's POST guard is weaker
+  than its display guard; `InviteAdmin.search_fields` leaks a code oracle;
+  resend-throttle edge cases; the NodeInfo `openRegistration` singular/plural
+  deviation; lists-service defense-in-depth; add-film bypasses the per-user
+  block; uncapped remote mentions; the activity-builder actor/author split;
+  `change_email` reads the old address outside its transaction). **These are
+  recorded, not fixed - fixing F13-F18 is the next increment (S7).**
+  **Verified:** targeted pytest green on a rebuilt image, **106 passed** across
+  the three touched suites (`test_invites`, `test_import_export`,
+  `test_mirror_profile_throttle`); `makemigrations --check` clean (the
+  hand-written `0003` matches Django's output); `ruff check` and `format --check`
+  clean on the six ruff-checked files (the migration is excluded by
+  `extend-exclude`). **The full gate was not run** - it is the owner's signal to
+  give. Two commits: Half 1 (the fixes) and Half 2 (this record).
+
 - **THE INBOX NOW BOUNDS ITS OWN BODY, ITS OWN ABUSERS, AND ITS OWN GROWTH
   (2026-10-22, security increment S5, closes F7 + F8).** Four pieces, each
   placed in front of the cost it bounds. **F7 body bound:**

@@ -1,147 +1,91 @@
 # Security audit handoff
 
-> Status: **S5 is landed, pushed, and FULL-GATE GREEN: 2600 passed, 5 skipped**
-> (all four markers `0`, 35:40). F7 (inbox body bound + per-source floor +
-> retention prune) and F8 (signatures must cover the body) are in the tree, on
-> the live instance, and verified against a real Mastodon peer. **Nothing is
-> outstanding on S5.**
+> Status: **S6 is landed on two commits (Half 1 the fixes, Half 2 this record),
+> targeted-green but NOT yet full-gate.** Half 1 closed **F10** (invite code now
+> rides the minter's session, never the query string), **F11** (CSV export
+> formula guard on the title cell), and **F12** (a: DEPLOYING.md at-rest key note;
+> b: version-disclosure decision recorded - keep publishing; c: the mirror
+> profile throttle moved off LocMemCache to a `MirrorProfileAttempt` table,
+> migration `0003`). Half 2 audited the surfaces the first pass missed and
+> appended **F13-F18** to `SECURITY-AUDIT.md`.
 >
-> The next increment is **S6: F10-F12 plus the surfaces the first pass did not
-> audit**. No open design questions block it. The `## NOW` block in
-> `PROGRESS.md` is the current source of truth; everything below is the handoff
-> as written at S5's close.
+> Targeted runs: **106 passed** across `test_invites`, `test_import_export`,
+> `test_mirror_profile_throttle`; `makemigrations --check` clean; ruff clean on
+> the six checked files. **The full gate (~36 min) has not been run since S4 part
+> 2 and needs the owner's explicit signal.**
+>
+> The next increment is **S7: fix F13-F18** (see `security-plan.md` and the
+> second-pass section of `SECURITY-AUDIT.md`). No open design questions block it.
+> The `## NOW` block in `PROGRESS.md` is the current source of truth; everything
+> below is the handoff as written at S6's close.
 
 Point the next session at this file. Everything needed is in the repo; no
 production access is required to start.
 
-## State (as of the S5 close, 2026-10-22)
+## State (as of the S6 close, 2026-10-22)
 
 - Closed so far: S1 (F4, F5), S2 (F1), S3 (F2, F3 + the Tombstone gap), S4 part 1
-  (F6), S4 part 2 (the DB role split), **S5 (F7, F8)**. Open: **S6** (F10-F12 +
-  the unaudited surfaces).
-- **The full gate has not been run since S4 part 2.** S5 landed on targeted runs:
-  104 green in the three inbox/signature suites, then **684 passed, 5 skipped**
-  across twelve neighbouring suites (federation inbound/integrity/interactions/
-  sanitize, lists inbound, flag+domain-block, AP follow, suspension read sites,
-  proxy trust, credential throttle, clean room). **Predicted next full gate:
-  2600 passed, 5 skipped** (2574 + the 20 items `test_inbox_hardening.py`
-  collects + 6 clean-room items for the six new files). Count collected items,
-  never `def test` lines.
-- **The live federation check F8 needed is DONE (owner drove it 2026-10-22).**
-  Both app roles were recreated onto the S5 image with `0002` applied, then a
-  favourite from `minnix@upallnight.minnix.dev` on a ReelTalk review arrived: a
-  new `activitypub_deliveredactivity` row (`.../users/minnix#likes/1386`) and a
-  real `core_like` on the post, with `activitypub_inboxattempt` **still at zero
-  rows**. So the reference peer's signed `digest` satisfies the new requirement,
-  and honest traffic spent no throttle budget. **What it did not prove:** that an
-  uncovered body is refused (mock-only), and the 429 floor and 413 bound, which
-  no honest test produces.
+  (F6), S4 part 2 (the DB role split), S5 (F7, F8), **S6 (F10, F11, F12 + the
+  second-pass audit)**. Open: **S7** (fix F13-F18).
+- **The full gate has not been run since S4 part 2.** S6 landed on targeted runs
+  only (106 green across the three touched suites). The next full gate should
+  re-count from the S5 baseline of 2600 passed, 5 skipped and add S6's new items:
+  `test_mirror_profile_throttle.py` collects 6, `test_import_export.py` grew by
+  11 (10 parametrized guard cases + 1 export case), and `test_invites.py` is
+  net-flat (one test replaced by one). Plus the clean-room guard's items for the
+  two new files. **Count collected items, never `def test` lines.**
 - **VPS redeploy stays deferred until the audit is finished (owner).**
   reeltalk.dev still runs pre-S1 code. When it redeploys its `.env` needs
   `WEB_BIND=127.0.0.1` and `FEDERATION_ALLOWED_NETWORKS=192.168.1.0/24`.
 
-## What landed in S5, and where
+## What landed in S6, and where
 
-- `settings.INBOX_MAX_BODY_BYTES` (default 1 MiB, documented in `.env.example`,
-  pinned in pyproject's pytest-env block). Checked in
-  `views._inbox_too_large`: declared `Content-Length` first, then the real
-  bytes. Refusal is **413**.
-- `reeltalk/activitypub/inbox_throttle.py` + the `InboxAttempt` model
-  (migration `0002_inboxattempt_and_more.py`). 60 counted failures per address
-  per 15 minutes; refusal is **429 with `Retry-After`**.
-- `reeltalk/activitypub/management/commands/prune_inbox.py` (`--days`,
-  `--dry-run`), cron documented in `DEPLOYING.md` §10 (the old §10 became §11).
-  `DeliveredActivity.delivered_date` gained an index so the prune is not a
-  sequential scan.
-- `signatures._body_must_be_covered` plus two gates: `_verify_rfc9421` refuses a
-  POST-with-body whose `Signature-Input` omits `content-digest`;
-  `_verify_legacy` refuses one whose `headers` list omits `digest`.
-- `reeltalk/tests/test_inbox_hardening.py`, 20 items. Every refusal in the file
-  is paired with its honest inverse, so a bound that refused everything would
-  not pass.
-
-### The one deliberate deviation from the plan
-
-The plan asked for "a per-source floor on inbox POSTs". **This floor counts only
-POSTs that cost us work and then failed authentication**, not all POSTs. The
-reason is that the shared inbox legitimately receives a great many POSTs from
-honest peers, so a floor on all of them would let a busy federation spend an
-address's budget for doing nothing wrong. Counting only the failures keeps
-honest deliveries free (pinned by a test asserting zero rows after successful
-deliveries) while still bounding the amplification that made F7 worth fixing:
-`resolve_sender` dials out for any unseen keyid, so a POST with no chance of
-verifying used to buy an outbound fetch paid by our worker pool and by the peer
-we were tricked into dialling. Both new refusals answer **before** that dial-out.
-
-If a future session "corrects" this toward the plan's literal wording, it will
-re-arm a denial in which a noisy but honest peer is throttled out of its own
-deliveries. The count is the design, not an oversight.
-
-### Measured facts for S5 (verified 2026-10-22, against the running peer)
-
-Read these before touching the signature gates; they came from the **running**
-Mastodon 4.7.2 on the LAN peer, not from a GitHub tag.
-
-- **Mastodon 4.7.2 sends no RFC 9421 at all.** It speaks the cavage draft, so
-  the `content-digest` gate cannot break it. That gate is for RFC 9421 peers.
-- **It sends `Digest` on every POST that has a body**, and its own verifier
-  refuses a POST whose digest is unsigned ("Mastodon requires the Digest header
-  to be signed when doing a POST request"). So the legacy gate asks of a peer
-  nothing the peer does not already demand of us.
-- **Mastodon treats 4xx as final except 401, 408 and 429.** That is why the
-  floor refuses with 429: any other code tells a healthy peer to discard the
-  delivery. 413 correctly stays permanent, because an oversized body is not
-  going to shrink on retry.
-- **`crypto.load_private_key(pem: str)` takes a `str` and no `password`** - it is
-  the project's Ed25519-only helper in `reeltalk/activitypub/crypto.py`, not
-  `cryptography`'s serialization function. Passing `.encode()` and
-  `password=None` raises `TypeError`.
+- **F10** - `reeltalk/social/views.py`: `invite_create` stashes the minted code
+  in `request.session[INVITE_SESSION_KEY]` and redirects to the bare profile;
+  `_invite_context` pops it from the session and never reads `?invite=`. Two
+  tests rewritten to the session carry (the mint redirect is the bare profile
+  path; a code handed in via the URL renders nothing).
+- **F11** - `reeltalk/core/import_export.py`: `guard_formula` prefixes a leading
+  `=`, `+`, `-`, `@`, tab or CR with `'`, applied to `film.title` in
+  `export_film_csv`. Fires only on the payload, so ordinary titles stay
+  byte-identical and the export still re-imports as a no-op.
+- **F12a** - `DEPLOYING.md`: new subsection "What the role split does not protect:
+  keys at rest", stating that `social_user.private_key` is plaintext and a DB or
+  backup compromise is a signing-key compromise.
+- **F12b** - `SECURITY-AUDIT.md` "F12 resolutions": decision to keep publishing
+  the version, citing the live peer (`mastodon 4.7.3` in nodeinfo) and `/about`.
+  No code change.
+- **F12c** - `reeltalk/activitypub/models.py` `MirrorProfileAttempt` (one row per
+  actor, `actor_url` unique, upserted) + migration `0003_mirrorprofileattempt.py`
+  + `mirrors.py::_profile_refresh_throttled` (marks before fetching, so a failing
+  remote still counts). New suite `test_mirror_profile_throttle.py` (6 items).
+- **Half 2** - `SECURITY-AUDIT.md` "Second pass (S6)": F13 (High, admin
+  self-promotion), F14-F17 (Medium), F18 (minor bucket a-k).
 
 ## What the next session should do
 
-**S6: cleanup pass + finish the audit** (see `security-plan.md` §S6). Two halves.
+**S7: fix F13-F18** (see the second-pass section of `SECURITY-AUDIT.md` for each
+finding's file:line and suggested fix). Suggested order:
 
-### Half 1: F10, F11, F12
-
-Premises below were re-verified against the tree on 2026-10-22, with the line
-that holds each one.
-
-1. **F10, invite code in the query string.** `reeltalk/social/views.py:358`
-   ends the mint with `return redirect(f"{profile}?invite={invite.code}")`, so
-   the code lands in browser history, in any `Referer` the profile page leaks,
-   and in any proxy log that records query strings. There is already a comment
-   at `:346` reasoning about a bookmarked or forwarded `?invite=` on someone
-   else's profile, so the surface is understood; the fix is the shape the
-   finding names, a fragment (`#invite=`) instead of a query, since fragments
-   are not sent to servers. Check what reads the value on the other side before
-   changing how it is carried - the signup form prefills from it.
-2. **F11, CSV export formula injection.** `export_film_csv`
-   (`reeltalk/core/import_export.py:242`) writes `film.title` straight into a
-   cell via `csv.writer`, and titles are not always TMDB's: the manual
-   create-film path lets a member author one. A title beginning `=` (or `+`,
-   `-`, `@`) executes when the export is opened in a spreadsheet. Prefix the
-   cells that need it on the way out, and note the export is documented as
-   byte-identical across runs and as re-importing as a no-op - a guard that
-   changes bytes unconditionally breaks both, so it must trigger on the payload,
-   not on every cell.
-3. **F12, the three notes.** (a) Private keys sit unencrypted in the DB, which is
-   inherent to the design; the ask is to **say so** in `DEPLOYING.md` next to the
-   role split, since DB compromise is key compromise. (b) `nodeinfo_2_0`
-   (`reeltalk/activitypub/views.py:145`) publishes `software.version` from
-   `reeltalk.__version__`; the ask is a decision, not necessarily a change.
-   (c) `refresh_mirror_profile`'s throttle uses `cache.get` (`mirrors.py:280`)
-   against `LocMemCache` (`settings.py:224`), so it is per-process and resets on
-   deploy - the same two failures `attempts.py` exists to avoid. If S6 moves it,
-   `InboxAttempt` and `CredentialAttempt` are both existing table shapes to copy.
-
-### Half 2: audit the surfaces the first pass did not cover
-
-`social/admin.py` (811 lines), `lists/models.py` + `lists/services.py`,
-`mentions/parser.py`, the notifications views, `collections.py`, `objects.py`,
-`broadcast.py`, `verify.py`. Append anything found to `SECURITY-AUDIT.md` as
-F13+ and extend `security-plan.md` if material. `social/admin.py` is the one with
-history: the user admin was once a bare `ModelAdmin` whose add form wrote a
-plaintext password (R77), so admin forms are a known-fragile pattern here.
+1. **F13 (High) first - the admin privilege escalation.** `social/admin.py`
+   `UserAdmin` is a plain `ModelAdmin` with no per-object guards, and `is_superuser`
+   sits in the editable "Roles" fieldset. Any staff account with change-on-users
+   can self-promote or overwrite the admin's password. Mirror stock
+   `contrib.auth.admin.UserAdmin`: override `has_change_permission`/
+   `has_delete_permission(request, obj)` to refuse a non-superuser on any
+   superuser/staff/moderator row, and drop the role fields from the form unless
+   `request.user.is_superuser`. This is the one finding worth a whole session on
+   its own.
+2. **F14-F17 (Medium)** - the status-Delete audience (`broadcast_status_delete`
+   should use `_status_targets`, matching `broadcast_list_delete`); the password
+   hash render (gate `password_hash` on change permission or truncate it); the
+   mention-parser ReDoS (atomic quantifiers or a line-scan, and/or a markdown
+   length cap); the resend-throttle TOCTOU (serialize check+mint per key).
+3. **F18 (minor bucket a-k)** - each is small and independent; batch them. Note
+   F18(f) is a one-word spec fix (`openRegistration` -> `openRegistrations` in
+   `activitypub/views.py:148`), and F18(a) (clear `rating` in `Status.delete()`)
+   touches a soft-delete path with federation implications, so check the
+   tombstone tests.
 
 ## Deferred by the owner (from S4, still open): eliminate the bootstrap password
 
@@ -176,42 +120,45 @@ makes "no password" safe at all.
   `POSTGRES_APP_PASSWORD` are the S4 examples; `test_db_role_split.py` scrubs
   every `POSTGRES_*` name in its subprocess boots.)
 
-## Traps learned landing S5, so you do not re-derive them
+## Traps learned landing S6, so you do not re-derive them
 
-- **The F8 refusal test is a vacuous-test trap.** A signature that omits body
-  coverage still has to be *otherwise valid* or the test proves nothing: sign
-  with the mirrored actor's own key, not a fresh one, or the request is refused
-  for the wrong reason and the test stays green with the gate deleted. This is
-  the same failure the R79 mutation pass caught, wearing a different hat.
-- **The floor's counter cannot be written inside the delivery transaction.** The
-  dedup row and the handler run in one transaction (`activitypub/inbox.py`), so
-  a counter written there would roll back its own rows on the failure it is
-  trying to record. `record_failure` is called from the view, outside it.
-- **A refusal that costs nothing must not be counted.** A POST with no signature
-  at all returns 401 and writes no row: it never reached `resolve_sender`, so it
-  never cost anything. Counting free refusals is how a floor becomes a
-  self-inflicted denial of service.
-- **Never key on an empty address.** `client_ip()` can come back empty; an empty
-  key is one shared bucket for every caller that gets one. `inbox_blocked` and
-  `record_failure` both no-op on empty, and `retry_after_seconds` returns 1.
+- **A hand-written migration must match what `makemigrations` would emit**, or
+  `makemigrations --check` fails the gate. Write it, then run `--check --dry-run`
+  in the container to confirm "No changes detected" before trusting it.
+- **`migrations/` is ruff-excluded** (`extend-exclude` in pyproject). Do not name
+  a migration file in a `ruff check` path - naming it overrides the exclude and
+  you get a spurious E501 on Django's own unformatted `BigAutoField` line.
+- **A formula guard must fire on the payload, not every cell.** The CSV export is
+  documented as byte-identical across runs and re-importing as a no-op; a guard
+  that prefixes unconditionally breaks both. `guard_formula` only touches a cell
+  that leads with a dangerous character.
+- **A per-actor throttle is an upsert, not an append-only log.** `MirrorProfileAttempt`
+  is one row per actor updated in place. Copying `InboxAttempt`'s append-only shape
+  here would grow a row per page view of an un-fillable mirror forever - the exact
+  unbounded table F7 just closed.
+- **A check-then-mint throttle is a TOCTOU** (this is F17, to be fixed): the
+  resend cooldown reads the token table and then mints with no lock, so
+  concurrent POSTs all pass. Do not trust a read-then-write throttle to bound a
+  concurrent flood until it serializes the two.
+
+## Ground rules carried from S5 (still true)
+
 - **`ruff` on the bind-mounted host tree needs `--no-cache`**, or it dies with
-  `Failed to initialize cache at /host/.ruff_cache: Permission denied`. The
-  working invocation is
-  `docker compose run --rm --no-deps -v "$PWD":/host:z web sh -c "cd /host && ruff check --no-cache <paths>"`.
-  Same for `makemigrations`, which must run against the host tree because the
-  image bakes the source.
-- **`prune_inbox` prunes two tables, not one.** If a future change adds another
-  inbox-written table, the prune has to know about it or it becomes the second
-  unbounded one - which is the finding this increment just closed.
+  `Failed to initialize cache at /host/.ruff_cache: Permission denied`. Same for
+  `makemigrations`, which must run against the host tree because the image bakes
+  the source.
+- **Never key a throttle on an empty address.** `client_ip()` can come back empty;
+  an empty key is one shared bucket for every caller that gets one.
 
 ## Read in this order
 
-1. `security-plan.md` - ground rules first, then §S6.
-2. `SECURITY-AUDIT.md` - F10, F11, F12, and the "Not yet audited in depth" list
-   that Half 2 works through.
-3. `reeltalk/tests/test_inbox_hardening.py` for what S5 actually enforces, then
-   `views._handle_inbox_post`, `inbox_throttle.py`, `signatures.py`,
-   `prune_inbox.py`.
-4. `reeltalk/social/attempts.py` before touching any throttle, including F12(c).
-5. `db/role-split.sql` and `docker-compose.test.yml` if the gate command or the
-   DB identity comes up.
+1. `security-plan.md` - ground rules first, then the S7 fix list.
+2. `SECURITY-AUDIT.md` - the "Second pass (S6)" section (F13-F18) is the whole
+   S7 work list, each with file:line and a suggested fix.
+3. `reeltalk/social/admin.py` for F13, and stock `django.contrib.auth.admin`
+   `UserAdmin` for the guard pattern to copy.
+4. `reeltalk/activitypub/broadcast.py` for F14 (compare `broadcast_status_delete`
+   with `broadcast_list_delete`), `reeltalk/mentions/parser.py` for F16,
+   `reeltalk/social/verify.py` for F17.
+5. `reeltalk/social/attempts.py` and `inbox_throttle.py` before touching any
+   throttle.
