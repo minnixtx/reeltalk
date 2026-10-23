@@ -22,11 +22,13 @@ What gets pinned here, and why each one earns its place:
 * **The session key changes across the confirm boundary**, anti-fixation.
 """
 
+import threading
 from datetime import timedelta
 
 import pytest
 from django.contrib.auth import SESSION_KEY
 from django.core import mail
+from django.db import connections, transaction
 from django.test import Client, TestCase
 from django.urls import resolve, reverse
 from django.utils import timezone
@@ -560,6 +562,53 @@ def test_an_unknown_ip_is_not_a_free_pass(db):
     # request. The per-address axis still applies, which is the one that
     # protects the member.
     assert ip_budget_spent("") is False
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_concurrent_resend_waits_and_then_sees_the_firsts_token(db):
+    # F17: the cooldown read and the mint are one critical section, guarded by
+    # a row lock on the account. Without the lock, N concurrent POSTs for one
+    # address all read an empty cooldown before any mint commits, so all N
+    # mint and the per-address window is defeated by concurrency.
+    #
+    # The main thread stands in for the first request: it takes the account's
+    # row lock and mints while holding it -- exactly the window a real first
+    # request occupies between its cooldown read and its commit. The worker is
+    # the second request. It must (a) block on the lock, which is what makes
+    # the lock load-bearing rather than decorative -- a plain ``.filter().first()``
+    # would let it straight through -- and (b) once released, read the cooldown
+    # the first request wrote and mint nothing. Under READ COMMITTED the second
+    # request's post-lock statements see the first's committed token, which is
+    # the whole reason the lock closes the race rather than just slowing it.
+    victim = unverified_member(localname="victim", email="victim@example.test")
+    started = threading.Event()
+    outcome = {}
+
+    def second_request():
+        started.set()
+        outcome["result"] = request_resend("victim@example.test", "10.0.0.1")
+        connections.close_all()
+
+    with transaction.atomic():
+        User.objects.select_for_update().filter(pk=victim.pk).first()
+        worker = threading.Thread(target=second_request)
+        worker.start()
+        assert started.wait(5)
+        # The first request mints while still holding the lock.
+        EmailVerificationToken.mint(victim)
+        # A full second is orders of magnitude longer than this endpoint takes
+        # when it is free to run; still alive here means it is parked on the
+        # lock, not merely slow.
+        worker.join(timeout=1.0)
+        blocked = worker.is_alive()
+    # Leaving the atomic commits the mint and releases the lock at once.
+    worker.join(timeout=10)
+
+    assert blocked, "the second resend did not wait on the account row lock"
+    assert not worker.is_alive(), "the second resend never completed"
+    assert outcome["result"]["reason"] == "address-cooldown"
+    minted = EmailVerificationToken.objects.filter(email="victim@example.test")
+    assert minted.count() == 1
 
 
 # --- the response never reveals whether the address exists ------------

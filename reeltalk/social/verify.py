@@ -285,24 +285,41 @@ def request_resend(raw_email: str, ip: str) -> dict:
         )
         return {"enqueued": 0, "reason": "ip-limited"}
 
-    user = User.objects.filter(email=email).first()
-    if user is None:
-        # Silent by design. This is the branch that must be indistinguishable
-        # from a successful send, so it logs at info and says nothing more
-        # than the fact.
-        logger.info("Verification resend requested for an unknown address.")
-        return {"enqueued": 0, "reason": "no-account"}
+    # Serialize the cooldown check and the mint on the account's row (F17).
+    # The lookup and the cooldown read above are a check; the mint below is the
+    # write it guards. With nothing between them, N concurrent POSTs for one
+    # address all read an empty cooldown before any mint commits, so all N mint
+    # and the per-address window is defeated by concurrency. The row lock makes
+    # the second request wait for the first to commit, then read the token the
+    # first one wrote. Same idiom as ``Invite.lock_live`` and the token
+    # ``consume``: check-then-write is only true until two requests land in the
+    # same second, and this is exactly where they do -- a member pressing the
+    # button and their mail client's link prefetcher, or a caller hammering it.
+    #
+    # The lookup moves inside the lock so the locked row is the very row the
+    # mint binds to; the per-IP check stays above, outside the transaction,
+    # because it is the coarse pre-filter that has to hold even when the
+    # account lookup behind it is being exercised as hard as it can.
+    with transaction.atomic():
+        user = User.objects.select_for_update().filter(email=email).first()
+        if user is None:
+            # Silent by design. This is the branch that must be indistinguishable
+            # from a successful send, so it logs at info and says nothing more
+            # than the fact.
+            logger.info("Verification resend requested for an unknown address.")
+            return {"enqueued": 0, "reason": "no-account"}
 
-    if address_in_cooldown(email):
-        logger.info(
-            "Verification resend for @%s is inside the %d-minute cooldown; "
-            "no new mail.",
-            user.localname,
-            RESEND_ADDRESS_COOLDOWN_MINUTES,
-        )
-        return {"enqueued": 0, "reason": "address-cooldown"}
+        if address_in_cooldown(email):
+            logger.info(
+                "Verification resend for @%s is inside the %d-minute cooldown; "
+                "no new mail.",
+                user.localname,
+                RESEND_ADDRESS_COOLDOWN_MINUTES,
+            )
+            return {"enqueued": 0, "reason": "address-cooldown"}
 
-    result = send_verification_email(user, request_ip=ip)
+        result = send_verification_email(user, request_ip=ip)
+
     if result["enqueued"]:
         logger.info("Verification resend queued for @%s.", user.localname)
     return result
