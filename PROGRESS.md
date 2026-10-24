@@ -1,6 +1,6 @@
 # ReelTalk (AGPLv3 rewrite) — Progress Tracker
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 ---
 
@@ -8,6 +8,49 @@
 
 **Rewritten at the close of each increment. If anything else in this file
 disagrees with this block, this block is current and the other is history.**
+
+- **`setup.sh` NOW PRODUCES THE WHOLE `.env` (2026-10-24, setup rewrite).** A
+  first-time deployer goes clone to running without opening `.env.example` or
+  `DEPLOYING.md`. The script copies the template itself, asks ten questions
+  that each name the variable, say in one line what it controls, and show the
+  default Enter accepts, then generates the secrets and **prints which keys it
+  wrote**. Two rules govern the output, and both come from how `environs`
+  actually parses a file, measured in the container rather than assumed.
+  **(1) A line is written only when there is a real value.** An unanswered
+  optional stays commented, because `env.bool("")` and `env.int("")` raise
+  (so a file that uncommented every template line and wrote `KEY=` for whatever
+  was skipped refuses to boot) and `env.list("")` returns `[]` instead of the
+  default, which for `TRUSTED_PROXIES` means "believe no proxy" with nothing
+  printed. **(2) Blank means fill, set means leave alone.** That is the entire
+  repair vocabulary: `.env` stays hand-editable, re-running the script after an
+  edit does not silently undo it, and a blanked secret rotates that one secret
+  and no other. A scripted install with **no TTY** still works and now **fails
+  loudly on the placeholder domain** instead of minting an instance on a domain
+  nobody owns, which is the regression that actually bit. `set_var` passes
+  values to awk through `ENVIRON`, not `-v`, because `-v` eats backslash escapes
+  and a typed mail password is not URL-safe base64. New
+  `reeltalk/tests/test_setup_script.py` (490 lines) drives the real script on a
+  **pty**, so the interactive branch is the branch under test, and reads the
+  result back through `environs` in a subprocess whose environment is exactly
+  the generated file's lines, so the assertion is about what the app resolves
+  and not about the file's text. Its compose check passes only `PATH` and
+  `HOME`: compose resolves `${VAR:?required}` from the **process env before
+  any env file**, and this shell exports six `POSTGRES_*` vars, so the check had
+  been passing on a file with `POSTGRES_PASSWORD` stripped until they were
+  scrubbed. `test_the_compose_check_actually_bites` is the negative control for
+  exactly that. Docs updated to the new flow: `README.md` §1, `DEPLOYING.md` §3
+  and §6, `PLAN.md` (three passages), `docker-compose.prebuilt.yml`, and the
+  `SECRET_KEY` refusal in `settings.py`. **Verified:** `bash -n` clean; ruff
+  check and `format --check` clean on the touched Python; `test_setup_script.py`
+  with `test_secret_key.py` is **21 passed, 3 skipped**, and with
+  `test_clean_room.py` **358 passed, 6 skipped** on a rebuilt image; with the
+  ambient `POSTGRES_*` scrubbed, `compose config -q` is rc=0 for both compose
+  files and rc=1 with `POSTGRES_PASSWORD` removed; a fresh-clone boot on a
+  throwaway compose project served `/` as a 302 to `/setup/`, `/setup/` as
+  200, a bad `Host` as 400, and `reeltalk_app` existed as a non-superuser
+  role. **The full gate was not run** - that is the owner's call. Out of scope
+  by the handoff: TLS termination, backups, firewalls, nginx/certbot config,
+  host-side DB roles.
 
 - **EVERY FINDING FROM BOTH AUDIT PASSES IS NOW FIXED (2026-10-23, security
   increment S7, closes F13 + F14 + F15 + F16 + F17 + F18).** All six second-pass
