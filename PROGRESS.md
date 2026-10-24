@@ -48,7 +48,13 @@ disagrees with this block, this block is current and the other is history.**
   files and rc=1 with `POSTGRES_PASSWORD` removed; a fresh-clone boot on a
   throwaway compose project served `/` as a 302 to `/setup/`, `/setup/` as
   200, a bad `Host` as 400, and `reeltalk_app` existed as a non-superuser
-  role. **The full gate was not run** - that is the owner's call. Out of scope
+  role. **FULL GATE GREEN 2026-10-24 - 2669 passed, 8 skipped in 36:31, all four
+  markers `0`** (`RUFF_CHECK`, `RUFF_FORMAT`, `MIGRATIONS`, `PYTEST`), on an image
+  rebuilt after the docs edits, which matters because `test_clean_room.py` walks
+  the baked tree. The arithmetic closes: S7's 2654, plus 13 of the new suite's 16
+  collected items (the 3 that skip all shell out to the compose CLI, which the
+  gate container does not have), plus 2 clean-room items for the new file.
+  Count collected items, never `def test` lines. Out of scope
   by the handoff: TLS termination, backups, firewalls, nginx/certbot config,
   host-side DB roles.
 
