@@ -9,6 +9,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
 
+from reeltalk import __version__
 from reeltalk.social.models import SiteSettings
 from reeltalk.tests.members import member, site_admin
 from reeltalk.tests.signup import open_signup
@@ -71,7 +72,8 @@ def test_about_page_shows_instance_info(client, admin):
     assert "My Film Club" in body
     # Domain from settings (pytest env pins it to localhost).
     assert "<dd>localhost</dd>" in body
-    assert "ReelTalk 0.1" in body
+    # Derived, never a literal: a release bump must not break this file.
+    assert f"ReelTalk {__version__}" in body
     assert "AGPL-3.0" in body
 
 
