@@ -34,7 +34,8 @@ backups/
 # project's own runbook and names our hosts and addresses.
 DEPLOYING.md
 PLAN.md
-REWRITE.md
+PROGRESS.md
 SECURITY-AUDIT.md
 SECURITY-HANDOFF.md
 SETUP-HANDOFF.md
+security-plan.md

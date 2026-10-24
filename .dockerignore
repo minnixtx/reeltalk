@@ -24,7 +24,8 @@ images/*
 # every published image.
 DEPLOYING.md
 PLAN.md
-REWRITE.md
+PROGRESS.md
 SECURITY-AUDIT.md
 SECURITY-HANDOFF.md
 SETUP-HANDOFF.md
+security-plan.md
