@@ -28,6 +28,10 @@ Both paths clone this repo, because the Compose files, `.env.example` and
 `setup.sh` all live in it. Neither needs Python or a package manager on your
 host.
 
+The nine steps below are the shortest path to a running instance. For more
+information, see [DEPLOYING.md](DEPLOYING.md): the full variable reference,
+proxy and firewall detail, the invite policy, and post-deploy checks.
+
 ### Requirements
 
 - **Docker with the Compose plugin** (`docker compose version`).
@@ -49,24 +53,20 @@ cd reeltalk
 ./setup.sh
 ```
 
-`setup.sh` creates `.env` itself, so there is nothing to copy first. It asks
-about the handful of settings a first install actually has to decide: the
-domain, whether a reverse proxy sits on the same host, any extra hostname or IP
-you reach the site by, the port, whether you are behind TLS, outbound mail, the
-TMDB key, and the time zone. Each question says in one line what the variable
-controls and what the default on the screen means, and bare Enter accepts that
-default. The secrets (`SECRET_KEY`, `POSTGRES_PASSWORD`, and
-`POSTGRES_APP_PASSWORD`) are generated, never asked.
+`setup.sh` creates `.env` itself, so there is nothing to copy first. It asks the
+few decisions a first install has to make: the domain, whether the reverse proxy
+is on this same host, any extra hostname or IP you reach the site by, the port,
+https or plain http, mail, the TMDB key, any federation peer on your local
+network, and the time zone. Each question says in one line what the variable
+controls, and bare Enter takes the default on screen. The secrets (`SECRET_KEY`,
+`POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD`) are generated, never asked.
 
-It is safe to re-run, and that is also how you change an answer: edit `.env`,
-run `./setup.sh` again, and only the blanks get filled. A value that is set is
-never overwritten, so the file stays yours to edit by hand. Blank a line to be
-asked about it again, or, for a secret, to have a fresh one generated.
-
-A question you skip is left out of the file rather than written empty, which is
-deliberate: an empty line is a value to this app, not an absence, and the
-settings that take a number or a true/false refuse to parse one. Skipping is
-the same as keeping the shipped default.
+Re-running it is how you change an answer. A value that is set is never
+overwritten, so edit `.env`, blank the line you want back, and run it again; for
+a secret that means a fresh one and every session logged out. A question you skip
+stays out of the file rather than being written empty, because an empty line is a
+value to this app and the settings that take a number or a true/false refuse to
+parse one. Skipping is the same as keeping the shipped default.
 
 ### 2. The .env parameters
 
@@ -74,65 +74,53 @@ Required:
 
 | Key | Notes |
 |---|---|
-| `DOMAIN` | Your public hostname, no scheme. Drives `ALLOWED_HOSTS` and the default mail domain. |
-| `SECRET_KEY` | Django secret. `setup.sh` generates one. |
-| `POSTGRES_PASSWORD` | Database password. `setup.sh` generates one. Seeds the bootstrap login; see `DEPLOYING.md`. |
+| `DOMAIN` | Your public hostname, no scheme. Seeds `ALLOWED_HOSTS` and the mail domain. |
+| `SECRET_KEY` | Django secret; `setup.sh` generates one. It signs session and CSRF cookies, so with `DEBUG` off the app refuses to start when it is missing, blank, or still the published development value. |
+| `POSTGRES_PASSWORD` | Database password; `setup.sh` generates one. A first-boot seed the db container then rotates away. |
 | `POSTGRES_APP_USER` | The login the app connects as: no superuser, no `CREATEROLE`, no `CREATEDB`. Defaults to `reeltalk_app`. |
-| `POSTGRES_APP_PASSWORD` | That login's password. `setup.sh` generates it when `POSTGRES_APP_USER` is set. |
+| `POSTGRES_APP_PASSWORD` | That login's password; `setup.sh` generates it when `POSTGRES_APP_USER` is set. |
 
-`POSTGRES_USER`, `POSTGRES_DB` and `POSTGRES_HOST=db` have working defaults.
-
-The app runs on its own database role, not the superuser the postgres image
-creates. On a first boot the db container creates that role, hands it the
-database, and rotates the bootstrap password to a value that is not recorded
-anywhere, because `.env` is the web container's whole environment. Maintenance
-does not need it: `docker compose exec db psql -U reeltalk` connects over the
-unix socket. See "The two database roles" in `DEPLOYING.md`, which also has the
-upgrade path for an install that predates the split.
-
-`SECRET_KEY` is not a formality: it signs session and CSRF cookies, and the
-built-in development value is published in the source, so an instance running
-on it has a secret everybody knows. With `DEBUG` off the app therefore refuses
-to start when the key is missing, blank, or still the development value, and
-tells you to run `setup.sh`. That refusal is the safety, not a bug: the
-alternative is coming up looking healthy while every session cookie is
-forgeable, admin included.
+`POSTGRES_USER`, `POSTGRES_DB` and `POSTGRES_HOST=db` have working defaults. The
+app runs on its own role, never the superuser the postgres image creates, and
+maintenance needs neither password: `docker compose exec db psql -U reeltalk`
+connects over the unix socket. See "The two database roles" in `DEPLOYING.md`,
+which also has the upgrade path for an install that predates the split.
 
 Optional, and most installs want some of them:
 
 | Key | Default | Notes |
 |---|---|---|
 | `REELTALK_TMDB_API_KEY` | unset | Free key from themoviedb.org. Without it, film search falls back to the local library only. |
-| `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS` | unset | Your email parameters. |
-| `EMAIL_SENDER_NAME` | `admin` | Local part of the From address. |
-| `EMAIL_SENDER_DOMAIN` | `DOMAIN` | Domain part of the From address. |
-| `CANONICAL_ORIGIN` | `https://DOMAIN` | The origin every ActivityPub identity is minted from. Set it only if that is wrong for you, and never to a LAN address. |
+| `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS` | unset | Your email parameters. See step 4. |
+| `EMAIL_SENDER_NAME`, `EMAIL_SENDER_DOMAIN` | `admin`, `DOMAIN` | The two halves of the From address. On a server that refuses a sender other than the account it authenticated, they must add up to `EMAIL_HOST_USER`. |
 | `WEB_PORT` | `3030` | Host port the web container publishes. |
-| `CSRF_TRUSTED_ORIGINS` | unset | Comma-separated list of full origins (scheme, host and port) that a browser may post forms to. Not a yes/no switch, and the scheme is required. Leave it unset for a normal single-domain https install; add one entry per extra origin you actually type into a browser. Example: `CSRF_TRUSTED_ORIGINS=https://reeltalk.example.com,http://192.168.1.50:3030` |
+| `WEB_BIND` | every interface | Set `127.0.0.1` when a proxy on this same host fronts the app and nothing off the machine should reach the port. |
+| `ALLOWED_HOSTS` | `DOMAIN` plus localhost | Every host a browser may name in the URL. Add extra hostnames and IPs here. |
+| `CSRF_TRUSTED_ORIGINS` | unset | Every origin a browser may post a form to, comma-separated, scheme required. Leave unset for a normal single-domain https install; add one entry per extra origin you actually type into a browser. |
 | `TRUSTED_PROXIES` | the private ranges | Which peers may tell us a request arrived over https, and which hops to skip when reading the client address. A proxy on your LAN or on the Compose network needs no value at all. |
-| `ALLOWED_HOSTS` | `DOMAIN` plus localhost | Add extra hostnames here. |
+| `CANONICAL_ORIGIN` | `https://DOMAIN` | The origin every ActivityPub identity is minted from. Set it only if that is wrong for you, and never to a LAN address. |
+| `FEDERATION_ALLOWED_NETWORKS` | unset | CIDRs of federation peers that genuinely share your network. Outbound fetches refuse private addresses until you name them. |
+| `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS` | off | The app's own http-to-https redirect, and how long a browser should keep using https. Your proxy can do the redirect; HSTS is a deliberate, hard to undo choice. |
+| `TIME_ZONE` | `UTC` | Display only. Timestamps are stored in UTC. |
 
 Leave `DEBUG` off. Do not turn it on for anything reachable over a network.
 
-Please note the following:
+Two things catch a first install:
 
-**Reaching the instance by IP address.** `ALLOWED_HOSTS` defaults to your
-`DOMAIN` plus localhost. Browse to a raw IP and every request returns HTTP
-400. To use an IP or an extra hostname you must name it:
+**Reaching the instance by IP address.** Browse to a raw IP that `ALLOWED_HOSTS`
+does not name and every request returns 400; without the matching
+`CSRF_TRUSTED_ORIGINS` entry the pages render but every form POST returns 403.
+Both have to name it:
 
 ```
 ALLOWED_HOSTS=192.168.1.50,localhost,127.0.0.1
 CSRF_TRUSTED_ORIGINS=http://192.168.1.50:3030
 ```
 
-Without `CSRF_TRUSTED_ORIGINS` the pages render but every form POST is
-rejected with 403.
-
-**The emailed verification link uses `https://DOMAIN`.** `CANONICAL_ORIGIN`
-defaults to `https://DOMAIN`, so until TLS actually works the link in the
-email points at an https URL that does not answer. Finish your proxy setup
-before you create the first account, or read the link out of the worker log
-as described in step 4.
+**The emailed verification link uses `https://DOMAIN`.** So until TLS actually
+works, the link in the mail points at an https URL that does not answer. Finish
+your proxy setup before you create the first account, or read the link out of
+the worker log as described in step 4.
 
 ### 3. Start
 
