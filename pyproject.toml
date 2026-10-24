@@ -1,6 +1,6 @@
 [project]
 name = "reeltalk"
-version = "0.1.0"
+version = "0.2.0"
 description = "A federated social network for tracking, reviewing, and discovering films."
 license = "AGPL-3.0-only"
 requires-python = ">=3.12"
