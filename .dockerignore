@@ -19,3 +19,12 @@ backups/
 assets/
 images/*
 !images/.gitkeep
+# Working notes, not deployer docs. They carry this project's own hostnames,
+# addresses, and audit detail, and `COPY . /app/` would bake all of it into
+# every published image.
+DEPLOYING.md
+PLAN.md
+REWRITE.md
+SECURITY-AUDIT.md
+SECURITY-HANDOFF.md
+SETUP-HANDOFF.md

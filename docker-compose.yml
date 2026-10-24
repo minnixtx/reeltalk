@@ -33,7 +33,7 @@ services:
       # The application's own login, created once when the data directory is
       # first initialised. Empty POSTGRES_APP_USER means "no split": the app
       # keeps connecting as POSTGRES_USER, which is what installs predating the
-      # change do. See db/role-split.sql and DEPLOYING.md.
+      # change do. See db/role-split.sql.
       POSTGRES_APP_USER: ${POSTGRES_APP_USER:-}
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-}
     healthcheck:

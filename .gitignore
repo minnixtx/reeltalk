@@ -28,3 +28,13 @@ backups/
 # All instance environment variants may contain credentials
 .env.*
 !.env.example
+
+# Working notes for local development only. Not deployer documentation, and
+# not for a prospective user: DEPLOYING.md in particular is written as this
+# project's own runbook and names our hosts and addresses.
+DEPLOYING.md
+PLAN.md
+REWRITE.md
+SECURITY-AUDIT.md
+SECURITY-HANDOFF.md
+SETUP-HANDOFF.md

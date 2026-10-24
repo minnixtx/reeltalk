@@ -28,10 +28,6 @@ Both paths clone this repo, because the Compose files, `.env.example` and
 `setup.sh` all live in it. Neither needs Python or a package manager on your
 host.
 
-The nine steps below are the shortest path to a running instance. For more
-information, see [DEPLOYING.md](DEPLOYING.md): the full variable reference,
-proxy and firewall detail, the invite policy, and post-deploy checks.
-
 ### Requirements
 
 - **Docker with the Compose plugin** (`docker compose version`).
@@ -83,8 +79,9 @@ Required:
 `POSTGRES_USER`, `POSTGRES_DB` and `POSTGRES_HOST=db` have working defaults. The
 app runs on its own role, never the superuser the postgres image creates, and
 maintenance needs neither password: `docker compose exec db psql -U reeltalk`
-connects over the unix socket. See "The two database roles" in `DEPLOYING.md`,
-which also has the upgrade path for an install that predates the split.
+connects over the unix socket. An install that predates the split keeps
+connecting as `POSTGRES_USER` until you run `./db/upgrade-role-split.sh`, then
+rebuilds and recreates.
 
 Optional, and most installs want some of them:
 

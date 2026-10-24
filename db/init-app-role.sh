@@ -17,7 +17,7 @@ SQL_FILE=/usr/local/share/reeltalk/role-split.sql
 
 if [ -z "$APP_USER" ]; then
     printf 'reeltalk: POSTGRES_APP_USER is empty, so the app keeps using the %s login.\n' "${POSTGRES_USER}"
-    printf 'reeltalk: no separate application role was created. See DEPLOYING.md, "The two database roles".\n'
+    printf 'reeltalk: no separate application role was created. To add one later, set POSTGRES_APP_USER and run ./db/upgrade-role-split.sh.\n'
     exit 0
 fi
 
