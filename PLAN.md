@@ -125,7 +125,7 @@ Docker-first. The stack grows per milestone (owner direction: grow the stack as 
 - **Volumes:** `pgdata`, `static_volume`, `media_volume` (posters/avatars); `exports_volume` lands with M3 as needed.
 - **Entrypoint behavior:** the web container auto-runs migrations + collectstatic on start (no manual migrate step); an `initdb` management command seeds permissions/site settings idempotently. The image runs as a non-root user.
 - **TLS policy (D14):** none in-project; operator reverse proxy in front of :3030 forwarding `X-Forwarded-Proto`. `CSRF_TRUSTED_ORIGINS` env-overridable for extra access origins (LAN IP, etc.).
-- **Env:** `.env` with `DOMAIN`, generated secrets (`SECRET_KEY`, `POSTGRES_PASSWORD`), optional `REELTALK_TMDB_API_KEY`, optional SMTP vars; a `setup.sh` generates the secrets safely.
+- **Env:** `.env` produced by `setup.sh`, which copies `.env.example`, asks the deployer about the settings a first install must decide, and generates the secrets (`SECRET_KEY`, `POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD`); optional `REELTALK_TMDB_API_KEY`, optional SMTP vars. A value already set is never overwritten, and a question left unanswered is left out of the file rather than written blank.
 - **Host quirks (verified real on this Fedora box):**
   1. SELinux: ad-hoc bind mounts need the `:z` label or containers get Permission denied even as root (compose uses named volumes; one-off `docker run -v` still needs it).
   2. IPv6 `[::1]` through docker-proxy resets HTTP connections → test with `curl -4`.
@@ -329,7 +329,7 @@ Dockerfile              # python:3.13-slim, uv venv at /app/.venv, non-root appu
 docker-compose.yml      # web (uvicorn on :3030) + db (postgres:17) + worker (Django-Q2,
                         # joined at M2)
 entrypoint.sh           # auto migrate + collectstatic on web start
-.env.example / setup.sh # config template + secret generation
+.env.example / setup.sh # config reference + the script that writes .env and its secrets
 manage.py               # Django entry point
 reeltalk/               # Django project: settings, urls, asgi, and the apps — core,
                         # social, activitypub, notifications, mentions, moderation
@@ -339,7 +339,7 @@ reeltalk/tests/         # the pytest suite (see PROGRESS.md NOW for the current 
 Run it:
 
 ```sh
-cp .env.example .env && ./setup.sh        # one-time: set DOMAIN + generate secrets
+./setup.sh                              # one-time: writes .env, asks the questions, makes the secrets
 docker compose up -d --build              # start the stack
 curl -4 http://localhost:3030/            # IPv6 docker-proxy quirk → use -4
 ```

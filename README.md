@@ -46,13 +46,27 @@ host.
 ```bash
 git clone https://github.com/minnixtx/reeltalk.git
 cd reeltalk
-cp .env.example .env
 ./setup.sh
 ```
 
-`setup.sh` prompts for `DOMAIN` and generates `SECRET_KEY` and
-`POSTGRES_PASSWORD` if they are empty. It is safe to re-run: values already
-set are never overwritten.
+`setup.sh` creates `.env` itself, so there is nothing to copy first. It asks
+about the handful of settings a first install actually has to decide: the
+domain, whether a reverse proxy sits on the same host, any extra hostname or IP
+you reach the site by, the port, whether you are behind TLS, outbound mail, the
+TMDB key, and the time zone. Each question says in one line what the variable
+controls and what the default on the screen means, and bare Enter accepts that
+default. The secrets (`SECRET_KEY`, `POSTGRES_PASSWORD`, and
+`POSTGRES_APP_PASSWORD`) are generated, never asked.
+
+It is safe to re-run, and that is also how you change an answer: edit `.env`,
+run `./setup.sh` again, and only the blanks get filled. A value that is set is
+never overwritten, so the file stays yours to edit by hand. Blank a line to be
+asked about it again, or, for a secret, to have a fresh one generated.
+
+A question you skip is left out of the file rather than written empty, which is
+deliberate: an empty line is a value to this app, not an absence, and the
+settings that take a number or a true/false refuse to parse one. Skipping is
+the same as keeping the shipped default.
 
 ### 2. The .env parameters
 

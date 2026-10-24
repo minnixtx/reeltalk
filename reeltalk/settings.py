@@ -29,10 +29,10 @@ DEV_SECRET_KEY = "insecure-dev-only-key-change-me"
 SECRET_KEY = env.str("SECRET_KEY", default=DEV_SECRET_KEY)
 if not DEBUG and SECRET_KEY.strip() in ("", DEV_SECRET_KEY):
     raise ImproperlyConfigured(
-        "SECRET_KEY is required when DEBUG is false. Copy .env.example to .env "
-        "and run ./setup.sh, which generates one; see the Deployment section "
-        "of README.md. Refusing to start rather than sign sessions with the "
-        "development key, which is public."
+        "SECRET_KEY is required when DEBUG is false. Run ./setup.sh in the "
+        "clone, which writes .env and generates one; see the Deployment "
+        "section of README.md. Refusing to start rather than sign sessions "
+        "with the development key, which is public."
     )
 
 # DOMAIN may carry an explicit port (an IP:port operator instance, R52); the

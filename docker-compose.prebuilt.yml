@@ -4,7 +4,7 @@
 # but no service builds anything: every app role names the SAME published image
 # tag, so the whole stack is pulled rather than compiled.
 #
-#   cp .env.example .env && ./setup.sh
+#   ./setup.sh
 #   docker compose -f docker-compose.prebuilt.yml up -d
 #
 # Why a separate file instead of an override: Compose merges keys, so an

@@ -65,8 +65,15 @@ that collapse rather than infer it.
 
 ## 3. Environment variables
 
-Copy `.env.example` to `.env`. Values marked **required** have no usable default
+`./setup.sh` writes `.env` for you: it copies `.env.example`, asks about the
+settings a first install has to decide, and generates the secrets. Nothing has
+to be copied first, and this section is the reference for the variables the
+script does not ask about. Values marked **required** have no usable default
 for a public instance.
+
+To change something later, edit `.env` and run `./setup.sh` again. A value that
+is already set is never overwritten; blank a line to have the script fill it,
+which for a secret means rotating it and logging every session out.
 
 ### Identity
 
@@ -255,9 +262,10 @@ through the tested TMDB CSV path is cleaner than rewriting them.
 
 ```bash
 # 1. Configure
-cp .env.example .env
-./setup.sh                      # generates SECRET_KEY + POSTGRES_PASSWORD
-# then set DOMAIN, ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, TRUSTED_PROXIES per §3
+./setup.sh                      # writes .env, asks the questions, generates the secrets
+# DOMAIN, the proxy posture, the port, mail and the time zone are all asked.
+# ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS are filled from the extra-origins
+# answer; anything else per §3.
 
 # 2. Build EVERY service that runs app code (see §7)
 docker compose build
