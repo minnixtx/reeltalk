@@ -49,7 +49,10 @@
           {% else %}
             <span class="avatar avatar-placeholder" aria-hidden="true"></span>
           {% endif %}
-          {{ user.localname }}
+          {# The name sits in its own span so a long handle (a remote mirror's #}
+          {# user@host especially) truncates with an ellipsis instead of #}
+          {# pushing the header grid past the viewport on a phone. #}
+          <span class="user-handle">{{ user.localname }}</span>
         </a>
       {% else %}
         <a href="{% url 'login' %}">Log in</a>

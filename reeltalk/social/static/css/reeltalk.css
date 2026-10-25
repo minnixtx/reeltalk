@@ -316,6 +316,25 @@ a {
      would open an implicit third track and leave a gap on the right. */
   .header-user {
     grid-column: 2;
+    /* The corner truncates instead of widening the grid. Its min-content (a
+       long handle is one unbreakable word) used to push the whole header past
+       the viewport, and the search row spanning 1 / -1 inherited the overflow:
+       measured 399px of content in a 375px viewport. min-width:0 lets the
+       track shrink; the text inside each corner link carries the ellipsis. */
+    min-width: 0;
+  }
+
+  .header-user a {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .header-user .user-handle {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
