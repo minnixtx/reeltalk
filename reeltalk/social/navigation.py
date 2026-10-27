@@ -1,21 +1,27 @@
-"""The navigation destinations, defined once (navigation redesign N2/N3).
+"""The navigation destinations, defined once (navigation redesign N2/N3/N4).
 
 Before N2 the nav row was hand-written markup in ``base.html``: six anchors,
 a logout form, and an ``{% if user.is_authenticated %}`` around the member
 items. The redesign's surfaces render these same destinations again as a
-mobile bottom bar, a More sheet, and (in N4) a desktop sidebar, so the list
-lives here and the header markup lives in ``templates/_navigation.html``.
-One definition, many surfaces; N3 and N4 consume this list rather than
-copying it.
+desktop sidebar, a mobile bottom bar and a More sheet, so the list lives here
+and each surface keeps only its own markup. One definition, many surfaces; no
+surface copies the list.
 
 N3 added the two phone surfaces: ``bottom_nav`` is the bar's four links --
 the More button is a control, not a destination, so the template renders it
 after the list -- and ``more_nav`` is the sheet's destinations with Log out
-last. The mobile labels differ from the desktop row's on purpose (Feed,
-Lists); the approved design says so, and the desktop row keeps its own
-words until N4 restyles it. The icons are the approved mockup's 24x24
-single-path SVG data, held here so a surface renders from data instead of
-copying markup per destination.
+last. N4 replaced the desktop row with ``sidebar_nav``, the wide left menu the
+approved design asks for; its labels now agree with the bar's (Feed, Lists)
+because one menu speaks at each width instead of two competing ones. Import,
+Export and Moderate ride in none of them by design: they live inside Profile /
+Settings, which every surface links to. The icons are the approved mockup's
+24x24 single-path SVG data, held here so a surface renders from data instead
+of copying markup per destination.
+
+The sidebar is the grouped surface: ``group`` names the block an item sits in
+and the partial draws a rule wherever the group changes, so the grouping lives
+in the definition rather than in template markup that would have to be edited
+in step with the list.
 
 The active rule is exact path equality, unchanged from the markup it
 replaces. A list's own page (``/list/<id>/``) deliberately does not light
@@ -40,14 +46,15 @@ from django.urls import reverse
 
 @dataclass(frozen=True)
 class NavItem:
-    """One entry of the nav row: what it says, where it goes, whether it's lit."""
+    """One entry of a nav surface: what it says, where it goes, whether it's lit."""
 
     key: str
     label: str
     url: str
     current: bool = False
     kind: str = "link"  # "link", or "form" for the POST-only Log out control
-    icon: str = ""  # 24x24 single-path SVG data; only the phone surfaces render it
+    icon: str = ""  # 24x24 single-path SVG data; the menu surfaces render it
+    group: str = ""  # sidebar block name; the partial rules between groups
 
 
 # The approved N1 mockup's icon set (24x24, stroke-drawn, one path each). The
@@ -73,22 +80,76 @@ ICONS = {
 }
 
 
-def primary_nav(request):
-    """The destinations in the main nav row, in order, for this viewer."""
-    path = request.path
-    items = [_item("home", "Home", "index", path)]
+def sidebar_nav(request):
+    """The desktop menu's destinations, in the approved order, Log out last.
+
+    Members only (N1 decision 8): a signed-out visitor gets no menu, because
+    the wordmark is the way home and the corner carries Log in / Sign up.
+
+    Import, Export and Moderate are deliberately absent. The approved design
+    nests them inside Profile / Settings, so the menu stays seven rows instead
+    of ten and the destinations stay reachable from the one page that acts on
+    them. The moderator keeps the corner's own Moderate link (R101), which the
+    stylesheet retires below 1024px in favor of the More sheet's row.
+    """
     user = request.user
-    if user.is_authenticated:
-        name = user.localname
-        items += [
-            _item("films", "My Films", "user-films", path, args=(name,)),
-            _item("lists", "My Lists", "user-lists", path, args=(name,)),
-            _item("find", "Find People", "find-user", path),
-            _item("import", "Import", "import-films", path),
-            _item("export", "Export", "export-films", path),
-            NavItem("logout", "Log out", reverse("logout"), kind="form"),
-        ]
-    return items
+    if not user.is_authenticated:
+        return []
+    path = request.path
+    name = user.localname
+    return [
+        _item("feed", "Feed", "index", path, icon=ICONS["feed"], group="feed"),
+        _item(
+            "films",
+            "My Films",
+            "user-films",
+            path,
+            args=(name,),
+            icon=ICONS["films"],
+            group="feed",
+        ),
+        _item(
+            "lists",
+            "Lists",
+            "user-lists",
+            path,
+            args=(name,),
+            icon=ICONS["lists"],
+            group="feed",
+        ),
+        _item(
+            "find",
+            "Find People",
+            "find-user",
+            path,
+            icon=ICONS["find"],
+            group="discover",
+        ),
+        _item(
+            "notifications",
+            "Notifications",
+            "notifications",
+            path,
+            icon=ICONS["bell"],
+            group="discover",
+        ),
+        _item(
+            "settings",
+            "Profile / Settings",
+            "profile-edit",
+            path,
+            icon=ICONS["settings"],
+            group="account",
+        ),
+        NavItem(
+            "logout",
+            "Log out",
+            reverse("logout"),
+            kind="form",
+            icon=ICONS["logout"],
+            group="session",
+        ),
+    ]
 
 
 def bottom_nav(request):
@@ -158,20 +219,27 @@ def more_nav(request):
     return items
 
 
-def _item(key, label, url_name, path, args=None, icon=""):
+def _item(key, label, url_name, path, args=None, icon="", group=""):
     url = reverse(url_name, args=args or ())
-    return NavItem(key=key, label=label, url=url, current=(path == url), icon=icon)
+    return NavItem(
+        key=key,
+        label=label,
+        url=url,
+        current=(path == url),
+        icon=icon,
+        group=group,
+    )
 
 
 def nav_items(request):
     """Add the nav surfaces as this viewer should see them.
 
-    One processor, three lists: the desktop row, the phone bar, the sheet.
-    The phone lists answer ``[]`` signed out, so the anonymous render pays
-    nothing it did not pay before.
+    One processor, three lists: the desktop menu, the phone bar, the sheet.
+    All three answer ``[]`` signed out, so the anonymous render pays nothing
+    it did not pay before.
     """
     return {
-        "nav_items": primary_nav(request),
+        "sidebar_items": sidebar_nav(request),
         "bottom_items": bottom_nav(request),
         "more_items": more_nav(request),
     }

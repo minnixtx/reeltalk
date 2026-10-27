@@ -72,11 +72,11 @@
       {% endif %}
     </div>
   </div>
-  {# The nav row (N2) renders from the shared registry, not from markup here: #}
-  {# reeltalk/social/navigation.py defines the destinations once, and the #}
-  {# partial is what the N3/N4 surfaces will include alongside it. #}
-  {% include "_navigation.html" %}
 </header>
+{# The desktop menu (N4) renders from the shared registry -- #}
+{# reeltalk/social/navigation.py defines the destinations once -- and sits #}
+{# outside the header so it can be the page's own column beside the content. #}
+{% include "_navigation.html" %}
 {# The phone surfaces (N3): the bottom bar and the More sheet, from the #}
 {# same registry. The partial guards itself to members; on desktop the bar #}
 {# is display:none and the sheet never opens. #}

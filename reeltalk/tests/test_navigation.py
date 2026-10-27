@@ -1,23 +1,33 @@
-"""The shared navigation structure (N2).
+"""The shared navigation structure (N2, reshaped by N4).
 
-One registry (``reeltalk/social/navigation.py``) defines the nav row once and
-``templates/_navigation.html`` renders it, so the header shipped today and the
-sidebar/bottom bar/More of N3/N4 read the same destinations. What is pinned
-here is the contract the extraction must not break:
+One registry (``reeltalk/social/navigation.py``) defines the member
+destinations once and ``templates/_navigation.html`` renders the desktop menu
+from it, so the left menu shipped today and the phone bar and More sheet
+(N3) read the same destinations. What is pinned here is the contract the
+extraction must not break:
 
-* the registry's shape per viewer: anonymous gets Home alone; a member gets
-  the six link destinations plus the Log out control, in the order the old
-  hand-written row used;
-* active state is exact path equality -- the lists page lights My Lists
-  alone and a list's own page lights nothing (R138's rule, now in Python);
-* the rendered row marks the active item with ``aria-current="page"`` and
+* the registry's shape per viewer: a signed-out visitor gets no menu at all
+  (N1 decision 8 -- the wordmark is the way home and the corner carries Log
+  in / Sign up), and a member gets the seven rows the approved design lists,
+  in its order, with Log out last;
+* active state is exact path equality -- the lists page lights Lists alone
+  and a list's own page lights nothing (R138's rule, now in Python);
+* the rendered menu marks the active item with ``aria-current="page"`` and
   marks nothing else;
 * Log out is a POST form carrying CSRF, never a GET link;
-* the row is one labeled landmark, rendered once, from the shared partial.
+* the menu is one labeled landmark, rendered once, from the shared partial,
+  and every row carries the mockup's icon;
+* the group rules come from ``NavItem.group``, not from markup that would
+  have to be edited in step with the list.
 
-The corner (search box, badge, Moderate, avatar) is untouched by N2 and
+Import, Export and Moderate are absent from the menu by design (they live
+inside Profile / Settings), so their absence is pinned too: a future edit
+that re-lists them here would silently undo the approved grouping.
+
+The corner (search box, badge, Moderate, avatar) is untouched by N4 and
 pinned by ``test_search.py``, ``test_notifications_badge.py`` and
-``test_moderator_gate.py``; it is not duplicated here.
+``test_moderator_gate.py``; it is not duplicated here. The phone surfaces are
+pinned by ``test_mobile_nav.py``.
 """
 
 import re
@@ -27,7 +37,7 @@ from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.test import Client, RequestFactory
 
-from reeltalk.social.navigation import primary_nav
+from reeltalk.social.navigation import nav_items, sidebar_nav
 from reeltalk.tests.members import member
 
 PASSWORD = "s3cretpass"
@@ -45,14 +55,14 @@ def _login(localname: str) -> Client:
 
 
 def _site_nav(body: str) -> str:
-    """The header's own ``.site-nav`` row, and nothing else.
+    """The desktop menu's own ``.site-nav`` landmark, and nothing else.
 
     Scoped for the same reason ``test_lists_views._tabs`` scopes the page's
-    tab bar: a header contract read off the whole body could be satisfied by
-    other markup and say nothing about the header.
+    tab bar: a menu contract read off the whole body could be satisfied by
+    other markup and say nothing about the menu.
     """
     match = re.search(r'<nav class="site-nav".*?</nav>', body, re.S)
-    assert match, "no .site-nav row rendered"
+    assert match, "no .site-nav menu rendered"
     return match.group(0)
 
 
@@ -66,21 +76,20 @@ def _request(path: str, user=None):
 
 
 @pytest.mark.django_db
-def test_the_registry_gives_anonymous_only_home():
-    (item,) = primary_nav(_request("/"))
-    assert (item.key, item.label, item.url, item.current) == ("home", "Home", "/", True)
+def test_the_registry_gives_a_signed_out_visitor_no_menu():
+    assert sidebar_nav(_request("/")) == []
 
 
 @pytest.mark.django_db
-def test_the_registry_gives_a_member_every_destination_in_order(alice):
-    items = primary_nav(_request("/find/", alice))
+def test_the_registry_gives_a_member_every_row_in_the_approved_order(alice):
+    items = sidebar_nav(_request("/find/", alice))
     assert [(i.key, i.label) for i in items] == [
-        ("home", "Home"),
+        ("feed", "Feed"),
         ("films", "My Films"),
-        ("lists", "My Lists"),
+        ("lists", "Lists"),
         ("find", "Find People"),
-        ("import", "Import"),
-        ("export", "Export"),
+        ("notifications", "Notifications"),
+        ("settings", "Profile / Settings"),
         ("logout", "Log out"),
     ]
     assert [i.url for i in items] == [
@@ -88,8 +97,8 @@ def test_the_registry_gives_a_member_every_destination_in_order(alice):
         "/user/alice/films/",
         "/user/alice/lists/",
         "/find/",
-        "/preferences/import/",
-        "/preferences/export/",
+        "/notifications/",
+        "/preferences/profile/",
         "/logout/",
     ]
     # Exactly one item is lit, and it is the page being viewed.
@@ -99,10 +108,34 @@ def test_the_registry_gives_a_member_every_destination_in_order(alice):
 
 
 @pytest.mark.django_db
+def test_the_rows_are_grouped_for_the_menu_dividers(alice):
+    """The dividers are data, not template markup: ``group`` names the block
+    each row sits in and the partial rules wherever the group changes."""
+    assert [i.group for i in sidebar_nav(_request("/find/", alice))] == [
+        "feed",
+        "feed",
+        "feed",
+        "discover",
+        "discover",
+        "account",
+        "session",
+    ]
+
+
+@pytest.mark.django_db
+def test_import_export_and_moderate_ride_in_the_menu_by_design(alice):
+    """The approved design nests these inside Profile / Settings."""
+    keys = [i.key for i in sidebar_nav(_request("/find/", alice))]
+    assert "import" not in keys
+    assert "export" not in keys
+    assert "moderate" not in keys
+
+
+@pytest.mark.django_db
 def test_active_state_is_exact_path_equality(alice):
-    """A list's own page lights no nav item (R138): equality, not prefix."""
-    assert [i.key for i in primary_nav(_request("/list/1/", alice)) if i.current] == []
-    items = primary_nav(_request("/user/alice/lists/", alice))
+    """A list's own page lights no menu item (R138): equality, not prefix."""
+    assert [i.key for i in sidebar_nav(_request("/list/1/", alice)) if i.current] == []
+    items = sidebar_nav(_request("/user/alice/lists/", alice))
     assert [i.key for i in items if i.current] == ["lists"]
 
 
@@ -111,54 +144,84 @@ def test_the_processor_is_registered():
     assert "reeltalk.social.navigation.nav_items" in processors
 
 
+@pytest.mark.django_db
+def test_the_processor_answers_all_three_surfaces_at_once(alice):
+    """One processor feeds the desktop menu, the phone bar and the sheet, so
+    a surface can never drift from the others by reading a second source."""
+    context = nav_items(_request("/find/", alice))
+    assert [i.key for i in context["sidebar_items"]][0] == "feed"
+    assert [i.key for i in context["bottom_items"]] == [
+        "feed",
+        "search",
+        "films",
+        "lists",
+    ]
+    assert [i.key for i in context["more_items"]][-1] == "logout"
+
+
 def test_base_html_defers_the_row_to_the_shared_partial():
     """The single-source guard: base.html includes the partial and keeps no
-    nav item of its own, so a future edit cannot fork the row back into it."""
+    nav item of its own, so a future edit cannot fork the menu back into it."""
     base = (settings.BASE_DIR / "templates" / "base.html").read_text()
     assert '{% include "_navigation.html" %}' in base
     assert ">My Lists<" not in base
     assert ">Find People<" not in base
 
 
-# --- the rendered row --------------------------------------------------------
+# --- the rendered menu --------------------------------------------------------
 
 
 @pytest.mark.django_db
-def test_the_member_row_renders_every_destination(alice):
+def test_the_member_menu_renders_every_row(alice):
     nav = _site_nav(_login("alice").get("/find/").content.decode())
     for href in (
         'href="/"',
         'href="/user/alice/films/"',
         'href="/user/alice/lists/"',
         'href="/find/"',
-        'href="/preferences/import/"',
-        'href="/preferences/export/"',
+        'href="/notifications/"',
+        'href="/preferences/profile/"',
     ):
         assert href in nav
-    assert ">Log out</button>" in nav
+    assert ">Log out<" in nav
+
+
+@pytest.mark.django_db
+def test_every_row_carries_its_icon(alice):
+    """The menu is the icon-and-label surface; a row that lost its drawing
+    would render as a text-only row and read as a different design."""
+    nav = _site_nav(_login("alice").get("/find/").content.decode())
+    assert nav.count("<svg") == 7
 
 
 @pytest.mark.django_db
 def test_the_active_item_is_marked_aria_current_and_nothing_else_is(alice):
     nav = _site_nav(_login("alice").get("/find/").content.decode())
-    lit = '<a href="/find/" class="active" aria-current="page">Find People</a>'
-    assert lit in nav
+    assert '<a href="/find/" class="active" aria-current="page">' in nav
     assert nav.count('aria-current="page"') == 1
 
 
 @pytest.mark.django_db
-def test_a_page_outside_the_row_lights_nothing(alice):
+def test_a_page_outside_the_menu_lights_nothing(alice):
     nav = _site_nav(_login("alice").get("/about/").content.decode())
     assert "aria-current" not in nav
     assert 'class="active"' not in nav
 
 
 @pytest.mark.django_db
-def test_the_anonymous_row_carries_home_only(db):
-    nav = _site_nav(Client().get("/about/").content.decode())
-    assert '<a href="/">Home</a>' in nav
-    assert "<form" not in nav
-    assert "My Films" not in nav
+def test_the_group_rules_are_drawn_where_the_group_changes(alice):
+    """Three group changes (feed -> discover -> account -> session), so three
+    rules -- and none before the first row."""
+    nav = _site_nav(_login("alice").get("/find/").content.decode())
+    assert nav.count("<hr>") == 3
+
+
+@pytest.mark.django_db
+def test_a_signed_out_visitor_gets_no_menu_at_all(db):
+    body = Client().get("/about/").content.decode()
+    assert '<nav class="site-nav"' not in body
+    # Control: the page rendered, so the menu is what is absent, not the page.
+    assert "Log in" in body
 
 
 @pytest.mark.django_db
@@ -172,6 +235,6 @@ def test_log_out_is_a_post_form_with_csrf_never_a_get_link(alice):
 
 
 @pytest.mark.django_db
-def test_the_row_is_one_labeled_landmark_rendered_once(alice):
+def test_the_menu_is_one_labeled_landmark_rendered_once(alice):
     body = _login("alice").get("/find/").content.decode()
     assert body.count('<nav class="site-nav" aria-label="Main">') == 1

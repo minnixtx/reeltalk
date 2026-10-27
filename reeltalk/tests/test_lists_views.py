@@ -543,21 +543,30 @@ def test_the_nav_item_shows_even_with_no_lists(alice, root):
 
 @pytest.mark.django_db
 def test_the_nav_item_is_active_only_on_the_lists_page(alice):
-    """The header item, pinned as the header renders it (N2).
+    """The header item, pinned as the header renders it (N2, re-pinned for N4).
 
-    The active anchor now carries ``aria-current="page"``, and the page's
-    own tab bar renders a same-shaped anchor without it -- so the positive
-    read names the aria-current form (only the header carries it) and the
-    negative read drops the closing ``>`` (an active header item would now
-    end ``class="active" aria-current="page">`` and would slip past a
-    check that demanded the old ``>``).
+    The active anchor carries ``aria-current="page"``, and the page's own tab
+    bar renders a same-shaped anchor without it -- so the positive read names
+    the aria-current form (only the header carries it) and the negative read
+    drops the closing ``>`` (an active header item would now end
+    ``class="active" aria-current="page">`` and would slip past a check that
+    demanded the old ``>``).
+
+    N4 re-pinned this on purpose, twice over. The desktop row became the left
+    menu, so the anchor now wraps an icon and a label span instead of holding
+    its text directly -- the old full-anchor literal could not survive that.
+    And the menu calls the destination "Lists", not "My Lists": with one menu
+    speaking at desktop width instead of a row and a phone bar competing, the
+    short label is the one the approved design uses (the phone bar already
+    said "Lists"). The pin therefore checks the lit anchor's own opening tag
+    and the label inside it, rather than one glued string.
     """
     made = create_list(alice, title="Sci-Fi")
     lists_page = _body(_login("alice").get("/user/alice/lists/"))
     assert (
-        '<a href="/user/alice/lists/" class="active" aria-current="page">My Lists</a>'
-        in lists_page
+        '<a href="/user/alice/lists/" class="active" aria-current="page">' in lists_page
     )
+    assert '<span class="nav-label">Lists</span>' in lists_page
     # A list's own page is not the lists page, so it does not light the item.
     list_page = _body(_login("alice").get(f"/list/{made.pk}/"))
     assert '<a href="/user/alice/lists/" class="active"' not in list_page

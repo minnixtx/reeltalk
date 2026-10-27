@@ -217,81 +217,9 @@ a {
   color: var(--link);
 }
 
-/* Nav row under the marquee, centered under the search box; the active page
-   gets the red underline (R61). */
-.nav-inner {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.35rem 1.9rem;
-  padding-top: 0;
-  padding-bottom: 0.7rem;
-}
-
-.site-nav a {
-  color: var(--white);
-  text-decoration: none;
-  font-size: 0.88rem;
-  letter-spacing: 0.02em;
-  padding: 0.2rem 0.1rem;
-  position: relative;
-  border-bottom: 2px solid transparent;
-}
-
-/* Hover takes the lit-red the rest of the site already uses for "interactive"
-   (owner decision, 2026-10-04). With the resting colour now white, the old
-   brighter-cream hover would have been no feedback at all. */
-.site-nav a:hover {
-  color: var(--link);
-}
-
-.site-nav a.active {
-  color: var(--white);
-  text-shadow: 0 0 10px rgba(255, 65, 56, 0.5);
-}
-
-/* The active-page marker is a lit neon tube, not a painted rule (R67): the mockup's
-   indicator measures a white-hot core inside saturated red with ~10px of bloom, and
-   a border can carry neither, so it is a positioned bar — gradient cross-section for
-   the glass, layered shadows for the light. The transparent 2px border above stays so
-   nav metrics are untouched. */
-.site-nav a.active::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -3px;
-  height: 3px;
-  background: linear-gradient(
-    to bottom,
-    var(--red) 0 1px,
-    #fff 1px 2px,
-    var(--red-bright) 2px
-  );
-  box-shadow:
-    0 0 3px rgba(255, 120, 100, 0.95),
-    0 0 9px rgba(255, 65, 56, 0.9),
-    0 0 20px rgba(255, 45, 32, 0.6),
-    0 0 40px rgba(255, 30, 20, 0.4);
-}
-
-/* Log out reads as nav text, not a button (owner review of M6 increment 5). */
-.site-nav form.inline button {
-  border: none;
-  padding: 0.2rem 0.1rem;
-  box-shadow: none;
-  color: var(--white);
-  font-size: 0.88rem;
-  letter-spacing: 0.02em;
-}
-
-/* Log out is a <button> styled as nav text, so it takes the anchor hover red
-   too — the owner's call on 2026-10-05: two different reds side by side in
-   one nav row reads as a mistake, not as two kinds of thing. */
-.site-nav form.inline button:hover {
-  color: var(--link);
-}
+/* The nav row that lived here is retired (N4): the member destinations now
+   ride the left menu defined in the "Desktop navigation" section below, and
+   the phone surfaces in the "Mobile navigation" section after it. */
 
 /* Narrow screens: the search box drops to its own full-width line so the
    suggest dropdown keeps its shape; the wordmark steps down and the wide
@@ -349,11 +277,56 @@ a {
    moderator's corner link: those two carry standing "no CSS was written
    for it" guards (R96, R101) and stay green. */
 
-/* Waiting for the media block below: desktop keeps the text badge and no
-   bar, so these parts are inert above the breakpoint. */
-.corner-icon,
+/* The unread bell is the corner's treatment at every width now (N4): the
+   approved desktop corner is a bell with a count bubble, not the "N unread"
+   sentence the retired row's corner carried. The label stays in the DOM,
+   clipped rather than display:none, so the link keeps its accessible name.
+   Named on the corner's own parts and .header-user > a, never the badge's or
+   the moderator's own classes: those two carry standing "no CSS was written
+   for it" guards (R96, R101) and stay green. */
+.header-user > a {
+  /* position:relative is what the count bubble sits on. */
+  position: relative;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.corner-icon {
+  display: block;
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .corner-count {
-  display: none;
+  display: block;
+  position: absolute;
+  top: 2px;
+  right: 0;
+  font: 700 0.68rem/1 var(--ui);
+  background: var(--red);
+  color: #fff;
+  border-radius: 0.6rem;
+  padding: 0.18rem 0.35rem;
+}
+
+.corner-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .bottom-nav {
@@ -515,17 +488,6 @@ a {
     gap: 0.55rem;
   }
 
-  /* Every corner link is a 44px target; the position:relative lets the
-     unread count sit on the bell without naming the badge's class. */
-  .header-user > a {
-    position: relative;
-    min-width: 44px;
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
   .header-user .user-handle {
     display: none;
   }
@@ -539,44 +501,6 @@ a {
      More sheet. */
   .corner-desk {
     display: none;
-  }
-
-  /* The badge becomes a bell with a count bubble. The "N unread" label
-     stays in the DOM, clipped rather than display:none, so the link keeps
-     its accessible name. */
-  .corner-icon {
-    display: block;
-    width: 22px;
-    height: 22px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.7;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  .corner-count {
-    display: block;
-    position: absolute;
-    top: 2px;
-    right: 0;
-    font: 700 0.68rem/1 var(--ui);
-    background: var(--red);
-    color: #fff;
-    border-radius: 0.6rem;
-    padding: 0.18rem 0.35rem;
-  }
-
-  .corner-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-    border: 0;
   }
 
   .bottom-nav {
@@ -668,6 +592,158 @@ a {
      the desktop column keeps its current wrapping. */
   .review-body {
     overflow-wrap: anywhere;
+  }
+}
+
+/* --- Desktop navigation (N4) -------------------------------------------------
+   The approved wide layout: a 280px left menu that is the page's own column,
+   a full-bleed header above it, and the reading column centred in what is
+   left. The menu is a body child (templates/base.html), so the layout is a
+   body grid rather than a padding hack: the header spans both tracks and the
+   menu sticks in its own column, which is what keeps a viewport-centred 40rem
+   column from sitting under a fixed sidebar at 1024px. Values are the
+   approved mockup's (.n1-* in .qwen/tmp/navigation-n1/proposal.js).
+
+   Above 1023px only: the phone surfaces are the other half of the design and
+   the 1023px block already hides this menu, so nothing here can reach them. */
+@media (min-width: 1024px) {
+  body {
+    display: grid;
+    /* One track by default. A signed-out visitor gets no menu at all (N1
+       decision 8), and a standing 280px first track would leave them an empty
+       gutter down the left of the landing page. */
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  body:has(.site-nav) {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+
+  .site-header {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  main {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  /* body > because home puts its footer inside the rail instead (R131), and
+     .rail is a grid of its own -- an unscoped rule would place the rail's
+     footer in the body's tracks and drop it out of the column it belongs to. */
+  body > .site-footer {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+
+  /* With a menu, the content and the footer move into the second track and
+     the menu takes the first. */
+  body:has(.site-nav) main,
+  body:has(.site-nav) > .site-footer {
+    grid-column: 2;
+  }
+
+  /* Full-bleed and slim: the wordmark owns the menu's width, the search box
+     keeps a real field, the corner stays right. The header spans the whole
+     viewport now, so the 72rem inner cap would leave the corner floating in
+     the middle of the band. */
+  .site-header .container {
+    max-width: none;
+  }
+
+  .header-top {
+    grid-template-columns: 252px minmax(200px, 480px) 1fr;
+    gap: 1.25rem 1.75rem;
+    padding: 0.75rem 1.75rem;
+  }
+
+  /* The bar is 80px tall instead of the old ~130px, and the wordmark is the
+     step-down size it already wore under 40rem: at 3.6rem the tube could not
+     fit the menu's column and the slim band together. */
+  .brand {
+    font-size: 2.2rem;
+  }
+
+  .header-user {
+    gap: 1.25rem;
+  }
+
+  .site-nav {
+    display: flex;
+    flex-direction: column;
+    grid-column: 1;
+    grid-row: 2;
+    /* The column scrolls with the page until the menu fills the viewport,
+       then sticks -- the approved behaviour, and the reason the menu is a
+       column rather than a fixed overlay. */
+    position: sticky;
+    top: 0;
+    align-self: start;
+    box-sizing: border-box;
+    max-height: 100vh;
+    overflow-y: auto;
+    padding: 16px 0;
+    background: rgba(22, 19, 17, 0.94);
+    border-right: 1px solid #40372f;
+  }
+
+  /* One row shape for both kinds of destination: an anchor navigates, the Log
+     out row acts, and a reader must not be able to tell them apart. The bare
+     <button> blocks would otherwise dress the Log out row in Bebas caps with
+     bloom, so it is un-dressed here the way the More sheet un-dresses its rows. */
+  .site-nav a,
+  .site-nav form.inline button {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 54px;
+    padding: 0 28px;
+    color: #c8bdad;
+    background: none;
+    border: 0;
+    box-shadow: none;
+    font-size: 1rem;
+    text-align: left;
+    text-decoration: none;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  .site-nav svg {
+    width: 23px;
+    height: 23px;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .site-nav a:hover,
+  .site-nav form.inline button:hover {
+    background: #2b241e;
+    color: #f5e4ca;
+  }
+
+  /* The lit row is amber text only. The retired row's active state was a neon
+     tube under the label, which has no meaning in a vertical column. */
+  .site-nav a.active {
+    color: #f1c88d;
+    text-shadow: none;
+  }
+
+  /* A rule opens each new group (NavItem.group); the partial draws it, this
+     gives it the mockup's spacing. */
+  .site-nav hr {
+    width: 100%;
+    border: 0;
+    border-top: 1px solid #493d32;
+    margin: 16px 0;
   }
 }
 
@@ -2160,6 +2236,24 @@ a.genre-pill:hover {
     max-height: none;
     overflow: visible;
     overscroll-behavior: auto;
+  }
+}
+
+/* The left menu takes 280px out of the page, so the home 2-pane needs width
+   the retired nav row never demanded: the feed pane would fall to ~350px at
+   1024px. Below 1280px the feed is the only pane and the rail falls in under
+   it. Placed after the block above and mirroring its declarations on purpose
+   -- below either stack point the narrow layout is the same layout -- and not
+   folded into it, because that block is the 64rem stack point the rail's own
+   placement tests read as its single definition. */
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2rem;
+  }
+
+  .rail {
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
   }
 }
 

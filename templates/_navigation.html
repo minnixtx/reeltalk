@@ -1,17 +1,29 @@
-{# The shared nav row (N2): the items come from reeltalk.social.navigation.nav_items. #}
-{# Real pages only; "Reviews" joins when a /reviews/ index exists. #}
+{# The desktop menu (N4): the items come from reeltalk.social.navigation.nav_items. #}
+{# Members only: a signed-out visitor gets no menu at all (N1 decision 8), so the #}
+{# whole partial is guarded rather than rendering an empty landmark. #}
+{% if sidebar_items %}
 <nav class="site-nav" aria-label="Main">
-  <div class="container nav-inner">
-    {% for item in nav_items %}
-    {% if item.kind == "form" %}
-    {# Log out acts, so it is a POST form with CSRF -- never a GET link. #}
-    <form method="post" action="{{ item.url }}" class="inline">
-      {% csrf_token %}
-      <button type="submit">{{ item.label }}</button>
-    </form>
-    {% else %}
-    <a href="{{ item.url }}"{% if item.current %} class="active" aria-current="page"{% endif %}>{{ item.label }}</a>
-    {% endif %}
-    {% endfor %}
-  </div>
+  {% for item in sidebar_items %}
+  {# A rule opens each new group (NavItem.group); the first row opens none. #}
+  {# ifchanged has to run on every row: it only records a value on the turns #}
+  {# that render it, so guarding the tag with forloop.first loses the opening #}
+  {# group and rules before the second row instead of the second group. #}
+  {% ifchanged item.group %}{% if not forloop.first %}<hr>{% endif %}{% endifchanged %}
+  {% if item.kind == "form" %}
+  {# Log out acts, so it is a POST form with CSRF -- never a GET link. #}
+  <form method="post" action="{{ item.url }}" class="inline">
+    {% csrf_token %}
+    <button type="submit">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{ item.icon }}"></path></svg>
+      <span class="nav-label">{{ item.label }}</span>
+    </button>
+  </form>
+  {% else %}
+  <a href="{{ item.url }}"{% if item.current %} class="active" aria-current="page"{% endif %}>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{ item.icon }}"></path></svg>
+    <span class="nav-label">{{ item.label }}</span>
+  </a>
+  {% endif %}
+  {% endfor %}
 </nav>
+{% endif %}
