@@ -131,6 +131,15 @@ def _rule_for(selector: str) -> str | None:
     return None
 
 
+def _rules_for(selector: str) -> list[str]:
+    """Declarations of every rule whose selector list names this selector."""
+    return [
+        declarations
+        for selectors, declarations in _css_rules()
+        if selector in selectors
+    ]
+
+
 # --- The overlay -------------------------------------------------------------
 
 
@@ -423,9 +432,12 @@ def test_nothing_underlines_the_prose_when_the_row_is_hovered():
 @pytest.mark.django_db
 def test_post_prose_is_white_not_cream():
     # Owner pass, 2026-10-04. Asserted against the token rather than a literal so
-    # the palette stays the single place the colour is decided.
-    declarations = _rule_for(".review-body")
-    assert declarations is not None, "no .review-body rule in the shipped stylesheet"
+    # the palette stays the single place the colour is decided. N3 added a second
+    # .review-body rule (the mobile overflow-wrap), so the check reads every rule
+    # for the selector: white must be declared somewhere, and no rule may reach
+    # for cream - the negative now covers the mobile rule too.
+    declarations = " ".join(_rules_for(".review-body"))
+    assert declarations, "no .review-body rule in the shipped stylesheet"
     assert "color: var(--white)" in declarations
     assert "var(--cream)" not in declarations
 

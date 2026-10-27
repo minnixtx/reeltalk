@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="{% static 'css/reeltalk.css' %}">
   <meta name="csrf-token" content="{{ csrf_token }}">
   <script src="{% static 'js/search.js' %}" defer></script>
+  <script src="{% static 'js/nav_sheet.js' %}" defer></script>
 </head>
 <body>
 <header class="site-header">
@@ -30,7 +31,15 @@
         {# navigates, so it wears the header link's own look; the mark-all- #}
         {# read control it leads to really acts, so that one is a <button>. #}
         {# Ahead of the handle so the handle keeps the right grid edge (R80). #}
-        <a class="notifications-link" href="{% url 'notifications' %}">{{ unread_notifications }} unread</a>
+        {# N3: the bell and count are the phone treatment, the "N unread" #}
+        {# label the desktop one; the stylesheet picks which half shows. #}
+        {# The label stays in the DOM (clipped, not display:none) so the #}
+        {# link keeps its accessible name on phones. #}
+        <a class="notifications-link" href="{% url 'notifications' %}">
+          <svg class="corner-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg>
+          <span class="corner-count" aria-hidden="true">{{ unread_notifications }}</span>
+          <span class="corner-label">{{ unread_notifications }} unread</span>
+        </a>
         {% endif %}
         {% if user.is_moderator %}
         {# The moderator's way onto /moderate/ (R101). An <a> and no .btn for #}
@@ -39,8 +48,9 @@
         {# Placed after the badge so neither existing element moves, and the #}
         {# handle keeps the right grid edge (R80). .header-user is pinned to #}
         {# its own grid column at both breakpoints, so one more flex child #}
-        {# here cannot reflow the top row. #}
-        <a class="moderation-link" href="{% url 'moderation' %}">Moderate</a>
+        {# here cannot reflow the top row. N3: the wrapper marks this corner #}
+        {# item desktop-only; on phones Moderate rides in the More sheet. #}
+        <span class="corner-desk"><a class="moderation-link" href="{% url 'moderation' %}">Moderate</a></span>
         {% endif %}
         {# The avatar rides inside the handle link so the corner stays one tab stop. #}
         <a class="user-name" href="{% url 'user-profile' user.localname %}">
@@ -67,6 +77,10 @@
   {# partial is what the N3/N4 surfaces will include alongside it. #}
   {% include "_navigation.html" %}
 </header>
+{# The phone surfaces (N3): the bottom bar and the More sheet, from the #}
+{# same registry. The partial guards itself to members; on desktop the bar #}
+{# is display:none and the sheet never opens. #}
+{% include "_mobile_nav.html" %}
 {# Pages that run wider than the reading column override main_class (home's 2-pane, R64). #}
 <main class="container{% block main_class %}{% endblock %}">
   {% if messages %}

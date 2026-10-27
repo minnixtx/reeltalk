@@ -104,7 +104,14 @@ def test_profile_page_edit_button_only_for_self(client):
 
     member(localname="bob", password="p")
     client.login(username="bob", password="p")
-    assert b"/preferences/profile/" not in client.get("/user/alice/").content
+    other = client.get("/user/alice/").content
+    # N3: every member page carries the More sheet, and its Profile /
+    # Settings row points at the viewer's own settings -- so the chrome
+    # outside main names that URL for every viewer and says nothing about
+    # whose profile this is. The pin is scoped to the page's own content,
+    # where the edit button lives; the negative is unchanged in force.
+    page = other[other.index(b"<main") : other.index(b"</main>")]
+    assert b"/preferences/profile/" not in page
 
 
 @pytest.mark.django_db

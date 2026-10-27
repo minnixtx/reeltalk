@@ -1,12 +1,23 @@
 {% extends "base.html" %}
 
-{% block title %}Edit profile — ReelTalk{% endblock %}
+{% block title %}Profile / Settings — ReelTalk{% endblock %}
 
 {% block content %}
-<h1>Edit profile</h1>
+<h1>Profile / Settings</h1>
 <form method="post" enctype="multipart/form-data">
   {% csrf_token %}
   {{ form.as_p }}
   <button type="submit" class="btn cinema-button cinema-button--primary">Save changes</button>
 </form>
+{# N3: this page is the settings hub the More sheet and (at N4) the sidebar #}
+{# lead to. Import and Export rode the old desktop nav row; they live here #}
+{# now at every width, so the destinations survive the row's N4 retirement. #}
+{# The form above is untouched: no new settings features are invented here. #}
+<nav class="settings-links" aria-label="Settings">
+  <a href="{% url 'import-films' %}">Import<span><small>Bring your film library into ReelTalk</small></span></a>
+  <a href="{% url 'export-films' %}">Export<span><small>Download your film library</small></span></a>
+  {% if user.is_moderator %}
+  <a href="{% url 'moderation' %}">Moderate<span><small>The reports queue</small></span></a>
+  {% endif %}
+</nav>
 {% endblock %}

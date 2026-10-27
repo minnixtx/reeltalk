@@ -5,6 +5,15 @@
 {% block content %}
 <h1>Search</h1>
 
+{# N3: phones hide the header box (the whole search surface is members-only, #}
+{# R80, so no anonymous guard here). This field is the mobile entry point; #}
+{# search.js suggests into it exactly as into the header box, and #}
+{# nav_sheet.js focuses it when it is the visible one. #}
+<form class="global-search page-search" action="{% url 'film-search' %}" method="get" role="search">
+  <input type="search" name="q" value="{{ query }}" placeholder="Search films…" autocomplete="off" aria-label="Search films">
+  <ul class="suggest-list" hidden></ul>
+</form>
+
 {% if not query %}
   <p class="muted">Use the search box above to find films.</p>
   {% if user.is_authenticated %}

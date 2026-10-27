@@ -1,0 +1,47 @@
+{# The phone surfaces (N3): the fixed bottom bar and the More sheet, both #}
+{# rendered from the shared registry (reeltalk.social.navigation), members #}
+{# only -- signed-out visitors get neither (N1 decision 8). #}
+{% if user.is_authenticated %}
+<nav class="bottom-nav" aria-label="Primary">
+  {% for item in bottom_items %}
+  <a href="{{ item.url }}"{% if item.current %} class="active" aria-current="page"{% endif %}>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{ item.icon }}"></path></svg>
+    <span class="nav-label">{{ item.label }}</span>
+  </a>
+  {% endfor %}
+  {# More is a control, not a destination: it opens the sheet below. #}
+  <button type="button" class="more-button" aria-haspopup="dialog" aria-expanded="false" aria-controls="more-sheet">
+    <span class="more-dots" aria-hidden="true">&#8226;&#8226;&#8226;</span>
+    <span class="nav-label">More</span>
+  </button>
+</nav>
+{# A native <dialog>: showModal gives the focus containment and the Escape #}
+{# dismissal; nav_sheet.js adds the open/close wiring around it. The Log out #}
+{# row is the same POST+CSRF form the desktop row carries, never a GET link. #}
+<dialog id="more-sheet" class="more-sheet" aria-label="More">
+  <div class="more-sheet-heading">
+    <h2>More</h2>
+    <button type="button" class="more-sheet-close" aria-label="Close More">&times;</button>
+  </div>
+  {% for item in more_items %}
+  {% if item.kind == "form" %}
+  <hr>
+  <form method="post" action="{{ item.url }}" class="inline">
+    {% csrf_token %}
+    <button type="submit">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{ item.icon }}"></path></svg>
+      <span class="nav-label">{{ item.label }}</span>
+    </button>
+  </form>
+  {% else %}
+  <a href="{{ item.url }}"{% if item.current %} class="active" aria-current="page"{% endif %}>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{ item.icon }}"></path></svg>
+    <span class="nav-label">{{ item.label }}</span>
+    {% if item.key == "notifications" and unread_notifications %}
+    <small>{{ unread_notifications }} unread</small>
+    {% endif %}
+  </a>
+  {% endif %}
+  {% endfor %}
+</dialog>
+{% endif %}

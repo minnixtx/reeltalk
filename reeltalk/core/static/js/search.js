@@ -1,7 +1,8 @@
 /* ReelTalk search behaviour (M2 increment 4). Deliberately small vanilla JS
-   per R6 — no framework, no build step. Two jobs: the header
-   search-as-you-type dropdown and the one-click watchlist buttons on the
-   search results page. */
+   per R6 — no framework, no build step. Two jobs: the search-as-you-type
+   dropdown (bound to every .global-search form: the header box and, since
+   N3, the search page's mobile field) and the one-click watchlist buttons
+   on the search results page. */
 (function () {
   "use strict";
 
@@ -10,15 +11,21 @@
     return meta ? meta.content : "";
   }
 
-  // --- Header suggest dropdown ---------------------------------------------
+  // --- Search-as-you-type dropdown ------------------------------------------
 
   function initSuggest() {
-    var form = document.querySelector(".global-search");
-    if (!form) {
+    // Every search field on the page gets its own dropdown: the header box
+    // and, since N3, the search page's mobile field. The list is the form's
+    // own .suggest-list, anchored to the form's position:relative.
+    document.querySelectorAll(".global-search").forEach(initForm);
+  }
+
+  function initForm(form) {
+    var input = form.querySelector("input[type=search]");
+    var list = form.querySelector(".suggest-list");
+    if (!input || !list) {
       return;
     }
-    var input = form.querySelector("input[type=search]");
-    var list = document.getElementById("search-suggest");
     var timer = null;
     // R32: the rendered row links and the keyboard-active one (-1 = none).
     var items = [];

@@ -338,6 +338,339 @@ a {
   }
 }
 
+/* --- Mobile navigation (N3) --------------------------------------------------
+   The approved phone pattern: a compact header (wordmark, unread bell,
+   avatar), a fixed bottom bar (Feed, Search, My Films, Lists, More) and a
+   More sheet that is a real dialog. Desktop is untouched on purpose: every
+   phone part starts hidden here (the bell parts, the bar, the page field),
+   and every change to shared chrome lives under the 1024px line where the
+   design retires the nav row. The corner rules name the corner's own parts
+   and .header-user > a, never the unread badge's own class or the
+   moderator's corner link: those two carry standing "no CSS was written
+   for it" guards (R96, R101) and stay green. */
+
+/* Waiting for the media block below: desktop keeps the text badge and no
+   bar, so these parts are inert above the breakpoint. */
+.corner-icon,
+.corner-count {
+  display: none;
+}
+
+.bottom-nav {
+  display: none;
+}
+
+.page-search {
+  display: none;
+}
+
+.more-sheet {
+  color: #eadbc1;
+  background: #201b17;
+  border: 1px solid #665344;
+  padding: 20px 20px 28px;
+  width: min(24rem, calc(100vw - 2rem));
+}
+
+.more-sheet::backdrop {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.more-sheet-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.more-sheet-heading h2 {
+  font-size: 26px;
+  margin: 0 0 10px;
+}
+
+/* The sheet's buttons must not arrive pre-lit: the three bare-button blocks
+   would otherwise dress the close control and the Log out row in Bebas
+   caps with bloom. */
+.more-sheet button {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #edddc4;
+  font-family: var(--body);
+}
+
+.more-sheet-close {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  font: 28px/1 sans-serif;
+}
+
+.more-sheet form.inline {
+  display: block;
+}
+
+.more-sheet a,
+.more-sheet form.inline button {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 54px;
+  padding: 0 12px;
+  color: #b9ac99;
+  font-family: var(--body);
+  font-size: 15px;
+  text-decoration: none;
+}
+
+.more-sheet .nav-label {
+  flex: 1;
+  /* The Log out row is a <button>, and buttons centre their text; the sheet
+     rows are a list and must agree with the anchors beside them. */
+  text-align: left;
+}
+
+.more-sheet a small {
+  margin-left: auto;
+  color: #a89c8c;
+  font-size: 11px;
+}
+
+.more-sheet svg {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.more-sheet hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid #54483e;
+  margin: 14px 0;
+}
+
+/* The Profile / Settings hub: Import and Export live here now at every
+   width, so the destinations outlive the desktop nav row's N4 retirement. */
+.settings-links {
+  border-top: 1px solid #54483e;
+  margin-top: 24px;
+}
+
+.settings-links a {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 4px 0;
+  color: #d8c8b0;
+  text-decoration: none;
+  border-bottom: 1px solid #54483e;
+}
+
+.settings-links a:hover {
+  color: var(--link);
+}
+
+.settings-links a small {
+  display: block;
+  font: 13px sans-serif;
+  color: #a99a85;
+  margin-top: 5px;
+}
+
+@media (max-width: 1023px) {
+  /* One compact row: wordmark left, corner right. The search field moves
+     into the search page (see .page-search) and the nav row retires -- its
+     destinations ride the bar and the sheet now. */
+  .header-top {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.5rem 1rem;
+    padding-top: 0.55rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .brand {
+    font-size: 1.65rem;
+  }
+
+  .global-search {
+    display: none;
+  }
+
+  .site-nav {
+    display: none;
+  }
+
+  .header-user {
+    grid-column: 2;
+    min-width: 0;
+    gap: 0.55rem;
+  }
+
+  /* Every corner link is a 44px target; the position:relative lets the
+     unread count sit on the bell without naming the badge's class. */
+  .header-user > a {
+    position: relative;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .header-user .user-handle {
+    display: none;
+  }
+
+  .header-user .avatar {
+    width: 28px;
+    height: 28px;
+  }
+
+  /* The corner's Moderate is desktop's; on phones Moderate rides in the
+     More sheet. */
+  .corner-desk {
+    display: none;
+  }
+
+  /* The badge becomes a bell with a count bubble. The "N unread" label
+     stays in the DOM, clipped rather than display:none, so the link keeps
+     its accessible name. */
+  .corner-icon {
+    display: block;
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .corner-count {
+    display: block;
+    position: absolute;
+    top: 2px;
+    right: 0;
+    font: 700 0.68rem/1 var(--ui);
+    background: var(--red);
+    color: #fff;
+    border-radius: 0.6rem;
+    padding: 0.18rem 0.35rem;
+  }
+
+  .corner-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 20;
+    background: #211b17;
+    border-top: 1px solid #75604e;
+    padding: 6px 6px max(8px, env(safe-area-inset-bottom));
+  }
+
+  .bottom-nav a,
+  .bottom-nav button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-height: 50px;
+    min-width: 0;
+    padding: 0;
+    color: #b9aa94;
+    background: none;
+    border: 0;
+    box-shadow: none;
+    text-decoration: none;
+    text-shadow: none;
+    text-transform: none;
+    letter-spacing: 0;
+    font: 11px/1.2 sans-serif;
+  }
+
+  .bottom-nav svg {
+    width: 25px;
+    height: 25px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .bottom-nav [aria-current="page"] {
+    color: #f2d8a7;
+    border-top: 2px solid #c14b37;
+  }
+
+  .bottom-nav .more-button[aria-expanded="true"] {
+    color: #f2d8a7;
+  }
+
+  /* The sheet lands as a bottom sheet, clear of the notch. */
+  .more-sheet {
+    position: fixed;
+    inset: auto 0 0 0;
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+    border-radius: 14px 14px 0 0;
+    max-height: 85dvh;
+    overflow-y: auto;
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+  }
+
+  /* The fixed bar must not eat the page's last line. */
+  body {
+    padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+  }
+
+  /* The search page's own field is the phone entry point; 16px keeps iOS
+     from zooming the viewport on focus. */
+  .page-search {
+    display: block;
+    margin: 1.25rem 0 1.5rem;
+  }
+
+  .page-search input[type="search"] {
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  /* A long post URL is one unbreakable word: the ellipsis markup alone still
+     pushed a 320px viewport sideways (measured 355px of content), the same
+     trap .review-author already carries for remote handles. The N1 mockup
+     hit this and carried overflow-wrap into the acceptance. Mobile only, so
+     the desktop column keeps its current wrapping. */
+  .review-body {
+    overflow-wrap: anywhere;
+  }
+}
+
 h1 {
   font-size: 1.6rem;
   margin: 1.5rem 0 1rem;
