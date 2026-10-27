@@ -188,6 +188,10 @@ TEMPLATES = [
                 # indexed COUNT on an authenticated render, guarded inside
                 # the processor, and it never runs for a JSON response.
                 "reeltalk.notifications.context_processors.unread_notifications",
+                # The nav row (N2): destinations defined once in
+                # reeltalk.social.navigation and rendered by
+                # templates/_navigation.html. reverse() only, no query.
+                "reeltalk.social.navigation.nav_items",
             ],
         },
     },

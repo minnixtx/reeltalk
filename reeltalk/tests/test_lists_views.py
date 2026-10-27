@@ -543,12 +543,24 @@ def test_the_nav_item_shows_even_with_no_lists(alice, root):
 
 @pytest.mark.django_db
 def test_the_nav_item_is_active_only_on_the_lists_page(alice):
+    """The header item, pinned as the header renders it (N2).
+
+    The active anchor now carries ``aria-current="page"``, and the page's
+    own tab bar renders a same-shaped anchor without it -- so the positive
+    read names the aria-current form (only the header carries it) and the
+    negative read drops the closing ``>`` (an active header item would now
+    end ``class="active" aria-current="page">`` and would slip past a
+    check that demanded the old ``>``).
+    """
     made = create_list(alice, title="Sci-Fi")
     lists_page = _body(_login("alice").get("/user/alice/lists/"))
-    assert '<a href="/user/alice/lists/" class="active">My Lists</a>' in lists_page
+    assert (
+        '<a href="/user/alice/lists/" class="active" aria-current="page">My Lists</a>'
+        in lists_page
+    )
     # A list's own page is not the lists page, so it does not light the item.
     list_page = _body(_login("alice").get(f"/list/{made.pk}/"))
-    assert '<a href="/user/alice/lists/" class="active">' not in list_page
+    assert '<a href="/user/alice/lists/" class="active"' not in list_page
 
 
 @pytest.mark.django_db
