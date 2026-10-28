@@ -283,3 +283,53 @@ def test_the_page_column_does_not_size_itself_to_the_text_on_it():
     rule = re.search(r"main\s*\{[^}]*\}", _media_block(css, "min-width:1024px"))
     assert rule, "the desktop block no longer styles main at all"
     assert "width: 100%" in rule.group(0), rule.group(0)
+
+
+def _desktop_decls(selector: str) -> dict[str, str]:
+    """Declarations of the first desktop rule with exactly this selector."""
+    block = _media_block(
+        Path(finders.find("css/reeltalk.css")).read_text(), "min-width:1024px"
+    )
+    for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", block):
+        if selector not in [s.strip() for s in match.group(1).split(",")]:
+            continue
+        out = {}
+        for part in match.group(2).split(";"):
+            prop, _, value = part.partition(":")
+            if prop.strip():
+                out[prop.strip()] = value.strip()
+        return out
+    raise AssertionError(f"no {selector!r} rule in the desktop block")
+
+
+def test_the_header_stays_pinned_while_the_page_scrolls():
+    """Owner, 2026-10-28: reading a long feed must not cost you the search box or
+    the profile corner.
+
+    Sticky, not fixed: fixed would need a spacer the height of the header, and
+    sticky keeps the header in its grid row. The background is load-bearing too -
+    the band was transparent only because nothing ever passed under it, and
+    without it the feed scrolls visibly through the wordmark. Measured after the
+    change: header top 0 and height 82px at 1024, 1280, 1440 and 1869 with the
+    document scrolled 1500px.
+    """
+    decls = _desktop_decls(".site-header")
+    assert decls["position"] == "sticky"
+    assert decls["top"] == "0"
+    assert decls["background"] == "var(--black)", (
+        "a transparent band lets the feed scroll through it"
+    )
+    assert int(decls["z-index"]) > 0, "it has to paint over the columns it passes"
+
+
+def test_the_menu_sticks_below_the_header_not_under_it():
+    """The menu already stuck, at ``top: 0`` -- which once the header stuck meant
+    the header painted over the Feed row. Both offsets come from one variable so
+    they cannot drift when the header's height changes."""
+    nav = _desktop_decls(".site-nav")
+    body = _desktop_decls("body")
+    assert nav["top"] == "var(--header-h)"
+    assert nav["max-height"] == "calc(100vh - var(--header-h))"
+    assert body["--header-h"].endswith("px"), (
+        "the header height is a length, not a keyword"
+    )

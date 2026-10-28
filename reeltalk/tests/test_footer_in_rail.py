@@ -283,7 +283,7 @@ def test_below_the_stack_point_the_rail_returns_to_document_flow():
     assert decls["overscroll-behavior"] == "auto"
 
 
-# --- The footer restacked for the 22rem column ----------------------------
+# --- The footer restacked for the 20rem column ----------------------------
 
 
 @pytest.mark.django_db
@@ -292,7 +292,7 @@ def test_the_rail_footer_stacks_one_zone_per_row():
     assert decls["display"] == "flex"
     assert decls["flex-direction"] == "column"
     assert decls["align-items"] == "center"
-    # The 72rem band width belongs to the wide footer only; inside a 22rem
+    # The 72rem band width belongs to the wide footer only; inside a 20rem
     # column it would just be dead space.
     assert decls["max-width"] == "none"
 
@@ -344,9 +344,13 @@ def test_the_rail_brand_block_centres_on_the_tagline():
 @pytest.mark.django_db
 def test_the_home_is_still_two_pane():
     """R64: no third column. The rail getting its own scroll is not an excuse
-    for the layout to grow."""
+    for the layout to grow.
+
+    20rem, not the 22rem this asserted until N8: the owner picked a 62rem home
+    band with the menu inside it, and the rail is what paid for the feed's 600px
+    column. The ticket art scales with the track, so the stubs step down ~9%."""
     decls = _decl_map(_rule_for(".home-grid"))
-    assert decls["grid-template-columns"] == "minmax(0, 1fr) 22rem"
+    assert decls["grid-template-columns"] == "minmax(0, 1fr) 20rem"
 
 
 @pytest.mark.django_db
