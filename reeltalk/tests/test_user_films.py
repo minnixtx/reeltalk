@@ -349,15 +349,38 @@ def test_home_feed_excludes_strangers(login, user, film, admin):
 
 
 @pytest.mark.django_db
-def test_home_anonymous_has_no_feed(client, admin):
+def test_home_anonymous_gets_the_local_feed_and_the_cta(client, admin):
+    """RE-PINNED at N6, deliberately.
+
+    This asserted ``'class="feed"' not in body``: through N5 a stranger got a
+    landing page and no feed at all. The owner's N6 ruling gives a signed-out
+    visitor the instance's public local posts, so the feed section is now what
+    the signup CTA sits above rather than what it stands in for. The CTA still
+    shipping is the half this test existed for, and it still has to be asserted
+    against a page that has a feed on it.
+
+    Which rows belong in a stranger's feed (local only, no mirrors, no shelf
+    events, no controls) is pinned in ``test_feed_scopes_public.py``; this is
+    the home page's shape, which is what this file has always covered.
+    """
     # Opened explicitly: the shipped default is invite-only, which hides the
     # CTA, so without this the "Sign up" assertion below would be testing
-    # nothing and the no-feed half would pass against a page with no door.
+    # nothing and the feed half would pass against a page with no door.
     open_signup()
+    dune = Film.objects.create(title="Dune", year=2021)
+    bob = member(localname="bob", password="s3cretpass")
+    Status.objects.create(
+        user=bob,
+        film=dune,
+        status_type=Status.Type.REVIEW,
+        content="<p>stranger-readable</p>",
+        published_date=timezone.now(),
+    )
     resp = client.get("/")
     assert resp.status_code == 200
     body = resp.content.decode()
-    assert 'class="feed"' not in body
+    assert 'class="feed"' in body
+    assert "stranger-readable" in body
     assert "Sign up" in body
 
 

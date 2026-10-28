@@ -31,10 +31,12 @@ pinned by ``test_mobile_nav.py``.
 """
 
 import re
+from pathlib import Path
 
 import pytest
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
+from django.contrib.staticfiles import finders
 from django.test import Client, RequestFactory
 
 from reeltalk.social.navigation import nav_items, sidebar_nav
@@ -238,3 +240,46 @@ def test_log_out_is_a_post_form_with_csrf_never_a_get_link(alice):
 def test_the_menu_is_one_labeled_landmark_rendered_once(alice):
     body = _login("alice").get("/find/").content.decode()
     assert body.count('<nav class="site-nav" aria-label="Main">') == 1
+
+
+# --- the stylesheet -----------------------------------------------------------
+
+
+def _media_block(css: str, query: str) -> str:
+    """The body of every ``@media`` block whose header contains ``query``."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    bodies = []
+    for match in re.finditer(r"@media\s*([^{]+)\{", css):
+        if query not in re.sub(r"\s+", "", match.group(1)):
+            continue
+        depth, i = 1, match.end()
+        while depth:
+            depth += css[i] == "{"
+            depth -= css[i] == "}"
+            i += 1
+        bodies.append(css[match.end() : i - 1])
+    assert bodies, f"no @media block matching {query!r}"
+    return "".join(bodies)
+
+
+def test_the_page_column_does_not_size_itself_to_the_text_on_it():
+    """The ``width`` ``main`` wears in the desktop block is load-bearing.
+
+    ``.container`` centres itself with ``margin: 0 auto``, and auto margins on a
+    grid item defeat the default stretch: the item shrink-wraps to its content's
+    max-content instead. N4 made ``body`` a grid, so from then on the page column
+    sized itself to the length of the text on it. Measured at 1440px the Local
+    feed rendered 486px against Following's 721px for an identical layout, which
+    is the owner-reported "the feed changes width between scopes". As a block
+    child of a block body the same declaration merely centred, which is why it
+    took the grid to create the condition and two feed scopes to make it visible.
+
+    ``width: 100%`` restores the fill; ``max-width`` still caps the column and
+    the auto margins still centre it once capped. Re-measured after the fix at
+    1440, 1280 and 1024 with all three scopes agreeing at each. This guard is here
+    so the declaration is not read as redundant and tidied away.
+    """
+    css = Path(finders.find("css/reeltalk.css")).read_text()
+    rule = re.search(r"main\s*\{[^}]*\}", _media_block(css, "min-width:1024px"))
+    assert rule, "the desktop block no longer styles main at all"
+    assert "width: 100%" in rule.group(0), rule.group(0)

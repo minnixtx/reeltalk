@@ -195,10 +195,18 @@ def test_the_fragment_is_a_fragment_not_a_page(alice, admin):
         )
 
 
-def test_the_fragment_route_requires_a_member(db):
+def test_the_fragment_route_is_open_to_a_stranger_now(db):
+    """RE-PINNED at N6, deliberately. Through N5 this asserted ``302 → /login/``
+    because the fragment could only ever be a member's own feed. A signed-out
+    visitor now has a feed of their own (Local), and its endless scroll needs
+    this route exactly as a member's does — a redirect here would hand
+    ``feed.js`` a login page to splice into the ``<ul>``. Which rows it serves,
+    and the scope rules around them, are pinned in
+    ``test_feed_scopes_public.py``; this assertion is only that the route
+    answers with feed markup rather than a sign-in form."""
     resp = Client().get("/feed/page/")
-    assert resp.status_code == 302
-    assert "/login/" in resp.url
+    assert resp.status_code == 200
+    assert "<form" not in resp.content.decode(), "a login page spliced into the feed"
 
 
 def test_the_fragment_returns_the_page_the_cursor_names(alice, admin):
@@ -298,12 +306,33 @@ def test_the_end_marker_is_inside_the_list_on_the_full_page(alice, admin):
     assert 'class="feed-end"' in _feed_region(body)
 
 
-def test_the_scroll_scripts_are_only_sent_to_members(admin):
-    """Anonymous visitors get the landing CTA, not a scroll wired to a route
-    they cannot reach."""
+def test_a_stranger_gets_the_scroll_and_not_the_applaud_script(admin):
+    """RE-PINNED at N6, and the split is the point.
+
+    Through N5 the anonymous home page was a landing page with no feed, so it
+    shipped neither script. A stranger now has a Local feed with a sentinel and
+    an Older link of their own, so withholding ``feed.js`` would leave them a
+    manual pager on a page that offers a scroll — the script ships.
+
+    ``likes.js`` does not. Its only handler is the ``.applaud-btn`` click, and
+    the row withholds that button from a stranger because the like route is
+    ``login_required``. Downloading a script with nothing in the document for it
+    to bind is the mirror image of R85: don't ship machinery for a control the
+    page refused to render. Asserting both halves keeps this a real check in
+    each direction, where "neither script" and "both scripts" would both have
+    passed one of the two old assertions.
+    """
     body = Client().get("/").content.decode()
-    assert "feed.js" not in body
+    assert "feed.js" in body
     assert "likes.js" not in body
+
+
+def test_a_member_gets_both_scripts(alice, admin):
+    """Non-vacuity for the half above: ``likes.js`` is gone from the template
+    for the stranger, not from the page."""
+    body = _member_client().get("/").content.decode()
+    assert "feed.js" in body
+    assert "likes.js" in body
 
 
 def test_an_empty_feed_renders_no_list_and_no_scroll_state(alice, admin):

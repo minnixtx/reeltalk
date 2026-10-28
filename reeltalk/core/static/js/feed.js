@@ -51,6 +51,16 @@
       return;
     }
 
+    /* The scope rides along with every page (N6). It is read off the page's own
+       address rather than a data attribute because the address IS the state —
+       that is the whole N1 Q6 design: no session write, the query parameter is
+       the scope, so the scroll cannot ask for a different tab than the one
+       being read. Absent means the visitor's default scope, and the route
+       resolves it the same way the page does. Without this, page 2 of Local
+       would silently be page 2 of Following. */
+    var scope = new URLSearchParams(window.location.search).get("scope");
+    var scopeQuery = scope ? "scope=" + encodeURIComponent(scope) + "&" : "";
+
     /* JS takes over the trigger; the link stays in the DOM as the fallback
        (decision 5). The whole paragraph is hidden rather than the anchor alone,
        so an empty <p> does not leave a gap where the link was. Its href is moved
@@ -66,7 +76,7 @@
         observer.disconnect();
       }
       if (revealOlder) {
-        older.href = "/?c=" + encodeURIComponent(next);
+        older.href = "/?" + scopeQuery + "c=" + encodeURIComponent(next);
         more.hidden = false;
       }
     }
@@ -77,7 +87,7 @@
       }
       loading = true;
       fetch(
-        "/feed/page/?c=" + encodeURIComponent(next),
+        "/feed/page/?" + scopeQuery + "c=" + encodeURIComponent(next),
         { credentials: "same-origin" }
       )
         .then(function (resp) {

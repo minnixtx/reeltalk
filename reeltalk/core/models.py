@@ -1145,6 +1145,157 @@ def _attach_list_strips(entries: list[FeedEntry]) -> None:
         )
 
 
+def _status_entry(status: "Status") -> "FeedEntry":
+    """The feed row that stands for one ``Status`` (N6: one builder, two feeds).
+
+    Extracted verbatim from :func:`feed_entries` when the public scopes arrived,
+    so a Following row and a Local/All row for the same status cannot be two
+    different shapes. The list-face flag is read off ``status_type`` here, where
+    the status is actually in hand — never inferred downstream from the absence
+    of a film, which is wrong and live (mirrored ``Note``s have no film and are
+    not lists; R85).
+    """
+    entry = FeedEntry(
+        kind="status",
+        user=status.user,
+        film=status.film,
+        date=status.published_date,
+        source_id=status.id,
+        rating=status.rating,
+        content=status.content,
+        status_id=status.id,
+        remote=not status.local,
+    )
+    if status.status_type == Status.Type.LIST:
+        entry.is_list_face = True
+    return entry
+
+
+def _attach_interaction_counts(entries: list["FeedEntry"], user) -> None:
+    """Like state and reply tallies for a batch of rows, in a fixed query count.
+
+    One grouped like count, one membership query, one grouped reply count,
+    whatever the batch holds. Rows without a status have nothing to interact
+    with and keep their defaults. ``user=None`` (an anonymous reader) gets
+    nobody's like state — :func:`liked_ids` answers the empty set — while the
+    counts stay honest, since a count is a fact about the post and only the
+    offer to act on it is gated (R85).
+    """
+    status_ids = [entry.status_id for entry in entries if entry.status_id is not None]
+    counts = like_counts(status_ids)
+    liked = liked_ids(user, status_ids) if user is not None else set()
+    replies = reply_counts(status_ids)
+    for entry in entries:
+        if entry.status_id is not None:
+            entry.like_count = counts.get(entry.status_id, 0)
+            entry.liked_by_viewer = entry.status_id in liked
+            entry.reply_count = replies.get(entry.status_id, 0)
+
+
+def public_status_scope(viewer=None, *, local_only: bool = False):
+    """The one definition of what a public feed scope may show (N6, plan §7).
+
+    Every public scope routes through this so the eligibility rule has a single
+    home; ``VISIBILITY_PROPOSAL.md`` §7 is the reason it is a function rather
+    than an inline filter. Owner decisions it implements (2026-10-28):
+
+    * **Local** is ``local_only=True`` — the authoritative flag is the status's
+      own ``Status.local`` ("authored here"), not the author's ``User.local``.
+    * **All** is the same scope with no locality filter: local posts plus the
+      inbound mirrors this instance holds, which is what "the instances we
+      federate with" means in storage — a mirror exists only because we did.
+    * **Top-level only**: a status with a ``reply_parent`` is a turn in someone
+      else's conversation, not a feed row (R83 decision 2, and the same rule
+      Mastodon's public timelines apply).
+
+    The filters, and why each is here rather than at a caller:
+
+    * ``deleted=False`` — a soft-deleted tombstone is not a post.
+    * authors not suspended and not banned — the account-state half of the
+      ``feed_member_ids`` pattern, generalized to a scope nobody follows their
+      way into. Suspension covers **domain blocks** for free: blocking a
+      server suspends every mirror held from it (R105) and the inbox refuses a
+      blocked host before storing anything, so no separate domain-block join
+      is needed here — that is a verified fact about the ingest path, not an
+      assumption about it.
+    * per-viewer blocks — the one filter that is the viewer's own, so it takes
+      ``viewer``. An anonymous reader has none, and there is nothing to hide
+      from them that the account-state clauses do not already hide.
+
+    No unfiltered "every stored status" path exists: this is the only way a
+    public scope gets its rows.
+    """
+    statuses = Status.objects.filter(
+        deleted=False,
+        reply_parent__isnull=True,
+        user__suspended_at__isnull=True,
+        user__banned_at__isnull=True,
+    )
+    if local_only:
+        statuses = statuses.filter(local=True)
+    if viewer is not None:
+        blocked = list(viewer.blocks.values_list("id", flat=True))
+        if blocked:
+            statuses = statuses.exclude(user_id__in=blocked)
+    return statuses.select_related("user", "film").order_by("-published_date", "-id")
+
+
+def public_feed(
+    viewer, *, local_only: bool, limit: int | None = None, cursor: str | None = None
+) -> tuple[list["FeedEntry"], str | None]:
+    """One page of a public scope (Local or All), newest first (N6, plan §7).
+
+    Returns the same ``(entries, next_cursor)`` pair as :func:`feed_entries` so
+    the view, the fragment route and the endless scroll treat all three scopes
+    identically. Rows are ``"status"`` entries only: shelf events stay in the
+    Following feed, which is the scope whose membership rule produces them
+    (owner ruling 2026-10-28: Home is the users you follow; Local and All are
+    posts).
+
+    Unlike ``feed_entries`` this pages **in SQL**, because the population here is
+    the whole instance rather than one member's follow set — computing and
+    sorting every local post per page request would be the expensive version of
+    the same answer. The cursor is the existing :func:`encode_feed_cursor`
+    marker, so a page boundary is still "everything strictly older" and a post
+    that lands mid-scroll cannot shift a row off the next page. The marker's
+    kind rank is honoured rather than ignored: a shelf row sorts *newer* than a
+    same-timestamp status (``KIND_RANK_SHELF``), so a cursor cut from a
+    Following page and pasted onto a Local URL still names a correct boundary.
+    """
+    statuses = public_status_scope(viewer, local_only=local_only)
+    if cursor:
+        try:
+            date, kind_rank, source_id = decode_feed_cursor(cursor)
+        except ValueError:
+            # Unreadable marker: page 1, not a 500. Same rule as feed_entries —
+            # a mistyped address bar is not an error page for a reader who did
+            # nothing wrong.
+            pass
+        else:
+            older = Q(published_date__lt=date)
+            same_date = Q(published_date=date)
+            if kind_rank <= KIND_RANK_STATUS:
+                same_date &= Q(id__lt=source_id)
+            statuses = statuses.filter(older | same_date)
+
+    if limit is None:
+        rows = list(statuses)
+    else:
+        # One extra row is all this needs to know whether to offer a cursor at
+        # all: a link to an empty page is worse than no link.
+        rows = list(statuses[: limit + 1])
+    has_more = limit is not None and len(rows) > limit
+    rows = rows[:limit] if has_more else rows
+
+    entries = [_status_entry(status) for status in rows]
+    _attach_interaction_counts(entries, viewer)
+    list_entries = [entry for entry in entries if entry.is_list_face]
+    if list_entries:
+        _attach_list_strips(list_entries)
+    next_cursor = encode_feed_cursor(entries[-1]) if has_more and entries else None
+    return entries, next_cursor
+
+
 def feed_entries(
     user, *, limit: int | None = None, cursor: str | None = None
 ) -> tuple[list[FeedEntry], str | None]:
@@ -1298,41 +1449,18 @@ def feed_entries(
             target.status_id = status.id
             target.remote = not status.local
             continue
-        entry = FeedEntry(
-            kind="status",
-            user=status.user,
-            film=status.film,
-            date=status.published_date,
-            source_id=status.id,
-            rating=status.rating,
-            content=status.content,
-            status_id=status.id,
-            remote=not status.local,
-        )
-        # Read off the status type, which is exactly what ``reply_to_status``
-        # checks for a film-less parent. Deriving the flag here rather than
-        # letting the template read "no film" is what keeps the offer and the
-        # route the same fact instead of two facts that happen to agree — the
-        # live feed holds film-less mirrored ``Note``s, and they are not lists.
-        if status.status_type == Status.Type.LIST:
-            entry.is_list_face = True
+        entry = _status_entry(status)
+        # The list flag is read off the status type inside the builder, which is
+        # exactly what ``reply_to_status`` checks for a film-less parent. Deriving
+        # it there rather than letting the template read "no film" is what keeps
+        # the offer and the route the same fact instead of two facts that happen
+        # to agree — the live feed holds film-less mirrored ``Note``s, and they
+        # are not lists.
+        if entry.is_list_face:
             list_entries.append(entry)
         entries.append(entry)
 
-    # Like state for every row that can carry a control, batched: one
-    # grouped count plus one membership query, whatever the feed's size.
-    # Rows without a status have nothing to like and keep the defaults.
-    status_ids = [entry.status_id for entry in entries if entry.status_id is not None]
-    counts = like_counts(status_ids)
-    liked = liked_ids(user, status_ids)
-    # And the reply tally, batched the same way. It renders on mirrors as
-    # well as local rows — the number is not an offer (R85).
-    replies = reply_counts(status_ids)
-    for entry in entries:
-        if entry.status_id is not None:
-            entry.like_count = counts.get(entry.status_id, 0)
-            entry.liked_by_viewer = entry.status_id in liked
-            entry.reply_count = replies.get(entry.status_id, 0)
+    _attach_interaction_counts(entries, user)
 
     # And the poster strips, batched the same way for the same reason: this is
     # the busiest page in the app and it already carries enough per-row

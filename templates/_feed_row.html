@@ -54,7 +54,17 @@ a second channel to say so.
     {# facts, not one — liked_by_viewer picks mine-vs-not, like_count picks #}
     {# others-vs-nobody. The count stays a SIBLING of the button: clicking #}
     {# a number must not toggle anything. #}
-    {% if entry.interactive %}
+    {% comment %}
+    N6 adds the second clause: the row is now rendered to signed-out visitors
+    too (the Local scope), and both endpoints behind these controls are
+    ``login_required``. A button whose POST bounces to a login page is the
+    offer-without-the-route that R85 is written against, so the page withholds
+    what the route refuses — same shape as R81 taking the link out of the rail
+    for strangers while leaving the fact on the page. The count rides with the
+    control rather than standing alone: a bare number beside where a button
+    would be invites the click that is not there.
+    {% endcomment %}
+    {% if entry.interactive and user.is_authenticated %}
       <span class="applaud">
         <button type="button" class="applaud-btn" data-url="{% url 'status-like' entry.status_id %}" data-state="{% if entry.liked_by_viewer %}mine{% elif entry.like_count %}others{% else %}idle{% endif %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}" title="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
         <span class="applaud-count" aria-live="polite">{{ entry.like_count }}</span>
@@ -86,8 +96,12 @@ a second channel to say so.
     JavaScript disabled and keeps middle-click and open-in-new-tab.
 
     The count always renders, zero included, matching the applaud count.
+
+    And it is gated on the same second clause as the applaud control above:
+    an anonymous reader gets neither button, because the reply route is
+    ``login_required`` too.
     {% endcomment %}
-    {% if entry.replyable %}
+    {% if entry.replyable and user.is_authenticated %}
       <span class="reply">
         <a class="reply-btn" href="{% url 'status' entry.status_id %}?reply=1" data-state="{% if entry.reply_count %}others{% else %}idle{% endif %}" title="{% if entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply to this post{% else %}Reply to this post{% endif %}"></a>
         <span class="reply-count" aria-live="polite">{{ entry.reply_count }}</span>

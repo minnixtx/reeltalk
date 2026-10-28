@@ -58,6 +58,7 @@ from reeltalk.core.models import (
     Shelf,
     feed_entries,
     popular_genres,
+    public_feed,
     trending_films,
 )
 from reeltalk.core.utils import render_markdown
@@ -130,14 +131,75 @@ def has_admin() -> bool:
     return User.objects.filter(is_superuser=True).exists()
 
 
-# Feed scopes (N5, plan §7). The keys are the ``?scope=`` values the URL
-# carries; the label is what the tab strip renders. ``feed_entries`` is the
-# only scope backend that exists, so it is the only entry — N6 adds "local"
-# and "all" here when their queries exist, and the tabs appear with them.
-# A scope name the app does not serve falls back to the default rather than
-# 404ing, so a deep link to a future scope degrades to the feed that exists.
-FEED_SCOPES = {"following": "Following"}
+# Feed scopes (N5 registry, N6 backends; plan §7). The keys are the ``?scope=``
+# values the URL carries; the label is what the tab strip renders. The owner's
+# definitions (2026-10-28), kept here because the three tabs are only coherent
+# as a set:
+#
+# * **Following** — every user you follow, remote or local, plus yourself.
+#   Exactly the pre-existing ``feed_entries`` queryset; §7 forbids changing it
+#   and this increment does not.
+# * **Local** — public posts authored on this instance, follow them or not.
+#   ``Status.local`` ("authored here") is the authoritative flag, not the
+#   author's ``User.local``.
+# * **All** — Local, plus the public posts of the remote instances this instance
+#   federates with (the inbound mirrors it holds), plus the posts of users you
+#   follow wherever they live.
+#
+# Who may read what is the other half of the ruling: a signed-out visitor reads
+# Local only. That is Mastodon's own supported shape — it has separate access
+# settings for the local and remote live feeds, and forces a feed local-only
+# when the viewer may not read remote — and it means the strip never dangles a
+# tab that bounces a stranger to a login page.
+FEED_SCOPES = {"following": "Following", "local": "Local", "all": "All"}
 DEFAULT_FEED_SCOPE = "following"
+ANONYMOUS_FEED_SCOPE = "local"
+
+
+def feed_scopes_for(request) -> dict[str, str]:
+    """The scopes this visitor may read, in tab order (N6)."""
+    if request.user.is_authenticated:
+        return FEED_SCOPES
+    return {ANONYMOUS_FEED_SCOPE: FEED_SCOPES[ANONYMOUS_FEED_SCOPE]}
+
+
+def default_feed_scope(request) -> str:
+    """What a bare ``/`` serves. A stranger has no follows, so their home is
+    the one scope they can read rather than an empty one they cannot."""
+    if request.user.is_authenticated:
+        return DEFAULT_FEED_SCOPE
+    return ANONYMOUS_FEED_SCOPE
+
+
+def resolve_feed_scope(request) -> str:
+    """The requested scope, or the default — never a 404 (the N5 contract).
+
+    A scope this visitor may not read is treated exactly as N5 treated a
+    not-yet-live one: serve the feed that exists and mark the tab that was
+    served, so a shared URL degrades instead of scolding.
+    """
+    scopes = feed_scopes_for(request)
+    scope = request.GET.get("scope") or default_feed_scope(request)
+    return scope if scope in scopes else default_feed_scope(request)
+
+
+def feed_for_scope(request, *, scope: str, cursor: str | None = None):
+    """One page of whichever scope this request resolved to.
+
+    One dispatcher behind both the page and the fragment route, so the two can
+    never disagree about what ``?scope=local`` means — the same anti-drift rule
+    that made the fragment render the shared row partial instead of a copy of
+    it. Paging is the same page size and the same cursor in every scope, which
+    is what lets the endless scroll stay scope-blind about its own mechanics.
+    """
+    if scope == "following":
+        # Members only: ``feed_scopes_for`` never hands this scope to a
+        # stranger, so there is no anonymous branch to write here.
+        return feed_entries(request.user, limit=FEED_PAGE_SIZE, cursor=cursor)
+    viewer = request.user if request.user.is_authenticated else None
+    return public_feed(
+        viewer, local_only=scope == "local", limit=FEED_PAGE_SIZE, cursor=cursor
+    )
 
 
 def index(request):
@@ -154,33 +216,28 @@ def index(request):
     }
     # URL-only scope state (N1 Q6): no session write, no stored preference —
     # the query parameter is the whole state, so reload, Back and a shared URL
-    # all agree on the tab. Resolving it here (unknown or not-yet-live value
-    # becomes the default) is what keeps the strip and the feed from ever
-    # disagreeing: the template marks active exactly what was served.
-    scope = request.GET.get("scope") or DEFAULT_FEED_SCOPE
-    data["feed_scope"] = scope if scope in FEED_SCOPES else DEFAULT_FEED_SCOPE
-    data["feed_scopes"] = FEED_SCOPES
-    if request.user.is_authenticated:
-        # The v0.1 timeline (§3.6/§3.7): shelf events + statuses (R33/R35);
-        # anonymous visitors get the sign-up CTA in the feed's place.
-        #
-        # Page 1 of the cursor-paged feed (§2I increment 2, R132). The page
-        # size is a first-paint knob only — increment 3 loads the rest on
-        # scroll — but the "Older" link is rendered from the same
-        # ``next_cursor`` whether or not that JS is running, which is what
-        # decision 6 asks for: one template, one link, and JS changing only
-        # how it gets triggered, never whether the page works without it.
-        entries, next_cursor = feed_entries(
-            request.user,
-            limit=FEED_PAGE_SIZE,
-            cursor=request.GET.get("c") or None,
-        )
-        data["feed"] = entries
-        data["next_cursor"] = next_cursor
+    # all agree on the tab. Resolving it here (unknown, or not readable by this
+    # visitor, becomes the default) is what keeps the strip and the feed from
+    # ever disagreeing: the template marks active exactly what was served.
+    scope = resolve_feed_scope(request)
+    data["feed_scope"] = scope
+    data["feed_scopes"] = feed_scopes_for(request)
+    # The template needs the default to know when a scope parameter is redundant
+    # on the "Older" href: a member's Following link stays the plain ``/?c=`` it
+    # always was, and only a non-default scope pays for the extra parameter.
+    data["feed_default_scope"] = default_feed_scope(request)
+    # Every visitor gets a feed now (N6): a stranger reads Local, a member reads
+    # whichever tab they asked for. The cursor story is identical for both, so
+    # the "Older" link and the endless scroll mean the same thing in every scope
+    # — one dispatcher picks the rows, one template draws them.
+    entries, next_cursor = feed_for_scope(
+        request, scope=scope, cursor=request.GET.get("c") or None
+    )
+    data["feed"] = entries
+    data["next_cursor"] = next_cursor
     return render(request, "home.html", data)
 
 
-@login_required
 def feed_page(request):
     """One page of the home feed as a bare HTML fragment (§2I increment 3).
 
@@ -190,17 +247,22 @@ def feed_page(request):
     gate and its ``aria-label`` cannot drift from a copy, because there is no
     copy (§2I decision 4, and the reason JSON + client templating was rejected).
 
-    ``login_required`` rather than an inline check: this is the member's own feed,
-    and an anonymous fragment request has no answer that is not a redirect.
+    No longer ``login_required`` (N6): a signed-out visitor has a feed of their
+    own now — Local — and its endless scroll needs this route exactly as a
+    member's does. That is not a widened surface. The scope rules run through
+    the same :func:`feed_for_scope` the page uses, so an anonymous request gets
+    Local rows and a request for a scope that visitor cannot read falls back the
+    same way the page falls back. Writing a second set of visibility rules here,
+    or leaving a login redirect that hands the scroll a login page to splice
+    into the feed, would each be a rule that can drift from the page's.
 
     No pushed URL and no session state (§2I decision 5) — the page a reader has
     scrolled to is not a place worth naming, and sharing a specific post already
     has ``/status/<id>/``.
     """
-    entries, next_cursor = feed_entries(
-        request.user,
-        limit=FEED_PAGE_SIZE,
-        cursor=request.GET.get("c") or None,
+    scope = resolve_feed_scope(request)
+    entries, next_cursor = feed_for_scope(
+        request, scope=scope, cursor=request.GET.get("c") or None
     )
     return render(
         request,

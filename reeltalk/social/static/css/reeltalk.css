@@ -628,6 +628,16 @@ a {
   main {
     grid-column: 1 / -1;
     grid-row: 2;
+    /* `.container` centres itself with `margin: 0 auto`, and auto margins on a
+       grid item defeat the default stretch: the item shrink-wraps to its
+       content's max-content instead. So the reading column sized itself to the
+       text on the page -- measured at 1440px, the Local feed rendered 486px wide
+       against Following's 721px for the same layout, purely because those posts
+       had fewer words. As a block child of a block body the same declaration was
+       simply centring, which is why this only surfaced once body became a grid.
+       Width 100% restores the fill; `max-width` still caps the column and the
+       auto margins still centre it once it is capped. */
+    width: 100%;
   }
 
   /* body > because home puts its footer inside the rail instead (R131), and

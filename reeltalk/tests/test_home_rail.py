@@ -72,6 +72,19 @@ def comment(user, film):
     )
 
 
+def rail(body: str) -> str:
+    """The rail column alone, so a rail rule is measured on the rail.
+
+    Since N6 a stranger's home page also carries a Local feed, and a feed row
+    legitimately links to its film page (film detail is public to strangers,
+    unlike search). R81's "showcase, not a doorway" is a rule about the RAIL, so
+    asserting it across the whole document stopped being true for a reason that
+    has nothing to do with the rail.
+    """
+    start = body.index('<aside class="rail"')
+    return body[start : body.index("</aside>", start)]
+
+
 # --- Trending Films (R61) ----------------------------------------------------
 
 
@@ -192,12 +205,15 @@ def test_anonymous_home_shows_the_rail_and_a_cta(client, admin):
     assert 'class="visually-hidden">Popular Genres' in body
     # R81: for a stranger the rail is a showcase, not a doorway. The titles
     # and genres still render — that is what sells the instance — but nothing
-    # in it can be followed.
-    assert "Alien" in body
-    assert "Horror" in body
-    assert f'href="/film/{film.id}/"' not in body
-    assert 'href="/genre/horror/"' not in body
-    # No feed for anonymous visitors — the sign-up CTA holds its pane instead.
+    # in it can be followed. Scoped to the rail: since N6 the stranger's Local
+    # feed sits beside it and its rows link to film pages that are public.
+    band = rail(body)
+    assert "Alien" in band
+    assert "Horror" in band
+    assert f'href="/film/{film.id}/"' not in band
+    assert 'href="/genre/horror/"' not in band
+    # The stranger's pane is titled by the instance name (the landing block),
+    # not by the member's pane title.
     assert "Now Playing" not in body
     assert 'href="/signup/"' in body
 

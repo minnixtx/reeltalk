@@ -18,77 +18,106 @@ from the footer partial's direction.
 {% block content %}
 {# M6 artwork C (R64): 2-pane home — feed left, ticket-stub rail right. #}
 <div class="home-grid">
-  {% if user.is_authenticated %}
-    {# The wordmark already hangs in the header, so the feed leads (R64). #}
-    <section class="feed">
+  <section class="feed">
+    {% if user.is_authenticated %}
+      {# The wordmark already hangs in the header, so the feed leads (R64). #}
       <h1 class="pane-title">Now Playing</h1>
+    {% else %}
       {% comment %}
-      N5 scope tabs: one link per live scope, the served one marked with
-      aria-current. Links rather than role=tab — the scope is a URL that
-      survives reload, Back and sharing (N1 Q6), not a JS panel switch —
-      and only scopes with a real backend render, so every tab shown goes
-      somewhere (plan §7: no fake or stub tabs).
+      N6: a stranger now has a feed of their own (Local), so the instance intro
+      became the head of that feed instead of a substitute for one. The name,
+      the description paragraph and the signup link all keep their exact markup
+      — test_landing.py pins each of them, and the signup CTA still follows the
+      instance policy rather than dangling (R76: closed hides it, it is not
+      redirected).
       {% endcomment %}
-      <nav class="feed-scopes" aria-label="Feed scope">
-        {% for key, label in feed_scopes.items %}
-          <a class="feed-scope" href="{% url 'index' %}?scope={{ key }}"{% if key == feed_scope %} aria-current="page"{% endif %}>{{ label }}</a>
-        {% endfor %}
-      </nav>
-      {% if feed %}
-        <ul class="review-list" id="feed-list">
-          {% for entry in feed %}{% include "_feed_row.html" %}{% endfor %}
-          {% if not next_cursor %}{% include "_feed_end.html" %}{% endif %}
-        </ul>
-        {% if next_cursor %}
-          {% comment %}
-          The no-JS way forward (§2I increment 2, R132 decision 5): a real
-          anchor to a real URL, not a handler waiting on a script that may
-          never run. Increment 3 hides this link and loads the same page on
-          scroll instead — same href, same template, so the feed never grows a
-          second rendering path to keep in sync. It is un-hidden again at the
-          300-row DOM ceiling, so the scroll can slow down but never silently
-          stop with nowhere to go (R132 decision 4).
-          {% endcomment %}
-          <p class="feed-more" id="feed-more">
-            <a class="feed-older" id="feed-older" href="{% url 'index' %}?c={{ next_cursor }}">Older</a>
-          </p>
+      <div class="landing">
+        <h1>{{ site.name }}</h1>
+        {% if site.description %}<p class="landing-desc">{{ site.description }}</p>{% endif %}
+        <p>A federated home for tracking, reviewing, and discovering films.</p>
+        {% if signup_open %}
+        <p><a class="btn cinema-button cinema-button--primary" href="{% url 'signup' %}">Sign up</a> to get started, or <a href="{% url 'login' %}">log in</a>.</p>
+        {% else %}
+        {# Invite-only: the signup CTA is gone, not redirected. #}
+        <p><a href="{% url 'login' %}">Log in</a> if you have an account.</p>
         {% endif %}
+      </div>
+    {% endif %}
+    {% comment %}
+    N5 scope tabs: one link per live scope, the served one marked with
+    aria-current. Links rather than role=tab — the scope is a URL that
+    survives reload, Back and sharing (N1 Q6), not a JS panel switch —
+    and only scopes with a real backend render, so every tab shown goes
+    somewhere (plan §7: no fake or stub tabs). N6 gave the strip its
+    backends; a stranger sees the one tab they can read (Local) rather
+    than two that would bounce them to a login page.
+    {% endcomment %}
+    <nav class="feed-scopes" aria-label="Feed scope">
+      {% for key, label in feed_scopes.items %}
+        <a class="feed-scope" href="{% url 'index' %}?scope={{ key }}"{% if key == feed_scope %} aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+    {% if feed %}
+      <ul class="review-list" id="feed-list">
+        {% for entry in feed %}{% include "_feed_row.html" %}{% endfor %}
+        {% if not next_cursor %}{% include "_feed_end.html" %}{% endif %}
+      </ul>
+      {% if next_cursor %}
         {% comment %}
-        The scroll sentinel (§2I increment 3): the element feed.js watches. When
-        it comes into view the next page is fetched and appended to the list.
-        ``data-next`` is the cursor to ask for, empty when there is nothing
-        left — which is also what makes this element harmless on a one-page
-        feed. It sits BELOW the list rather than inside it, because the appended
-        fragment goes into the ``<ul>`` and a non-``li`` child there would be
-        invalid markup.
+        The no-JS way forward (§2I increment 2, R132 decision 5): a real
+        anchor to a real URL, not a handler waiting on a script that may
+        never run. Increment 3 hides this link and loads the same page on
+        scroll instead — same href, same template, so the feed never grows a
+        second rendering path to keep in sync. It is un-hidden again at the
+        300-row DOM ceiling, so the scroll can slow down but never silently
+        stop with nowhere to go (R132 decision 4).
 
-        The ``|default:''`` is load-bearing, not tidiness: Django renders a
-        variable that resolves to ``None`` as the literal string ``"None"``, so
-        without it a one-page feed would hand the scroll a truthy cursor reading
-        "None", it would fetch with it, get page 1 back from the unreadable-cursor
-        fallback, and append a duplicate of what is already on screen.
+        N6: the href carries the scope, or it would silently drop the reader
+        back on the default feed one page down. The parameter is omitted when
+        the served scope already IS this visitor's default, which keeps a
+        member's Following link exactly the ``/?c=`` it always was.
         {% endcomment %}
-        <div class="feed-sentinel" id="feed-sentinel" data-next="{{ next_cursor|default:'' }}" aria-hidden="true"></div>
-      {% else %}
-        <p class="muted">Nothing here yet — add a film to your watchlist or mark one watched.</p>
+        <p class="feed-more" id="feed-more">
+          <a class="feed-older" id="feed-older" href="{% url 'index' %}?{% if feed_scope != feed_default_scope %}scope={{ feed_scope }}&amp;{% endif %}c={{ next_cursor }}">Older</a>
+        </p>
       {% endif %}
-    </section>
+      {% comment %}
+      The scroll sentinel (§2I increment 3): the element feed.js watches. When
+      it comes into view the next page is fetched and appended to the list.
+      ``data-next`` is the cursor to ask for, empty when there is nothing
+      left — which is also what makes this element harmless on a one-page
+      feed. It sits BELOW the list rather than inside it, because the appended
+      fragment goes into the ``<ul>`` and a non-``li`` child there would be
+      invalid markup.
+
+      The ``|default:''`` is load-bearing, not tidiness: Django renders a
+      variable that resolves to ``None`` as the literal string ``"None"``, so
+      without it a one-page feed would hand the scroll a truthy cursor reading
+      "None", it would fetch with it, get page 1 back from the unreadable-cursor
+      fallback, and append a duplicate of what is already on screen.
+      {% endcomment %}
+      <div class="feed-sentinel" id="feed-sentinel" data-next="{{ next_cursor|default:'' }}" aria-hidden="true"></div>
+    {% else %}
+      <p class="muted">{% if user.is_authenticated %}Nothing here yet — add a film to your watchlist or mark one watched.{% else %}Nothing has been posted here yet.{% endif %}</p>
+    {% endif %}
+  </section>
+  {% comment %}
+  N6 split the two scripts, because a stranger now has a feed of their own.
+
+  ``feed.js`` goes to everyone: the Local scope gives a signed-out visitor a
+  sentinel and an Older link exactly like a member's, and withholding the
+  script would leave them a manual pager where the page offered a scroll.
+
+  ``likes.js`` stays member-only. Its one handler is the ``.applaud-btn``
+  click, and the row withholds that button from a stranger (the like route is
+  ``login_required``), so shipping it would download a script with nothing in
+  the document for it to bind — the mirror image of R85: don't ship the
+  machinery for a control the page refused to render.
+  {% endcomment %}
+  {% if user.is_authenticated %}
     <script src="{% static 'js/likes.js' %}" defer></script>
-    <script src="{% static 'js/feed.js' %}" defer></script>
-  {% else %}
-    {# Anonymous visitors keep the landing copy where the feed would be. #}
-    <section class="landing">
-      <h1>{{ site.name }}</h1>
-      {% if site.description %}<p class="landing-desc">{{ site.description }}</p>{% endif %}
-      <p>A federated home for tracking, reviewing, and discovering films.</p>
-      {% if signup_open %}
-      <p><a class="btn cinema-button cinema-button--primary" href="{% url 'signup' %}">Sign up</a> to get started, or <a href="{% url 'login' %}">log in</a>.</p>
-      {% else %}
-      {# Invite-only: the signup CTA is gone, not redirected. #}
-      <p><a href="{% url 'login' %}">Log in</a> if you have an account.</p>
-      {% endif %}
-    </section>
   {% endif %}
+  <script src="{% static 'js/feed.js' %}" defer></script>
 
   <aside class="rail" aria-label="On this instance">
     {# Each card is titled by its owner-supplied ticket graphic above it, so the #}
