@@ -3173,3 +3173,38 @@ form.inline button,
   box-shadow: none;
   cursor: default;
 }
+
+/* --- Feed scope tabs (N5) --------------------------------------------------
+   The strip under "Now Playing" naming which feed is on screen. Links with
+   aria-current, not role=tab: the scope is a URL that survives reload, Back
+   and sharing (N1 Q6), not a JS panel switch. Only live scopes render, so
+   every tab shown goes somewhere. The active marker is the bottom bar's red
+   rule turned horizontal, so the two markers read as one system; 44px
+   targets per the N1 package. */
+.feed-scopes {
+  display: flex;
+  gap: 24px;
+  margin: 0 0 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.feed-scope {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 4px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-family: var(--ui);
+  font-size: 0.95rem;
+  text-decoration: none;
+}
+
+.feed-scope:hover {
+  color: var(--cream);
+}
+
+.feed-scope[aria-current="page"] {
+  color: var(--cream);
+  border-bottom-color: #c14b37;
+}

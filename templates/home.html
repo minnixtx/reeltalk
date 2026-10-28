@@ -22,6 +22,18 @@ from the footer partial's direction.
     {# The wordmark already hangs in the header, so the feed leads (R64). #}
     <section class="feed">
       <h1 class="pane-title">Now Playing</h1>
+      {% comment %}
+      N5 scope tabs: one link per live scope, the served one marked with
+      aria-current. Links rather than role=tab — the scope is a URL that
+      survives reload, Back and sharing (N1 Q6), not a JS panel switch —
+      and only scopes with a real backend render, so every tab shown goes
+      somewhere (plan §7: no fake or stub tabs).
+      {% endcomment %}
+      <nav class="feed-scopes" aria-label="Feed scope">
+        {% for key, label in feed_scopes.items %}
+          <a class="feed-scope" href="{% url 'index' %}?scope={{ key }}"{% if key == feed_scope %} aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
+      </nav>
       {% if feed %}
         <ul class="review-list" id="feed-list">
           {% for entry in feed %}{% include "_feed_row.html" %}{% endfor %}

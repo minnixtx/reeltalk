@@ -130,6 +130,16 @@ def has_admin() -> bool:
     return User.objects.filter(is_superuser=True).exists()
 
 
+# Feed scopes (N5, plan §7). The keys are the ``?scope=`` values the URL
+# carries; the label is what the tab strip renders. ``feed_entries`` is the
+# only scope backend that exists, so it is the only entry — N6 adds "local"
+# and "all" here when their queries exist, and the tabs appear with them.
+# A scope name the app does not serve falls back to the default rather than
+# 404ing, so a deep link to a future scope degrades to the feed that exists.
+FEED_SCOPES = {"following": "Following"}
+DEFAULT_FEED_SCOPE = "following"
+
+
 def index(request):
     if not has_admin():
         return redirect("setup")
@@ -142,6 +152,14 @@ def index(request):
         "trending": trending_films(),
         "genres": popular_genres(),
     }
+    # URL-only scope state (N1 Q6): no session write, no stored preference —
+    # the query parameter is the whole state, so reload, Back and a shared URL
+    # all agree on the tab. Resolving it here (unknown or not-yet-live value
+    # becomes the default) is what keeps the strip and the feed from ever
+    # disagreeing: the template marks active exactly what was served.
+    scope = request.GET.get("scope") or DEFAULT_FEED_SCOPE
+    data["feed_scope"] = scope if scope in FEED_SCOPES else DEFAULT_FEED_SCOPE
+    data["feed_scopes"] = FEED_SCOPES
     if request.user.is_authenticated:
         # The v0.1 timeline (§3.6/§3.7): shelf events + statuses (R33/R35);
         # anonymous visitors get the sign-up CTA in the feed's place.
