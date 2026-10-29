@@ -32,7 +32,6 @@ from django.test import Client
 from django.urls import reverse
 
 from reeltalk.activitypub.statuses import visibility_from_audience
-from reeltalk.core import views as core_views
 from reeltalk.core.import_export import export_film_csv
 from reeltalk.core.models import (
     Film,
@@ -386,36 +385,35 @@ def test_a_private_finish_leaves_no_feed_row_for_anybody_else(
 
 @pytest.mark.django_db
 def test_a_private_finish_produces_no_delivery_of_any_kind(
-    db, author, films, monkeypatch
+    db, author, films, deliveries
 ):
-    """No ``Create``, and no watchlist-removal ``ShelfEvent`` either (D5)."""
-    calls: list[str] = []
-    monkeypatch.setattr(
-        core_views, "broadcast_status_create", lambda *a, **k: calls.append("create")
-    )
-    monkeypatch.setattr(
-        core_views, "broadcast_status_update", lambda *a, **k: calls.append("update")
-    )
-    monkeypatch.setattr(
-        core_views, "broadcast_shelf_event", lambda *a, **k: calls.append("shelf")
-    )
+    """No ``Create``, and no watchlist-removal ``ShelfEvent`` either (D5).
+
+    Re-pinned in V2, deliberately. This test used to spy on the view's
+    ``broadcast_status_*`` calls, which was the right seam when the audience
+    check lived in the view. The gate moved into ``broadcast._announce`` so the
+    reply and delete routes are covered by it too, and a view-level spy now sees
+    the same call for all three audiences - it would pass with the gate deleted.
+    The spy sits on the delivery seam instead, which is what the promise is about.
+    """
+    client = _login("author")
     # Public finish first, so the film is on Watched and the next finish has a
     # Watchlist removal it would otherwise announce.
-    _login("author").post(
-        reverse("film-mark-watched", args=[films[0].id]), {"rating": "4"}
-    )
-    calls.clear()
-    _login("author").post(
+    client.post(reverse("film-shelve", args=[films[0].id]))
+    client.post(reverse("film-mark-watched", args=[films[0].id]), {"rating": "4"})
+    assert deliveries  # the public finish announced something
+    deliveries.clear()
+    client.post(
         reverse("film-mark-watched", args=[films[1].id]),
         {"rating": "4", "content": "Private", "visibility": "private"},
     )
-    assert calls == []
+    assert deliveries == []
     # A public finish still broadcasts, so the empty list above is the audience
-    # and not a broken spy.
-    _login("author").post(
-        reverse("film-mark-watched", args=[films[2].id]), {"rating": "4"}
-    )
-    assert "create" in calls
+    # and not a spy that never fires.
+    client.post(reverse("film-shelve", args=[films[2].id]))
+    deliveries.clear()
+    client.post(reverse("film-mark-watched", args=[films[2].id]), {"rating": "4"})
+    assert deliveries
 
 
 @pytest.mark.django_db
@@ -568,3 +566,137 @@ def test_the_marker_names_the_audience_only_to_those_entitled_to_see_it(
     assert '<span class="audience">Followers</span>' in (
         _login("follower").get("/").content.decode()
     )
+
+
+# --- V2: the composer, and what actually leaves the instance -----------------
+
+
+@pytest.fixture
+def deliveries(monkeypatch):
+    """Every delivery the broadcast layer actually attempts, as (type, targets).
+
+    Patched a level below the views on purpose. The audience gate lives in
+    ``broadcast._announce``, so a spy on the view's ``broadcast_status_*`` calls
+    would see the same call for all three audiences and prove nothing at all.
+    """
+    from reeltalk.activitypub import broadcast
+
+    calls: list[tuple[str, list[str]]] = []
+
+    def fake(request, actor, activity, recipients):
+        calls.append((activity["type"], [user.localname for user in recipients]))
+        return []
+
+    monkeypatch.setattr(broadcast, "_deliver_signed", fake)
+    return calls
+
+
+@pytest.mark.django_db
+def test_the_composer_offers_all_three_audiences(db, author, films):
+    """V2 flips the third one on: the control and the stored value agree."""
+    page = _login("author").get(f"/film/{films[0].id}/").content.decode()
+    for value in ("public", "followers", "private"):
+        assert f'name="visibility" value="{value}"' in page, value
+
+
+@pytest.mark.django_db
+def test_a_followers_finish_is_delivered_and_a_private_one_is_not(
+    db, author, films, deliveries
+):
+    """The difference between the two narrow audiences is on the wire, not in a flag."""
+    client = _login("author")
+    client.post(
+        reverse("film-mark-watched", args=[films[0].id]),
+        {"rating": "4", "content": "Open"},
+    )
+    client.post(
+        reverse("film-mark-watched", args=[films[1].id]),
+        {"rating": "4", "content": "Followers", "visibility": "followers"},
+    )
+    client.post(
+        reverse("film-mark-watched", args=[films[2].id]),
+        {"rating": "4", "content": "Private", "visibility": "private"},
+    )
+    assert [kind for kind, _ in deliveries] == ["Create", "Create"]
+
+
+@pytest.mark.django_db
+def test_a_followers_finish_writes_a_followers_shelf_row_too(db, author, films):
+    """D5's "the whole act" rule is audience-blind: it applies to the new value."""
+    mark_watched(author, films[0], rating=4, content="Ours", visibility="followers")
+    row = ShelfFilm.objects.get(
+        shelf__user=author, shelf__identifier="read", film=films[0]
+    )
+    assert row.visibility == Visibility.FOLLOWERS
+
+
+@pytest.mark.django_db
+def test_deleting_a_private_review_delivers_nothing(db, author, films, deliveries):
+    """The gap V1's finish-flow gate left behind, closed at the broadcast layer.
+
+    ``delete_activity`` embeds the whole Note, so a private review deleted behind
+    the old unconditional broadcast reached every remote follower carrying its
+    full text - the one row of the three that had never been sent at all.
+    """
+    private = mark_watched(
+        author, films[0], rating=4, content="Mine", visibility="private"
+    )
+    assert deliveries == []
+    _login("author").post(reverse("status-delete", args=[private.id]))
+    assert deliveries == []
+    # A public review's delete still goes out, so the empty list above is the
+    # audience and not a spy that never fires.
+    public = mark_watched(author, films[1], rating=4, content="Ours")
+    deliveries.clear()
+    _login("author").post(reverse("status-delete", args=[public.id]))
+    assert [kind for kind, _ in deliveries] == ["Delete"]
+
+
+@pytest.mark.django_db
+def test_a_reply_under_a_private_review_is_not_delivered(db, author, films, deliveries):
+    """The other half of the same gap: a reply inherits, and so must the gate.
+
+    Only the author can answer a private review, and they are the one reader who
+    already has it, so there is nobody to send it to.
+    """
+    parent = mark_watched(
+        author, films[0], rating=4, content="Mine", visibility="private"
+    )
+    _login("author").post(reverse("status-reply", args=[parent.id]), {"content": "hi"})
+    assert deliveries == []
+
+
+@pytest.mark.django_db
+def test_a_non_public_finish_announces_no_watchlist_removal(
+    db, author, films, monkeypatch
+):
+    """D5 stays true for the new value: the shelf has no audience shape yet.
+
+    Both halves are asserted, because an empty list on its own is also what a
+    finish that never touched a Watchlist produces - the same trap the delivery
+    spy above had to step around.
+    """
+    from reeltalk.core import views as views_module
+
+    shelf_events: list[bool] = []
+    monkeypatch.setattr(
+        views_module,
+        "broadcast_shelf_event",
+        lambda *a, added, **k: shelf_events.append(added),
+    )
+    client = _login("author")
+    client.post(reverse("film-shelve", args=[films[0].id]))
+    client.post(reverse("film-mark-watched", args=[films[0].id]), {"rating": "4"})
+    # The add announced itself and so did the removal - the pair is what proves
+    # the second half below is the audience and not a route that never fires.
+    assert shelf_events == [True, False]
+    shelf_events.clear()
+    client.post(reverse("film-shelve", args=[films[1].id]))
+    client.post(
+        reverse("film-mark-watched", args=[films[1].id]),
+        {"rating": "4", "content": "Followers", "visibility": "followers"},
+    )
+    # The Watchlist add still announced itself; the removal that the finish caused
+    # did not. That is D5 for the new audience: the shelf has no shape of its own
+    # on the wire, so a non-public finish leaves peers holding a stale row.
+    assert shelf_events == [True]

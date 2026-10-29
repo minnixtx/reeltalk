@@ -52,6 +52,9 @@ _LABEL_RE = re.compile(r"^([A-Za-z0-9_-]+)=\s*")
 # Signature parameters take a quoted string or a bare integer (created).
 _PARAM_RE = re.compile(r'^(\S+)=(?:"((?:[^"\\]|\\.)*)"|(\S+))$')
 _LEGACY_PARAM_RE = re.compile(r'(\w+)="((?:[^"\\]|\\.)*)"')
+# The draft's pseudo-header naming the request line. Two checks read it: the
+# signed-string builder below, and ``require_target``.
+_REQUEST_TARGET = "(request-target)"
 
 
 def _find_closing_paren(text: str, open_index: int) -> int:
@@ -319,7 +322,9 @@ def _body_must_be_covered(request: Any) -> bool:
     return bool(request.body)
 
 
-def _verify_rfc9421(request: Any, public_key: Any) -> bool:
+def _verify_rfc9421(
+    request: Any, public_key: Any, *, require_target: bool = False
+) -> bool:
     signature_input = request.headers.get("Signature-Input")
     signature_value = request.headers.get("Signature")
     if not signature_input or not signature_value:
@@ -335,6 +340,12 @@ def _verify_rfc9421(request: Any, public_key: Any) -> bool:
     # RFC 9421 peer must satisfy to have its body authenticated here.
     covered = {name.split(";")[0] for name in components}
     if _body_must_be_covered(request) and "content-digest" not in covered:
+        return False
+    if require_target and "@target-uri" not in covered:
+        # See ``verify_request``: an authorization must be about the request it
+        # is authorizing. The components are the sender's own declaration, so
+        # "did it name the URL" is a question about the sender's choice, and for
+        # an authorization that choice is not optional.
         return False
 
     # One signature per request; take the value for our label (a bare
@@ -372,7 +383,9 @@ def _verify_rfc9421(request: Any, public_key: Any) -> bool:
     return True
 
 
-def _verify_legacy(request: Any, public_key: rsa.RSAPublicKey) -> bool:
+def _verify_legacy(
+    request: Any, public_key: rsa.RSAPublicKey, *, require_target: bool = False
+) -> bool:
     """The old draft format current Mastodon still sends (rsa-sha256/hs2019).
 
     Signed string: one ``name: value`` line per listed header in order,
@@ -397,10 +410,15 @@ def _verify_legacy(request: Any, public_key: rsa.RSAPublicKey) -> bool:
     listed = params["headers"].split()
     if _body_must_be_covered(request) and "digest" not in listed:
         return False
+    if require_target and _REQUEST_TARGET not in listed:
+        # Same rule as the RFC 9421 branch, in the draft's vocabulary: the
+        # pseudo-header is ``(request-target)``, and Mastodon's own GET verifier
+        # already demands it, so asking for it costs an honest peer nothing.
+        return False
 
     lines: list[str] = []
     for name in listed:
-        if name == "(request-target)":
+        if name == _REQUEST_TARGET:
             target = f"{request.method.lower()} {request.path}"
             lines.append(f"(request-target): {target}")
         elif name == "digest":
@@ -428,13 +446,25 @@ def _verify_legacy(request: Any, public_key: rsa.RSAPublicKey) -> bool:
     return True
 
 
-def verify_request(request: Any, public_pem: str) -> bool:
+def verify_request(
+    request: Any, public_pem: str, *, require_target: bool = False
+) -> bool:
     """Verify an incoming signed request against the sender's public key.
 
     Dispatches on the header shape: ``Signature-Input`` present → RFC 9421
     (the key must be Ed25519); otherwise the old draft format (RSA).
     Returns False on any malformation, unsupported algorithm, or mismatch
     rather than raising.
+
+    ``require_target`` is for a verification that has to **authorize** something
+    rather than merely attribute it (visibility V2, ``read_auth``). The covered
+    components are the sender's own declaration, so a signature that never named
+    the URL being asked about still verifies here — which is fine when the answer
+    is "who sent this POST" and not fine at all when the answer is "may this
+    actor read this post". With the flag set, the signature must cover the request
+    target: ``@target-uri`` in the RFC 9421 form, ``(request-target)`` in the
+    draft's. An inbox delivery does not need it (the body digest is what matters
+    there and the activity is deduped); a read does.
     """
     try:
         if not request.headers.get("Signature"):
@@ -443,9 +473,9 @@ def verify_request(request: Any, public_pem: str) -> bool:
         if request.headers.get("Signature-Input"):
             if not isinstance(public_key, ed25519.Ed25519PublicKey):
                 return False
-            return _verify_rfc9421(request, public_key)
+            return _verify_rfc9421(request, public_key, require_target=require_target)
         if not isinstance(public_key, rsa.RSAPublicKey):
             return False
-        return _verify_legacy(request, public_key)
+        return _verify_legacy(request, public_key, require_target=require_target)
     except (ValueError, KeyError, InvalidSignature, TypeError):
         return False

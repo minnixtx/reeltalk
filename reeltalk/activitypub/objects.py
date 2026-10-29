@@ -30,7 +30,7 @@ from datetime import UTC
 
 from django.utils.html import escape
 
-from reeltalk.core.models import Status
+from reeltalk.core.models import Status, Visibility
 
 from .identity import (
     PUBLIC_COLLECTION,
@@ -225,18 +225,37 @@ def status_audience(status, mentioned_users=None) -> tuple[list[str], list[str]]
     is the whole of the R143 measurement (``statuses_count: 18`` against a
     profile endpoint that answers ``0``).
 
-    The mapping is the peer's own ``TagManager.to``/``.cc`` for a public
-    status, which is the only visibility this product has:
+    **The pair follows the row's own visibility** (visibility V2), because the
+    pair *is* the audience and a peer has nothing else to go on. Each shape below
+    is the peer's own for that audience -- ``TagManager.to``/``.cc`` on Mastodon
+    4.7.2, read off the running instance rather than guessed -- which is the only
+    reason a peer files what we send as what the member chose:
 
-    * ``to`` is the public collection, alone.
-    * ``cc`` is the author's **followers collection** -- one URI for the
-      collection, not one entry per follower -- followed by every
-      mentioned account's actor URI.
+    * **public**: ``to`` is the public collection, alone; ``cc`` is the author's
+      **followers collection** -- one URI for the collection, not one entry per
+      follower -- followed by every mentioned account's actor URI.
+    * **followers**: ``to`` is the followers collection alone and ``cc`` is
+      empty. That ``to`` is what makes a peer file the note as its own private
+      post instead of a public one. The empty ``cc`` is a decision, not an
+      omission: a followers-only post goes to the author's followers and to
+      nobody else, so a mention in the body names somebody the post is not
+      addressed to (the owner's call for V2).
+    * **private**: both empty. Nothing on this instance delivers a private status
+      -- ``core.models.sends_externally`` refuses it upstream -- but the shape is
+      spelled out rather than left to fall through, because the fall-through for
+      an address-less activity is ``direct`` on one peer and a silent
+      mislabel on another, and an empty audience is the narrowest thing the wire
+      can say. It is also the reading we apply to a peer that sends us empty
+      arrays (``statuses.visibility_from_audience``), so the two directions
+      agree.
 
-    The mention entries are not decoration. A peer that finds a tagged
+    The public mention entries are not decoration. A peer that finds a tagged
     account absent from the audience marks that mention *silent*: recorded,
     no notification, not in a timeline. An addressed mention is what makes
-    naming someone on the wire actually reach them.
+    naming someone on the wire actually reach them -- and on a followers-only
+    post they are deliberately absent, so a mention there is filed silent by a
+    peer that holds the post at all. That is the cost of the narrower audience,
+    written down rather than left to be discovered.
 
     **This is an audience, not a delivery list.** Who gets a POST is
     ``broadcast._status_targets``, a different set answering a different
@@ -249,14 +268,20 @@ def status_audience(status, mentioned_users=None) -> tuple[list[str], list[str]]
     ``note_document`` needs the same rows for its ``tag`` array, and the
     outbox serializes a page of these at a time -- re-reading the mention
     table per document for a second purpose is a needless query, not a
-    cheap one.
+    cheap one. Only the public branch reads it: the other two audiences
+    address nobody beyond the collection.
     """
+    followers = absolute_uri(followers_path(status.user.localname))
+    if status.visibility == Visibility.FOLLOWERS:
+        return [followers], []
+    if status.visibility == Visibility.PRIVATE:
+        return [], []
     if mentioned_users is None:
         mentioned_users = [
             mention.user for mention in status.mentions.select_related("user")
         ]
     to = [PUBLIC_COLLECTION]
-    cc = [absolute_uri(followers_path(status.user.localname))]
+    cc = [followers]
     for user in mentioned_users:
         uri = actor_reference(user)
         if uri and uri not in cc:
@@ -554,20 +579,30 @@ def delete_activity(status, user, request) -> dict:
     object rides inline so the receiver can key the tombstone by origin id
     without a fetch.
 
-    ``to`` is the public collection and there is deliberately **no** ``cc``,
-    matching the peer's ``DeleteNoteSerializer``, which declares ``to`` and
-    stops. A tombstone is not addressed to anybody in particular: everyone who
-    could see the post needs to learn it is gone, which is what the public
-    audience says, and naming a follower collection would imply the removal
-    was aimed at those accounts rather than at the world.
+    ``to`` is the deleted post's own audience head -- the public collection for
+    a public post, the followers collection for a followers-only one -- and there
+    is deliberately **no** ``cc``, matching the peer's ``DeleteNoteSerializer``,
+    which declares ``to`` and stops. A tombstone is not addressed to anybody in
+    particular: everyone who could see the post needs to learn it is gone, which
+    is what the public audience says, and naming a follower collection would
+    imply the removal was aimed at those accounts rather than at the world.
+
+    What it cannot be is **wider** than the post it removes. The object rides
+    inline, so a followers-only review deleted behind a public ``to`` would hand
+    its full text to the world at the one moment it is being taken away -- the
+    leak is the delete path's, not the audience's, and V2 closes it here rather
+    than in the view that happens to notice. A private status never reaches this
+    function: nothing about a private post is ever announced, and
+    ``core.models.sends_externally`` is what refuses it upstream.
     """
     _require_actor_is_author(status, user)
+    to, _cc = status_audience(status)
     return {
         "id": f"{absolute_uri(outbox_path(user.localname))}"
         f"#delete-{note_local_id(status)}",
         "type": "Delete",
         "actor": absolute_uri(actor_path(user.localname)),
-        "to": [PUBLIC_COLLECTION],
+        "to": to,
         "object": note_document(status, request),
     }
 

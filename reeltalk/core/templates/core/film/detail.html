@@ -106,14 +106,16 @@
       <label for="id_review_content">Review <span class="muted">(optional)</span></label>
       <textarea name="content" id="id_review_content" rows="4" placeholder="What did you think?">{% if user_review %}{{ user_review.raw_content }}{% endif %}</textarea>
       {% if not user_review %}
-        {# The audience control (visibility V1). Offered only when writing: an #}
-        {# audience is fixed at writing, so an edit shows no control rather than #}
-        {# one the view would ignore. Followers-only is absent until the outbound #}
-        {# addressing exists - offering it now would send a followers-only post out #}
-        {# addressed to the public collection, which no peer could ever un-know. #}
+        {# The audience control (visibility V1, all three since V2). Offered #}
+        {# only when writing: an audience is fixed at writing, so an edit shows #}
+        {# no control rather than one the view would ignore. Followers-only waits #}
+        {# for nothing now - the outbound addressing in objects.status_audience #}
+        {# puts a followers-only post in the followers collection, which is what #}
+        {# makes a peer file it as its own private post rather than a public one. #}
         <fieldset class="audience-choice">
           <legend>Who can see this</legend>
           <label><input type="radio" name="visibility" value="public" checked> Public</label>
+          <label><input type="radio" name="visibility" value="followers"> Followers</label>
           <label><input type="radio" name="visibility" value="private"> Private</label>
         </fieldset>
       {% endif %}

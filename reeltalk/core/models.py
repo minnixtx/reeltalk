@@ -1325,6 +1325,12 @@ def may_read(status, viewer) -> bool:
     arm, a notification's target, a report filed against a status. Keeping the
     queryset and the instance answers side by side is the point: two rules that
     can drift is how a leak comes back after the sweep that closed it.
+
+    A **machine** reader is not a ``viewer`` in here. An unauthenticated GET
+    cannot say who is asking, so this answers False for a followers-only row and
+    the ActivityPub arm of the post page then asks
+    :func:`reeltalk.activitypub.read_auth.may_fetch` whether the request carries
+    a signature that proves an entitled actor (V2).
     """
     if status.visibility == Visibility.PUBLIC:
         return True
@@ -1340,6 +1346,25 @@ def may_read(status, viewer) -> bool:
 def readable_statuses(viewer):
     """Every status ``viewer`` may read, before any other filter (V1)."""
     return Status.objects.filter(audience_q(viewer))
+
+
+def sends_externally(status) -> bool:
+    """Whether a status may be announced to another instance at all (V2).
+
+    The outbound twin of :func:`may_read`, and for the same reason: one answer
+    that every broadcast call site routes through. V1 gated only the finish
+    flow, which left the reply and delete routes free to announce rows they had
+    never delivered. The delete is the sharp case - ``objects.delete_activity``
+    carries the Note inline, so a private review deleted without this gate
+    reached every remote follower carrying its full text.
+
+    Two of the three audiences go out, and they differ in *address* rather than
+    in whether to send: a public post is addressed to the world, a followers-only
+    post to the author's followers, and ``objects.status_audience`` is what says
+    so on each row. A private post goes nowhere - it was never delivered, so a
+    follower has nothing to be told is gone, and nothing to be shown.
+    """
+    return status.visibility in (Visibility.PUBLIC, Visibility.FOLLOWERS)
 
 
 def public_status_scope(viewer=None, *, local_only: bool = False):

@@ -14,6 +14,7 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
+from reeltalk.activitypub import read_auth
 from reeltalk.activitypub.broadcast import (
     broadcast_like,
     broadcast_reply,
@@ -234,7 +235,16 @@ def status_detail(request, status_id):
     # one of the two doors a private post would otherwise leak through: the other
     # is the outbox listing (``activitypub.views.outbox``).
     if not may_read(status, request.user if request.user.is_authenticated else None):
-        raise Http404
+        # A machine is not nothing. A peer that signs its fetch proves which
+        # account asked (visibility V2), and that account may genuinely be one of
+        # the author's followers - the post was delivered to them. So the refusal
+        # above is re-opened only for an ActivityPub request whose signature
+        # verifies against a known actor that follows the author, and only for a
+        # followers-only row; an unsigned GET, a stranger's key, and any private
+        # row all still land in the same 404, which is what keeps D9 true (a 403
+        # would confirm the post exists).
+        if not (accepts_activitypub(request) and read_auth.may_fetch(request, status)):
+            raise Http404
     if accepts_activitypub(request):
         if not status.local:
             raise Http404
@@ -495,11 +505,12 @@ def like_status(request, status_id):
     )
 
 
-# The audiences the finish modal offers (visibility V1). ``followers`` is
-# deliberately absent until the outbound addressing exists in V2: a
-# followers-only post addressed to the public collection arrives on a peer filed
-# as public, and a mislabel already delivered cannot be retracted from here.
-COMPOSER_VISIBILITIES = {Visibility.PUBLIC, Visibility.PRIVATE}
+# The audiences the finish modal offers. All three since visibility V2: the
+# third one waited for the outbound addressing in ``objects.status_audience``,
+# because a followers-only post addressed to the public collection would arrive
+# on every peer filed as public, and a mislabel already delivered cannot be
+# retracted from here.
+COMPOSER_VISIBILITIES = {Visibility.PUBLIC, Visibility.FOLLOWERS, Visibility.PRIVATE}
 
 
 def _posted_visibility(request) -> str:
@@ -581,20 +592,26 @@ def mark_watched_view(request, film_id):
     # follower drops its send — this request must not fail because of one
     # unreachable instance.
     #
-    # A non-public finish sends nothing at all (visibility V1, D5): the whole act
-    # is private, so there is no ``Create`` and no ``ShelfEvent`` either. The
-    # watchlist removal stays silent with the rest of it, which leaves peers
-    # holding a stale "on their Watchlist" row for that film. That is the cost the
-    # owner accepted rather than announce a film's name just to announce its
-    # removal; the row is a peer's copy of a shelf that no longer has it, and the
-    # next full sync of that actor corrects it.
-    if status.visibility == Visibility.PUBLIC:
-        if existing_review:
-            broadcast_status_update(request, status)
-        else:
-            broadcast_status_create(request, status)
-        if was_on_watchlist:
-            broadcast_shelf_event(request, user, film, Shelf.TO_READ, added=False)
+    # The audience gate is deliberately not here: it sits in the broadcast
+    # layer's ``_announce``, in front of every status broadcast rather than in
+    # whichever view called, because the gate is a fact about the row (V2). A
+    # public finish is announced to the world and a followers-only one to the
+    # author's followers, each addressed the way a peer reads that audience; a
+    # private finish sends no ``Create`` at all (D5).
+    if existing_review:
+        broadcast_status_update(request, status)
+    else:
+        broadcast_status_create(request, status)
+    # The shelf event is the one announcement that stays public-only. D5 makes
+    # the whole finish act whatever the audience is, and a Watchlist removal
+    # names the film to whoever receives it, so a non-public finish sends no
+    # ``ShelfEvent`` and peers keep a stale "on their Watchlist" row for that
+    # film until the next full sync of that actor. That is the cost the owner
+    # accepted rather than announce a film's name just to announce its removal,
+    # and it now applies to a followers-only finish for the same reason: the
+    # shelf has no audience shape of its own on the wire.
+    if was_on_watchlist and status.visibility == Visibility.PUBLIC:
+        broadcast_shelf_event(request, user, film, Shelf.TO_READ, added=False)
     messages.success(request, "Marked as watched.")
     return redirect("film", film_id=film.id)
 

@@ -201,6 +201,9 @@ def outbox(request, localname):
         # (visibility V1, D9) - the other is the AP arm of the post page. A peer
         # that walks this collection gets the public posts and nothing else,
         # which is also what makes the count honest: it counts what it lists.
+        # V2 left it public-only on purpose: a followers-only post reaches its
+        # readers by delivery, and a collection anybody may walk is exactly the
+        # thing that audience excludes.
         .filter(visibility=Visibility.PUBLIC)
         .select_related("user", "film", "reply_parent")
         .order_by("-published_date", "-id")

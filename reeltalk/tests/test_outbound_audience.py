@@ -38,7 +38,7 @@ from reeltalk.activitypub.objects import (
     status_audience,
     update_activity,
 )
-from reeltalk.core.models import Film, Status
+from reeltalk.core.models import Film, Status, Visibility
 from reeltalk.mentions.models import sync_status_mentions
 from reeltalk.social.models import User
 from reeltalk.tests.members import member
@@ -458,3 +458,85 @@ def test_a_rating_status_is_addressed_the_same_as_a_comment(req, alice, film):
         rating=Decimal("4.5"),
     )
     assert status_audience(review) == status_audience(_status(alice, film))
+
+
+# --- the two audiences visibility V2 puts on the wire ------------------------
+
+
+def test_a_followers_note_is_addressed_to_the_followers_collection(req, alice, film):
+    """The whole of V2's wire work in one assertion.
+
+    The ``to`` head is all a receiver has, and a followers-only note carrying the
+    public collection would arrive *published* on every peer that received it --
+    not a thing this instance can take back afterwards. Run against the peer's
+    table, so the test fails when a peer would misfile it rather than when a
+    key name moved.
+    """
+    status = _status(alice, film, visibility=Visibility.FOLLOWERS)
+    to, cc = status_audience(status)
+    assert to == [FOLLOWERS_OF_ALICE]
+    assert cc == []
+    doc = note_document(status, req)
+    assert doc["to"] == [FOLLOWERS_OF_ALICE]
+    assert _peer_visibility(doc["to"], doc["cc"], FOLLOWERS_OF_ALICE) == "private"
+
+
+def test_a_followers_note_addresses_no_mentions(req, alice, zed, film):
+    """The owner's answer for the third audience: followers, and nobody else.
+
+    The mention still renders and still rides the ``tag`` array, but it is not an
+    address here, so a peer holding the post files the mention silent. That is
+    the cost of the narrower audience and it is deliberate, not an oversight --
+    which is why it is pinned rather than left to look like a bug.
+    """
+    status = _status(alice, film, raw="Thanks @zed.", visibility=Visibility.FOLLOWERS)
+    sync_status_mentions(status, [zed])
+    to, cc = status_audience(status)
+    assert cc == []
+    assert ZED_ACTOR not in to
+
+
+def test_a_private_note_addresses_nobody_and_never_the_public(req, alice, film):
+    """Nothing about a private post is delivered, and the shape says so.
+
+    The peer's fall-through for an address-less activity is ``direct``, so this
+    shape could not publish a private post even if a gate elsewhere ever let one
+    out. It is also the mirror of our own inbound reading: empty arrays come back
+    as private (``statuses.visibility_from_audience``), so the two directions
+    agree on what an empty audience means.
+    """
+    status = _status(alice, film, visibility=Visibility.PRIVATE)
+    to, cc = status_audience(status)
+    assert to == []
+    assert cc == []
+    assert _peer_visibility(to, cc, FOLLOWERS_OF_ALICE) != "public"
+
+
+def test_delete_activity_follows_the_posts_own_audience(req, alice, film):
+    """A tombstone cannot be wider than what it buries.
+
+    ``delete_activity`` embeds the Note, so a followers-only review deleted
+    behind a public ``to`` would hand its text to the world on the way out --
+    the leak belongs to the delete path, and this is where it is closed.
+    """
+    narrow = _status(alice, film, visibility=Visibility.FOLLOWERS)
+    assert delete_activity(narrow, alice, req)["to"] == [FOLLOWERS_OF_ALICE]
+
+
+def test_the_delivery_list_for_a_followers_post_drops_the_mention(alice, zed, film):
+    """The set that gets a POST has to agree with the array that says who may see.
+
+    Public keeps its mentions, because an address is an address. Followers-only
+    does not: delivering to somebody the envelope does not name puts a copy in
+    front of a person the audience refuses, on a server where our own read paths
+    have no say over what they can open again.
+    """
+    from reeltalk.activitypub.broadcast import _status_targets
+
+    public = _status(alice, film, raw="Thanks @zed.")
+    sync_status_mentions(public, [zed])
+    assert [user.pk for user in _status_targets(public)] == [zed.pk]
+
+    narrow = _status(alice, film, raw="Thanks @zed.", visibility=Visibility.FOLLOWERS)
+    sync_status_mentions(narrow, [zed])
+    assert _status_targets(narrow) == []

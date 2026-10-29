@@ -31,7 +31,7 @@ own data is not a social act).
 
 import requests
 
-from reeltalk.core.models import Status
+from reeltalk.core.models import Status, Visibility, sends_externally
 
 from .delivery import DeliveryFailure, deliver_activity, inbox_for
 from .identity import (
@@ -140,15 +140,47 @@ def _status_targets(status, extra=()):
     who must receive the reply whether or not they follow the replier. The
     union is deduped by pk so a person in more than one of these sets is
     posted to once, the way ``broadcast_reply`` already deduped its parent.
+
+    **A followers-only status drops the mention set** (visibility V2). The
+    owner's answer for that audience is that it reaches the author's followers
+    and nobody else, and the delivery list has to agree with the address on the
+    envelope — ``objects.status_audience`` puts no mention in ``cc`` for that
+    row, and delivering to somebody the activity does not address would hand a
+    copy to a person the audience refuses, including on our own read paths.
+    ``extra`` still rides: a reply is owed to the author of the post it answers
+    whoever the replier's followers happen to be.
     """
     targets = list(status.user.followers.all())
     seen = {user.pk for user in targets}
-    for user in (*_mentioned_remote_users(status), *extra):
+    mentioned = (
+        ()
+        if status.visibility == Visibility.FOLLOWERS
+        else _mentioned_remote_users(status)
+    )
+    for user in (*mentioned, *extra):
         if user.pk in seen:
             continue
         seen.add(user.pk)
         targets.append(user)
     return targets
+
+
+def _announce(request, status, activity, extra=()) -> list[DeliveryFailure]:
+    """Deliver a status activity, unless its audience keeps it at home (V2).
+
+    One gate in front of every status broadcast, because the gate belongs to the
+    audience and not to whichever view happened to call. Visibility V1 gated
+    only the finish flow, which left the reply and delete routes announcing rows
+    that had never been delivered — a delete carrying the Note inline, in the
+    delete's case. :func:`reeltalk.core.models.sends_externally` is the rule;
+    the empty list is the same "nothing failed" answer a broadcast with no
+    remote recipients already gives its callers.
+    """
+    if not sends_externally(status):
+        return []
+    return _deliver_signed(
+        request, status.user, activity, _status_targets(status, extra=extra)
+    )
 
 
 def broadcast_status_create(request, status) -> None:
@@ -159,9 +191,12 @@ def broadcast_status_create(request, status) -> None:
     the mention never reaches them. A dead mentioned instance drops its send
     exactly as a dead follower does — the member's post must not fail
     because of somebody else's server.
+
+    A private status never gets here in practice and is refused by
+    :func:`_announce` whatever the caller does.
     """
     activity = create_activity(status, status.user, request)
-    return _deliver_signed(request, status.user, activity, _status_targets(status))
+    return _announce(request, status, activity)
 
 
 def broadcast_status_update(request, status) -> None:
@@ -173,7 +208,7 @@ def broadcast_status_update(request, status) -> None:
     which ``sync_status_mentions`` is what the write sites call for.
     """
     activity = update_activity(status, status.user, request)
-    return _deliver_signed(request, status.user, activity, _status_targets(status))
+    return _announce(request, status, activity)
 
 
 def broadcast_status_delete(request, status) -> None:
@@ -186,10 +221,13 @@ def broadcast_status_delete(request, status) -> None:
     been told is gone. (F14.)
 
     The tombstone keeps its identity (soft-delete — §3.2), so the Note rides
-    inline and the receiver keys the deletion by origin id.
+    inline and the receiver keys the deletion by origin id. That inline copy is
+    exactly why this route needs the audience gate: a private review was never
+    delivered, so there is nobody to tell, and the Note must not go out as a
+    deletion notice.
     """
     activity = delete_activity(status, status.user, request)
-    return _deliver_signed(request, status.user, activity, _status_targets(status))
+    return _announce(request, status, activity)
 
 
 def broadcast_shelf_event(request, user, film, identifier: str, *, added: bool) -> None:
@@ -477,7 +515,10 @@ def broadcast_reply(request, reply) -> None:
     ``objects.note_reference`` makes that the parent's *home* URL, so a
     reply to a mirrored post points at the instance that actually owns the
     turn being answered rather than at a URL we minted for it.
+
+    A reply inherits its parent's audience (V1), so a reply under a private
+    review is itself private and goes nowhere: only the parent's author can
+    answer a post that narrow, and they are the one reader who already has it.
     """
     activity = create_activity(reply, reply.user, request)
-    targets = _status_targets(reply, extra=[reply.reply_parent.user])
-    return _deliver_signed(request, reply.user, activity, targets)
+    return _announce(request, reply, activity, extra=[reply.reply_parent.user])
