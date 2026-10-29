@@ -278,7 +278,7 @@ def export_film_csv(user) -> str:
     :func:`guard_formula` to defuse a formula-leading name before it can
     execute in a spreadsheet on open (F11).
     """
-    films = user.all_films()
+    films = user.all_films(viewer=user)
 
     # D5 allows at most one live review per user per film; keep the first (most
     # recent) rated one per film from a single query — no N+1.

@@ -350,6 +350,35 @@ class Shelf(models.Model):
             cls.objects.create(name=name, identifier=identifier, user=user)
 
 
+class Visibility(models.TextChoices):
+    """Who a post or a shelf change is addressed to (visibility V1).
+
+    Three values, one shared by ``Status`` and ``ShelfFilm`` because finishing a
+    film privately is one act with two rows (owner ruling 2026-10-28: the whole
+    act is private, not just the text). They map onto the audience arrays this
+    project already speaks on the wire:
+
+    * ``public`` - the public collection. Every reader, and the only value the
+      outbound path addresses today.
+    * ``followers`` - the author's followers collection. Stored and read
+      correctly from this increment; not offered in the composer until the
+      outbound addressing exists, because a followers-only post addressed to the
+      public collection arrives on a peer filed as public, which cannot be
+      retracted.
+    * ``private`` - the author alone, rendered as "Private". Not a share target
+      with a small audience; the absence of one.
+
+    There is deliberately no ``unlisted``. The wire can express it (the public
+    collection in ``cc`` alone) and Mastodon files it as its own visibility, but
+    nothing here needs a fourth state yet, and an inbound unlisted mirror reads
+    as what it is: publicly readable, so ``public``.
+    """
+
+    PUBLIC = "public", "Public"
+    FOLLOWERS = "followers", "Followers"
+    PRIVATE = "private", "Private"
+
+
 class ShelfFilm(models.Model):
     """Through row joining a film to a shelf (§3.2).
 
@@ -367,6 +396,13 @@ class ShelfFilm(models.Model):
     film = models.ForeignKey(Film, on_delete=models.PROTECT)
     user = models.ForeignKey("social.User", on_delete=models.CASCADE)
     shelved_date = models.DateTimeField(default=timezone.now)
+    # The audience of the act that put this row here (V1). Only the finish flow
+    # ever writes a non-public value: adding a film to the Watchlist is a
+    # separate act and stays public, and a row written by an import or a mirror
+    # has no review behind it to inherit an audience from.
+    visibility = models.CharField(
+        max_length=10, choices=Visibility.choices, default=Visibility.PUBLIC
+    )
 
     class Meta:
         verbose_name_plural = "shelf films"
@@ -449,6 +485,14 @@ class Status(models.Model):
     )
     # Remote statuses (M4) are mirrors; local ones are full rows.
     local = models.BooleanField(default=True)
+    # Who may read this post (visibility V1). Default public, so every row that
+    # predates the column keeps behaving exactly as it did; the filter that
+    # enforces it is ``audience_q`` / ``may_read``, not this field. An inbound
+    # mirror carries what the sender's own ``to``/``cc`` said, which is the only
+    # answer available to us (see ``activitypub/statuses.visibility_from_audience``).
+    visibility = models.CharField(
+        max_length=10, choices=Visibility.choices, default=Visibility.PUBLIC
+    )
 
     # ActivityPub origin identity (M4) — same day-one pattern as Film/Shelf.
     origin_id = models.PositiveBigIntegerField(null=True, blank=True)
@@ -581,10 +625,22 @@ class Status(models.Model):
         this increment. The replies still exist as thread objects under
         ``reply_parent``, exactly so that selective timeline visibility
         can become a later knob instead of a schema change.
+
+        **Audience is applied here** (visibility V1): a member's own private
+        rows and the followers rows they are entitled to, and nobody else's.
+        Membership and audience are separate clauses on purpose - the follow
+        set says whose content this feed is made of, the audience says which of
+        those posts the reader may open.
         """
-        return cls.objects.filter(
-            user_id__in=user.feed_member_ids(), deleted=False, reply_parent__isnull=True
-        ).select_related("user", "film")
+        return (
+            cls.objects.filter(
+                user_id__in=user.feed_member_ids(),
+                deleted=False,
+                reply_parent__isnull=True,
+            )
+            .filter(audience_q(user))
+            .select_related("user", "film")
+        )
 
 
 class Like(models.Model):
@@ -747,6 +803,11 @@ def add_reply(user, parent: Status, *, content: str, raw_content: str) -> Status
         content=content,
         raw_content=raw_content,
         reply_parent=parent,
+        # A reply inherits its parent's audience (V1). A public reply under a
+        # private review would name the film and answer a post its reader cannot
+        # see, which is a leak dressed as a conversation - and the route that
+        # gets you here already refuses a parent you may not read.
+        visibility=parent.visibility,
     )
 
 
@@ -1009,6 +1070,27 @@ class FeedEntry:
     reply_count: int = 0
     is_list_face: bool = False
     list_strip: ListStrip | None = None
+    # Who the row was addressed to (visibility V1), for the marker the template
+    # draws. Only ever read off a row the viewer is allowed to see, so the
+    # template needs no second check: a private row reaches a template only in
+    # its author's feed. Defaults to public so a row built without it - a shelf
+    # event with nothing behind it - draws nothing.
+    visibility: str = "public"
+
+    @property
+    def audience_label(self) -> str:
+        """The marker a row draws for its audience, or "" for a public row.
+
+        Read off the choices rather than a template string so the words a member
+        sees are one answer in one place (visibility V1). An unrecognised value
+        draws nothing: a marker naming an audience we do not have would be worse
+        than no marker.
+        """
+        try:
+            audience = Visibility(self.visibility)
+        except ValueError:
+            return ""
+        return "" if audience == Visibility.PUBLIC else audience.label
 
     @property
     def kind_rank(self) -> int:
@@ -1165,6 +1247,7 @@ def _status_entry(status: "Status") -> "FeedEntry":
         content=status.content,
         status_id=status.id,
         remote=not status.local,
+        visibility=status.visibility,
     )
     if status.status_type == Status.Type.LIST:
         entry.is_list_face = True
@@ -1190,6 +1273,73 @@ def _attach_interaction_counts(entries: list["FeedEntry"], user) -> None:
             entry.like_count = counts.get(entry.status_id, 0)
             entry.liked_by_viewer = entry.status_id in liked
             entry.reply_count = replies.get(entry.status_id, 0)
+
+
+def audience_q(viewer, *, field: str = "visibility", author: str = "user_id"):
+    """The Q that keeps a queryset to the rows ``viewer`` may read (visibility V1).
+
+    **This is the one audience rule.** Every surface that lists posts or shelf
+    changes routes its queryset through it, and the single-object twin is
+    :func:`may_read`. The reason it is one function rather than a clause at each
+    call site is the failure mode of the whole feature: one read path out of
+    nineteen forgetting the filter is a member's private review on a stranger's
+    screen, and a shared definition is the only shape a test can hold.
+
+    Three clauses, and the third pair is why ``author`` is a parameter:
+
+    * public rows, for everybody including an anonymous reader;
+    * followers rows, for the author's followers - which is
+      ``feed_member_ids`` (self plus follows), so a follower sees what their
+      feed already lets them see, and the author sees their own;
+    * private rows, for the author alone.
+
+    It composes with the standing filters rather than replacing them: deleted,
+    suspended and banned authors and per-viewer blocks stay where they are, in
+    ``public_status_scope``, ``feed_for`` and the film page. Suspension is a
+    fact about the author for every viewer; audience is a fact about the
+    viewer. Two different axes, and neither belongs in the other's clause.
+
+    ``field``/``author`` exist because ``ShelfFilm`` carries the same column on a
+    row whose actor column is also ``user_id`` (D5: the whole finish act is
+    private), not because either table needs anything cleverer.
+    """
+    public = Q(**{field: Visibility.PUBLIC})
+    if viewer is None or not getattr(viewer, "is_authenticated", False):
+        return public
+    members = viewer.feed_member_ids()
+    return (
+        public
+        # ``__in`` spelled out, not a bare list: Django does not infer an
+        # membership test from a list value on a scalar column, and a list on
+        # ``user_id=`` raises TypeError at query build rather than returning
+        # nothing - which the walk test caught on its first run.
+        | Q(**{field: Visibility.FOLLOWERS, f"{author}__in": members})
+        | Q(**{field: Visibility.PRIVATE, author: viewer.pk})
+    )
+
+
+def may_read(status, viewer) -> bool:
+    """Single-object twin of :func:`audience_q` (visibility V1).
+
+    For the pages that fetch one row by id - the post page and its ActivityPub
+    arm, a notification's target, a report filed against a status. Keeping the
+    queryset and the instance answers side by side is the point: two rules that
+    can drift is how a leak comes back after the sweep that closed it.
+    """
+    if status.visibility == Visibility.PUBLIC:
+        return True
+    if viewer is None or not getattr(viewer, "is_authenticated", False):
+        return False
+    if status.user_id == viewer.pk:
+        return True
+    return status.visibility == Visibility.FOLLOWERS and (
+        status.user_id in viewer.feed_member_ids()
+    )
+
+
+def readable_statuses(viewer):
+    """Every status ``viewer`` may read, before any other filter (V1)."""
+    return Status.objects.filter(audience_q(viewer))
 
 
 def public_status_scope(viewer=None, *, local_only: bool = False):
@@ -1230,6 +1380,13 @@ def public_status_scope(viewer=None, *, local_only: bool = False):
         reply_parent__isnull=True,
         user__suspended_at__isnull=True,
         user__banned_at__isnull=True,
+        # A public scope shows public posts, and that stays true for the
+        # author looking at their own tab (visibility V1): a private review
+        # belongs to Following, where it is the author's own row, not to the
+        # instance's public feed. ``audience_q`` is not used here because
+        # there is no viewer-relations clause to add - public is the whole
+        # answer in a scope whose definition is "public posts".
+        visibility=Visibility.PUBLIC,
     )
     if local_only:
         statuses = statuses.filter(local=True)
@@ -1368,6 +1525,11 @@ def feed_entries(
             user_id__in=member_ids,
             shelf__identifier__in=[Shelf.TO_READ, Shelf.READ],
         )
+        # A private finish leaves no row for anybody else (D5): the shelf half
+        # of the feed carries the same audience column as the post half, so the
+        # "watched X" row a private review rides on disappears for other
+        # viewers rather than showing the film and hiding the text.
+        .filter(audience_q(user))
         .select_related("shelf", "user", "film")
         .order_by("shelved_date", "id")
     )
@@ -1406,6 +1568,7 @@ def feed_entries(
                         film=row.film,
                         date=row.shelved_date,
                         source_id=row.id,
+                        visibility=row.visibility,
                     )
                 )
             continue
@@ -1420,6 +1583,7 @@ def feed_entries(
                 date=newest.shelved_date,
                 source_id=newest.id,
                 other_count=len(group) - 1,
+                visibility=newest.visibility,
             )
         )
 
@@ -1444,6 +1608,10 @@ def feed_entries(
         if target is not None:
             target.rating = status.rating
             target.content = status.content
+            # The review is the social object the folded row stands for, so it
+            # names the row's audience too (visibility V1) - and the marker the
+            # template draws from it.
+            target.visibility = status.visibility
             # R83: the folded row keeps the review as its identity — the row
             # reads as a shelf event but interacts as the review it carries.
             target.status_id = status.id
@@ -1522,7 +1690,13 @@ def validate_star_rating(rating) -> Decimal:
 
 @transaction.atomic
 def mark_watched(
-    user, film: Film, *, rating, content: str = "", raw_content: str = ""
+    user,
+    film: Film,
+    *,
+    rating,
+    content: str = "",
+    raw_content: str = "",
+    visibility: str = Visibility.PUBLIC,
 ) -> Status:
     """Mark ``film`` as watched for ``user`` (§3.3 rules 3–4).
 
@@ -1533,6 +1707,17 @@ def mark_watched(
     entry otherwise. Re-finishing a film that already has a review updates it
     in place (D5); empty text keeps the existing content. Posts no automatic
     feed note (D3) — only the review itself exists.
+
+    ``visibility`` is the audience of the review (visibility V1), and it is
+    honoured **only when the review is new**: the audience is fixed at writing
+    (owner ruling 2026-10-28), so re-finishing a film changes its text and its
+    rating and never its audience. The Watched shelf row takes the same audience
+    when this call creates it, because finishing a film is one act with two rows
+    and a private finish leaves no "watched X" row for anybody else (D5). A
+    shelf row that already existed - an imported Watched list, or a film finished
+    publicly and re-reviewed privately - keeps the audience of the act that
+    created it, so its bare "watched" row stays where it always was while the
+    review text hides: the row is not this act's to retract.
     """
     star_rating = validate_star_rating(rating)
     watched_shelf = Shelf.objects.get(user=user, identifier=Shelf.READ)
@@ -1550,7 +1735,9 @@ def mark_watched(
     )
 
     ShelfFilm.objects.get_or_create(
-        shelf=watched_shelf, film=film, defaults={"user": user}
+        shelf=watched_shelf,
+        film=film,
+        defaults={"user": user, "visibility": visibility},
     )
     # D1: Watchlist and Watched are mutually exclusive.
     ShelfFilm.objects.filter(shelf=watchlist_shelf, film=film).delete()
@@ -1579,6 +1766,7 @@ def mark_watched(
         rating=star_rating,
         content=content,
         raw_content=raw_content,
+        visibility=visibility,
     )
 
 
@@ -1640,8 +1828,8 @@ class GenreCount:
     review_count: int
 
 
-def live_reviews():
-    """The review statuses the rail counts (R61).
+def live_reviews(viewer=None):
+    """The review statuses ``viewer`` may read (R61; audience per V1).
 
     D5's review kinds alike — written reviews and rating-only entries — minus
     soft-deleted rows and minus anything written by a **suspended** account
@@ -1654,22 +1842,39 @@ def live_reviews():
     index rails all widen or narrow together. Adding it to the shared
     definition is what stops one rail showing a suspended reviewer's work
     while another hides it.
+
+    ``viewer`` arrived with V1, and it is the reason the rail counts became
+    per-viewer: a number and the list under it must agree for the reader
+    standing in front of them, so a review nobody but its author may read moves
+    no public tally (owner ruling 2026-10-28). That is the same class of defect
+    as copy that reports something the reader cannot verify. Note what did *not*
+    change: per-viewer **blocks** still do not narrow a count, only the lists
+    that hide the blocked reviewer's rows (R85) - a count is a fact about the
+    post, and blocking is personal. Audience is different in kind: a private
+    review is not a fact the reader can check at all.
     """
     return Status.objects.filter(
         status_type__in=list(Status.REVIEW_TYPES),
         deleted=False,
         user__suspended_at__isnull=True,
-    )
+    ).filter(audience_q(viewer))
 
 
-def trending_films(limit: int = TRENDING_LIMIT, window: timedelta = TRENDING_WINDOW):
+def trending_films(
+    limit: int = TRENDING_LIMIT,
+    window: timedelta = TRENDING_WINDOW,
+    viewer=None,
+):
     """Films with the most live reviews inside ``window``, busiest first (R61).
 
     Counts written and rating-only reviews alike. Ties break on the newest
     review and then the film id, so the stub order is stable between requests.
+    ``viewer`` scopes the count to what that reader may read (V1), which is why
+    the rail is no longer instance-wide: a trending list that counts reviews
+    its reader cannot open promises a click that leads nowhere.
     """
     rows = (
-        live_reviews()
+        live_reviews(viewer)
         .filter(published_date__gte=timezone.now() - window)
         .values("film_id")
         .annotate(review_count=Count("id"), latest=Max("published_date"))
@@ -1683,7 +1888,7 @@ def trending_films(limit: int = TRENDING_LIMIT, window: timedelta = TRENDING_WIN
     ]
 
 
-def _reviewed_genre_tally() -> Counter:
+def _reviewed_genre_tally(viewer=None) -> Counter:
     """Live review counts per genre, over reviewed films only (R64).
 
     Shelves hold nearly the whole imported archive, so a shelf-inclusive tally
@@ -1691,9 +1896,13 @@ def _reviewed_genre_tally() -> Counter:
     keeps every pill's subfeed non-empty. The count is reviews rather than
     films, matching the rows the genre page lists. Small-instance scale lets
     one grouped query plus one film read stand in for an unnest aggregate.
+
+    ``viewer`` (V1) keeps a pill's number and the subfeed behind it agreeing:
+    both are built from ``live_reviews(viewer)``, so a count can never promise a
+    row the reader is not allowed to open.
     """
     per_film = dict(
-        live_reviews()
+        live_reviews(viewer)
         .exclude(film__isnull=True)
         .values_list("film_id")
         .annotate(review_count=Count("id"))
@@ -1707,25 +1916,29 @@ def _reviewed_genre_tally() -> Counter:
     return tally
 
 
-def ranked_genres(limit: int | None = None) -> list[GenreCount]:
+def ranked_genres(limit: int | None = None, viewer=None) -> list[GenreCount]:
     """Genres of reviewed films, most-reviewed first (ties alphabetical)."""
     ordered = sorted(
-        _reviewed_genre_tally().items(),
+        _reviewed_genre_tally(viewer).items(),
         key=lambda item: (-item[1], item[0].lower(), item[0]),
     )
     ranked = [GenreCount(name, slugify(name), count) for name, count in ordered]
     return ranked if limit is None else ranked[:limit]
 
 
-def popular_genres(limit: int = POPULAR_GENRES_LIMIT) -> list[GenreCount]:
+def popular_genres(limit: int = POPULAR_GENRES_LIMIT, viewer=None) -> list[GenreCount]:
     """The "Popular Genres" pills (R61): the top ``limit`` ranked genres."""
-    return ranked_genres(limit)
+    return ranked_genres(limit, viewer)
 
 
-def genre_from_slug(slug: str) -> GenreCount | None:
+def genre_from_slug(slug: str, viewer=None) -> GenreCount | None:
     """The genre a pill's URL addresses; None when nothing carries that slug.
 
     Ranked genres only, so a pill never leads to an empty subfeed and an
-    unknown or stale slug 404s.
+    unknown or stale slug 404s. ``viewer`` (V1) matters for more than the
+    number: a genre whose only reviews are private must not answer 200 for a
+    stranger who would find an empty page.
     """
-    return next((genre for genre in ranked_genres() if genre.slug == slug), None)
+    return next(
+        (genre for genre in ranked_genres(viewer=viewer) if genre.slug == slug), None
+    )

@@ -21,7 +21,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 
 from reeltalk import __version__
-from reeltalk.core.models import Status
+from reeltalk.core.models import Status, Visibility
 from reeltalk.proxy_trust import client_ip
 from reeltalk.social.models import SiteSettings, User
 
@@ -196,6 +196,12 @@ def outbox(request, localname):
     collection_url = absolute_uri(outbox_path(user.localname))
     statuses = (
         Status.objects.filter(user=user, deleted=False, local=True)
+        # The outbox is an unauthenticated endpoint, so it is one of the two
+        # machine-facing doors a non-public post must not answer through
+        # (visibility V1, D9) - the other is the AP arm of the post page. A peer
+        # that walks this collection gets the public posts and nothing else,
+        # which is also what makes the count honest: it counts what it lists.
+        .filter(visibility=Visibility.PUBLIC)
         .select_related("user", "film", "reply_parent")
         .order_by("-published_date", "-id")
     )

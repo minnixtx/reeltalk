@@ -19,7 +19,7 @@ from django.utils import timezone
 from django.utils.dateformat import format as date_format
 
 from reeltalk.activitypub.crypto import generate_keypair
-from reeltalk.core.models import Film, Shelf, ShelfFilm, Status
+from reeltalk.core.models import Film, Shelf, ShelfFilm, Status, audience_q
 
 # A minted invite stays open this long before it lapses unused (R82). Long
 # enough that a link pasted into a chat app gets opened from it days later;
@@ -636,29 +636,47 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     # --- Films-page query API (PLAN.md §3.3 rule 1) -------------------------
 
-    def films_on_shelf(self, identifier: str):
-        """Films on one of this user's shelves — a tab on the films page."""
+    def films_on_shelf(self, identifier: str, viewer=None):
+        """Films on one of this user's shelves — a tab on the films page.
+
+        ``viewer`` (visibility V1) decides which of this user's shelf rows the
+        reader may see: a private finish leaves no row for anybody else, so the
+        film is simply absent from the tab rather than present without its
+        review. The rows are read directly rather than through the ``Film`` M2M
+        for that reason - the audience lives on the through row.
+        """
+        rows = ShelfFilm.objects.filter(
+            shelf__identifier=identifier, shelf__user=self
+        ).filter(audience_q(viewer))
         return self._films_with_rating(
-            Film.objects.filter(shelves__identifier=identifier, shelves__user=self)
+            Film.objects.filter(id__in=[row.film_id for row in rows]), viewer
         )
 
-    def all_films(self):
+    def all_films(self, viewer=None):
         """Every film this user has a relationship with (the §3.5/D10 set).
 
         Films on any of the user's shelves plus films carrying one of their
         non-deleted statuses — the same set the export emits rows for.
+
+        Both halves carry an audience (visibility V1), so a film whose only
+        connection to this user is a private review does not appear on their
+        public films page. ``import_export`` passes the member themselves,
+        where the export is their own data and nothing is hidden from it.
         """
         ids = set(
-            ShelfFilm.objects.filter(shelf__user=self).values_list("film_id", flat=True)
+            ShelfFilm.objects.filter(shelf__user=self)
+            .filter(audience_q(viewer))
+            .values_list("film_id", flat=True)
         )
         ids |= set(
             Status.objects.filter(user=self, deleted=False)
+            .filter(audience_q(viewer))
             .exclude(film=None)
             .values_list("film_id", flat=True)
         )
-        return self._films_with_rating(Film.objects.filter(id__in=ids))
+        return self._films_with_rating(Film.objects.filter(id__in=ids), viewer)
 
-    def _films_with_rating(self, films):
+    def _films_with_rating(self, films, viewer=None):
         """Annotate films with this user's current star rating.
 
         D5 allows at most one live review per user per film, so the subquery
@@ -666,6 +684,10 @@ class User(AbstractBaseUser, PermissionsMixin):
         The deterministic order (sort title, year, id) keeps the films page's
         pagination stable — id breaks sort-title ties and orders year-less
         stubs.
+
+        The subquery carries the audience filter (visibility V1): a private
+        rating is part of a private review, so a stranger's films page shows
+        that film with no stars rather than a score nobody may read.
         """
         rating = (
             Status.objects.filter(
@@ -674,6 +696,7 @@ class User(AbstractBaseUser, PermissionsMixin):
                 status_type__in=list(Status.REVIEW_TYPES),
                 deleted=False,
             )
+            .filter(audience_q(viewer))
             .order_by("-id")
             .values("rating")[:1]
         )

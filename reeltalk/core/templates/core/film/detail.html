@@ -70,6 +70,10 @@
             <a class="review-author" href="{% url 'user-profile' review.user.localname %}">{{ review.user.localname }}</a>
             {% if review.rating %}<span class="rating" title="{{ review.rating|floatformat:'-1' }} / 5">{{ review.rating|stars }}</span>{% endif %}
             <span class="post-date">{{ review.published_date|date:"Y-m-d" }}</span>
+            {# The audience tag (visibility V1): the list is already filtered to #}
+            {# what this reader may read, so a tag here is the author seeing their #}
+            {# own private review, and nobody else's. #}
+            {% if review.visibility != "public" %}<span class="audience">{{ review.get_visibility_display }}</span>{% endif %}
             {% if user.is_authenticated and review.user_id == user.id %}
               <form method="post" action="{% url 'status-delete' review.id %}" class="inline review-delete">
                 {% csrf_token %}
@@ -101,6 +105,18 @@
       </div>
       <label for="id_review_content">Review <span class="muted">(optional)</span></label>
       <textarea name="content" id="id_review_content" rows="4" placeholder="What did you think?">{% if user_review %}{{ user_review.raw_content }}{% endif %}</textarea>
+      {% if not user_review %}
+        {# The audience control (visibility V1). Offered only when writing: an #}
+        {# audience is fixed at writing, so an edit shows no control rather than #}
+        {# one the view would ignore. Followers-only is absent until the outbound #}
+        {# addressing exists - offering it now would send a followers-only post out #}
+        {# addressed to the public collection, which no peer could ever un-know. #}
+        <fieldset class="audience-choice">
+          <legend>Who can see this</legend>
+          <label><input type="radio" name="visibility" value="public" checked> Public</label>
+          <label><input type="radio" name="visibility" value="private"> Private</label>
+        </fieldset>
+      {% endif %}
       <button type="submit" disabled class="btn cinema-button cinema-button--primary">{% if user_review %}Save changes{% else %}Mark as watched{% endif %}</button>
     </form>
   </div>

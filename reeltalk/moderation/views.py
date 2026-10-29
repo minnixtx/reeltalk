@@ -36,7 +36,7 @@ from reeltalk.activitypub.broadcast import (
     broadcast_report_flag,
     broadcast_status_delete,
 )
-from reeltalk.core.models import Status
+from reeltalk.core.models import Status, may_read
 from reeltalk.moderation.decorators import (
     can_act_on,
     can_impose_severity,
@@ -881,6 +881,14 @@ def report_status(request, status_id):
     apply to you". What the test pins is that no row was created.
     """
     status = get_object_or_404(Status, id=status_id, deleted=False)
+    # Audience (visibility V1, D8): a post this member cannot read cannot be
+    # reported by them. This is not a moderation blind spot - a post nobody but
+    # its author may read is not something a second member has anything to
+    # report - and refusing it is what stops the report route becoming a way to
+    # confirm a private post exists, which is the reason the post page 404s
+    # rather than answering 403. The route refuses what the page withholds.
+    if not may_read(status, request.user):
+        raise Http404("No such post.")
     if status.user_id == request.user.pk:
         messages.error(request, "You can't report your own post.")
         return redirect("status", status_id=status.id)

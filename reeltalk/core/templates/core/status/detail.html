@@ -17,6 +17,10 @@
     <a class="review-author" href="{% url 'user-profile' status.user.localname %}">{{ status.user.localname }}</a>
     {% if status.rating %}<span class="rating" title="{{ status.rating|floatformat:'-1' }} / 5">{{ status.rating|stars }}</span>{% endif %}
     <span class="post-date">{{ status.published_date|date:"Y-m-d" }}</span>
+    {# The audience tag (visibility V1). This page 404s for anyone who may not #}
+    {# read the post, so a tag here is the author (or a follower) seeing which #}
+    {# audience a post went to - never a hint about something withheld. #}
+    {% if status.visibility != "public" %}<span class="audience">{{ status.get_visibility_display }}</span>{% endif %}
     {% comment %}
     Any member gets the control, on a local post or on a mirror of another
     instance's. Increment 5 made a like on a remote post deliverable, so

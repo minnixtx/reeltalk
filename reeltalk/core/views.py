@@ -44,11 +44,14 @@ from .models import (
     Shelf,
     ShelfFilm,
     Status,
+    Visibility,
     add_reply,
+    audience_q,
     conversation,
     genre_from_slug,
     live_reviews,
     mark_watched,
+    may_read,
     resolve_film_id,
     shelve_to_watchlist,
     toggle_like,
@@ -79,6 +82,11 @@ def film_detail(request, film_id):
             deleted=False,
             user__suspended_at__isnull=True,
         )
+        # Audience (visibility V1): a stranger sees the public reviews, a member
+        # adds the followers rows they follow into and their own private one.
+        # This one queryset is both the list and the page's review count, so the
+        # number and the rows can never disagree for the reader looking at them.
+        .filter(audience_q(request.user if request.user.is_authenticated else None))
         .select_related("user")
         .order_by("-published_date")
     )
@@ -216,6 +224,17 @@ def status_detail(request, status_id):
     # authoritative federation signal either way.
     if status.user.suspended_at is not None:
         raise Http404
+    # Audience (visibility V1, D9): a post the reader may not read 404s rather
+    # than answering 403, because a 403 confirms the post exists. The check sits
+    # **above** the content-negotiation split, unlike the block rule below it,
+    # and the difference is deliberate. A block is personal per-viewer state with
+    # no server-level answer to give a peer (R53/R54); an audience is exactly a
+    # server-level answer, and a peer that fetches a post it was not addressed
+    # must be refused on the machine arm as firmly as on the human one. That is
+    # one of the two doors a private post would otherwise leak through: the other
+    # is the outbox listing (``activitypub.views.outbox``).
+    if not may_read(status, request.user if request.user.is_authenticated else None):
+        raise Http404
     if accepts_activitypub(request):
         if not status.local:
             raise Http404
@@ -341,6 +360,12 @@ def reply_to_status(request, status_id):
     # Without this a hidden post keeps quietly accepting replies.
     if parent.user.suspended_at is not None:
         raise Http404
+    # And the same rule for the audience (visibility V1): a reply to a post you
+    # may not read would name the film and answer a conversation you were never
+    # in. The reply also inherits the parent's audience in ``add_reply``, so a
+    # thread can never contain a row with a wider audience than its root.
+    if not may_read(parent, request.user):
+        raise Http404
     # Which parents are replyable at all — named explicitly because L13
     # removed the accident that used to enforce it. Before L13 every reply
     # was typed ``comment``, so ``Status.save``'s anchoring rule refused a
@@ -441,6 +466,11 @@ def like_status(request, status_id):
     # accumulate interactions nobody can ever see the reason for.
     if status.user.suspended_at is not None:
         raise Http404
+    # The same rule for the audience (visibility V1): a post this member cannot
+    # read does not accept their like either. A private post is invisible to
+    # them, so an offer to applaud it could only have come from a typed-in URL.
+    if not may_read(status, request.user):
+        raise Http404
     liked = toggle_like(request.user, status)
     # Federation broadcast (increment 5): the Like / Undo(Like) to the
     # post's author, and nothing at all when that author is local. A dead
@@ -463,6 +493,26 @@ def like_status(request, status_id):
             "count": status.likes.filter(user__suspended_at__isnull=True).count(),
         }
     )
+
+
+# The audiences the finish modal offers (visibility V1). ``followers`` is
+# deliberately absent until the outbound addressing exists in V2: a
+# followers-only post addressed to the public collection arrives on a peer filed
+# as public, and a mislabel already delivered cannot be retracted from here.
+COMPOSER_VISIBILITIES = {Visibility.PUBLIC, Visibility.PRIVATE}
+
+
+def _posted_visibility(request) -> str:
+    """The audience the finish modal asked for, or public.
+
+    Anything outside :data:`COMPOSER_VISIBILITIES` - a stale tab, a hand-built
+    form, a value from a version of this instance that offered more - falls back
+    to public rather than refusing the write. The alternative is a member losing
+    a review to a field the form did not offer them, and the fallback is the
+    narrower surprise: it is the audience every post already had.
+    """
+    value = request.POST.get("visibility", "")
+    return value if value in COMPOSER_VISIBILITIES else Visibility.PUBLIC
 
 
 @login_required
@@ -497,6 +547,15 @@ def mark_watched_view(request, film_id):
             rating=request.POST.get("rating"),
             content=render_markdown(raw_content, mentions=True),
             raw_content=raw_content,
+            # The audience is fixed at writing (D6), so a posted value counts
+            # only on the create branch: re-finishing a film changes its text
+            # and its rating and never who it went to. The public on the other
+            # branch is inert - ``mark_watched`` ignores it once a review
+            # exists - and it is spelled out rather than left to a default so
+            # the branch that cannot change an audience is visible here.
+            visibility=(
+                Visibility.PUBLIC if existing_review else _posted_visibility(request)
+            ),
         )
     except ValueError as exc:
         messages.error(request, str(exc))
@@ -518,15 +577,24 @@ def mark_watched_view(request, film_id):
     # the reply route above.
     record_mentions(status, mentioned)
     # Federation broadcast (M4 increment 6): the review to remote followers,
-    # plus the watchlist removal when mark_watched took the film off it. A
-    # dead follower drops its send — this request must not fail because of
-    # one unreachable instance.
-    if existing_review:
-        broadcast_status_update(request, status)
-    else:
-        broadcast_status_create(request, status)
-    if was_on_watchlist:
-        broadcast_shelf_event(request, user, film, Shelf.TO_READ, added=False)
+    # plus the watchlist removal when mark_watched took the film off it. A dead
+    # follower drops its send — this request must not fail because of one
+    # unreachable instance.
+    #
+    # A non-public finish sends nothing at all (visibility V1, D5): the whole act
+    # is private, so there is no ``Create`` and no ``ShelfEvent`` either. The
+    # watchlist removal stays silent with the rest of it, which leaves peers
+    # holding a stale "on their Watchlist" row for that film. That is the cost the
+    # owner accepted rather than announce a film's name just to announce its
+    # removal; the row is a peer's copy of a shelf that no longer has it, and the
+    # next full sync of that actor corrects it.
+    if status.visibility == Visibility.PUBLIC:
+        if existing_review:
+            broadcast_status_update(request, status)
+        else:
+            broadcast_status_create(request, status)
+        if was_on_watchlist:
+            broadcast_shelf_event(request, user, film, Shelf.TO_READ, added=False)
     messages.success(request, "Marked as watched.")
     return redirect("film", film_id=film.id)
 
@@ -955,11 +1023,12 @@ def genre(request, slug):
     stale slugs 404 — ``genre_from_slug`` knows only genres carrying reviews,
     so a pill never leads to an empty page.
     """
-    genre_row = genre_from_slug(slug)
+    viewer = request.user if request.user.is_authenticated else None
+    genre_row = genre_from_slug(slug, viewer)
     if genre_row is None:
         raise Http404("No such genre.")
     reviews = (
-        live_reviews()
+        live_reviews(viewer)
         .filter(film__genres__contains=[genre_row.name])
         .select_related("user", "film")
         .order_by("-published_date")

@@ -35,6 +35,7 @@ prevent — and it would drift the moment ``notify()`` changed. Everything
 still standing after the two suppressions above goes through the door.
 """
 
+from reeltalk.core.models import may_read
 from reeltalk.notifications.models import Notification, notify
 
 
@@ -65,6 +66,15 @@ def record_mentions(status, users) -> list:
     made = []
     for user in users:
         if user.pk in already_told:
+            continue
+        # A mention inside a post its subject may not read notifies nobody
+        # (visibility V1, D7). The mention still renders as a link and still
+        # rides the ``tag`` array for the readers who get the post; what it must
+        # not do is light a badge naming a film the recipient cannot open, which
+        # is what "private" would then be lying about. Same predicate as every
+        # other read path, so a followers-only mention of someone who does not
+        # follow the author resolves here in V2 without a second rule.
+        if not may_read(status, user):
             continue
         note = notify(user, status.user, Notification.Kind.MENTION, status)
         if note is not None:

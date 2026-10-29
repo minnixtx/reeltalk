@@ -205,14 +205,16 @@ def feed_for_scope(request, *, scope: str, cursor: str | None = None):
 def index(request):
     if not has_admin():
         return redirect("setup")
-    # The home rail (M6 artwork C, R61) is instance-wide and public: its links
-    # go only to pages an anonymous visitor can already open (film pages, the
-    # genre subfeed). Counts stay the same for every viewer — a blocked user's
-    # review still counts toward a film's tally; only the lists hide them.
+    # The home rail (M6 artwork C, R61) links only to pages an anonymous visitor
+    # can already open (film pages, the genre subfeed). Its counts became
+    # per-viewer with visibility V1: a rail number may only count reviews that
+    # reader can open, so a private review moves nobody's trending list. The
+    # block rule is unchanged (R85): a blocked user's public review still counts.
+    viewer = request.user if request.user.is_authenticated else None
     data = {
         "site": SiteSettings.get_instance(),
-        "trending": trending_films(),
-        "genres": popular_genres(),
+        "trending": trending_films(viewer=viewer),
+        "genres": popular_genres(viewer=viewer),
     }
     # URL-only scope state (N1 Q6): no session write, no stored preference —
     # the query parameter is the whole state, so reload, Back and a shared URL
@@ -1152,12 +1154,17 @@ def user_films(request, localname):
     tab = request.GET.get("tab", "all")
     if tab not in ("watchlist", "watched"):
         tab = "all"
+    # Audience (visibility V1): a private finish leaves no row for anybody else,
+    # so the film is absent from the tab rather than shown without its review,
+    # and a private rating shows no stars to a stranger. The profile owner
+    # passes their own filter and sees everything of their own.
+    viewer = request.user if request.user.is_authenticated else None
     if tab == "watchlist":
-        films = profile.films_on_shelf(Shelf.TO_READ)
+        films = profile.films_on_shelf(Shelf.TO_READ, viewer)
     elif tab == "watched":
-        films = profile.films_on_shelf(Shelf.READ)
+        films = profile.films_on_shelf(Shelf.READ, viewer)
     else:
-        films = profile.all_films()
+        films = profile.all_films(viewer)
     paginator = Paginator(films, USER_FILMS_PAGE_SIZE)
     try:
         page_obj = paginator.page(request.GET.get("page"))

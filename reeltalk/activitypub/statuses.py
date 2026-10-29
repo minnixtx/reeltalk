@@ -74,6 +74,8 @@ from reeltalk.core.models import (
     Shelf,
     ShelfFilm,
     Status,
+    Visibility,
+    may_read,
     resolve_film_id,
 )
 from reeltalk.core.utils import sanitize_html
@@ -347,10 +349,19 @@ def _ensure_default_shelf(user, identifier: str) -> Shelf:
     return shelf
 
 
-def _ensure_shelf_row(user, identifier: str, film: Film) -> None:
-    """The (film, shelf) row for a mirrored user — idempotent."""
+def _ensure_shelf_row(
+    user, identifier: str, film: Film, visibility: str = "public"
+) -> None:
+    """The (film, shelf) row for a mirrored user — idempotent.
+
+    ``visibility`` (visibility V1) carries the mirrored post's audience onto the
+    shelf row, so a followers-only mirror's "watched" row is not public to our
+    members when the post riding on it is not.
+    """
     shelf = _ensure_default_shelf(user, identifier)
-    ShelfFilm.objects.get_or_create(shelf=shelf, film=film, defaults={"user": user})
+    ShelfFilm.objects.get_or_create(
+        shelf=shelf, film=film, defaults={"user": user, "visibility": visibility}
+    )
 
 
 def _apply_shelf_event(sender, event: dict, request, *, added: bool) -> None:
@@ -440,6 +451,81 @@ def _apply_note_fields(
         update_fields.append("edited_date")
     if update_fields:
         status.save(update_fields=update_fields)
+
+
+# The ActivityStreams public collection: a peer names it in ``to`` for a public
+# post and in ``cc`` for an unlisted one.
+_PUBLIC_COLLECTION = "https://www.w3.org/ns/activitystreams#Public"
+# Mastodon's legacy marker for a followers-only post: a well-known URI on the
+# instance that minted the note, not on ours. Still on the wire from older peers.
+_MASTODON_VISIBILITY_RE = re.compile(r"^https?://[^/]+/visibility$")
+
+
+def _audience_uris(note) -> tuple[set[str], set[str]]:
+    """The ``to``/``cc`` URI sets of a peer's Note, flattened to strings.
+
+    Both arrays arrive as strings, as objects with an ``id``, or as a mix, and a
+    nested list is legal JSON the spec allows. Reading them defensively is not
+    paranoia: a bare ``.get("to")`` that assumes strings raises inside an inbox
+    handler, and an exception here makes the sender retry the delivery forever.
+    """
+
+    def uris(value) -> set[str]:
+        out: set[str] = set()
+        for item in value or []:
+            if isinstance(item, str):
+                out.add(item)
+            elif isinstance(item, dict):
+                ref = item.get("id") or item.get("object")
+                if isinstance(ref, str):
+                    out.add(ref)
+        return out
+
+    return uris(note.get("to")), uris(note.get("cc"))
+
+
+def visibility_from_audience(note) -> str:
+    """What audience a peer addressed this Note to (visibility V1).
+
+    **Why this is derived rather than trusted.** We have no field telling us a
+    mirror's audience; the only evidence is the two arrays, and this is the same
+    reading a receiving Mastodon makes of us (see
+    ``objects.status_audience`` - the docstring there is the mirror image of
+    this one). Order matters and follows that parser:
+
+    * the public collection in ``to`` - public;
+    * the public collection in ``cc`` alone - unlisted, which for a product with
+      no unlisted value is **public**: "not in a timeline" and "anyone holding
+      the URL may read it" are the same thing here;
+    * ``to`` naming the author's followers collection (or a peer's legacy
+      ``/visibility`` marker) with no public collection anywhere - followers;
+    * anything else, including a direct message or an audience naming nobody we
+      recognise - **private**, the narrowest answer. The alternative is
+      publishing another instance's private post on our film pages, and we are
+      holding a copy of it either way: a thread one of our members can read needs
+      its parts, so a non-public mirror is stored and marked, not dropped.
+
+    **An absent audience is not a private one.** A note carrying neither ``to``
+    nor ``cc`` said nothing about its audience, and silence is not evidence of the
+    narrowest case: every mirror this instance stored before this increment was
+    public by construction, so a peer that omits the arrays - a sparse or older
+    implementation, a hand-built activity - must not find its posts hidden for a
+    rule it never opted into. Mastodon always sends both arrays, so that is the
+    sparse-peer branch and not the DM branch: a real direct message names its
+    addressee in ``to`` and is classified private above. An array that is *present
+    but empty* stays the opposite case - the sender addressed the post to nobody
+    it would name - and reads as private.
+    """
+    if "to" not in note and "cc" not in note:
+        return Visibility.PUBLIC
+    to, cc = _audience_uris(note)
+    if _PUBLIC_COLLECTION in to or _PUBLIC_COLLECTION in cc:
+        return Visibility.PUBLIC
+    if any(
+        uri.endswith("/followers") or _MASTODON_VISIBILITY_RE.match(uri) for uri in to
+    ):
+        return Visibility.FOLLOWERS
+    return Visibility.PRIVATE
 
 
 def _mirror_status(sender, note: dict, request):
@@ -556,7 +642,7 @@ def _mirror_status(sender, note: dict, request):
             edited=_parse_time(note.get("editedTime")),
         )
         if existing.is_review and existing.film_id is not None:
-            _ensure_shelf_row(sender, Shelf.READ, existing.film)
+            _ensure_shelf_row(sender, Shelf.READ, existing.film, existing.visibility)
         if list_ext is not None:
             # ``Update`` has to reach the ``FilmList`` and must not stop at
             # the face. A rename, a description change, a film added or
@@ -593,13 +679,19 @@ def _mirror_status(sender, note: dict, request):
         local=False,
         remote_url=home_url,
         remote_id=_remote_id_from_url(home_url),
+        # What the sender's own ``to``/``cc`` said, which is the only evidence we
+        # have (visibility V1). An ``Update`` does not move this field, mirroring
+        # the local rule that an audience is fixed at writing.
+        visibility=visibility_from_audience(note),
     )
     status.save()
     if status.is_review:
         # A review implies the film is on its author's Watched shelf (D3);
         # mirror that row so the feed renders the event as "watched" with
-        # stars (R35) instead of a standalone note.
-        _ensure_shelf_row(sender, Shelf.READ, film)
+        # stars (R35) instead of a standalone note. It carries the post's
+        # audience, so a followers-only mirror's shelf event is not public here
+        # when it is not public there.
+        _ensure_shelf_row(sender, Shelf.READ, film, status.visibility)
     if list_ext is not None:
         # The ``Create`` half of the same contract the ``Update`` branch
         # above keeps: the list row is made together with its face, not left
@@ -620,7 +712,7 @@ def _mirror_status(sender, note: dict, request):
     # a reply nobody asked about is not a fresh "replied to you". The
     # ``parent is not None`` test is what keeps a plain top-level note from
     # notifying anyone: with no parent there is no one the note answered.
-    if parent is not None:
+    if parent is not None and may_read(status, parent.user):
         notify(parent.user, sender, Notification.Kind.REPLY, status)
     return status
 

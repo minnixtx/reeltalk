@@ -48,6 +48,11 @@ a second channel to say so.
     {# Plain text, never a link: the .review-open overlay above already opens this #}
     {# post (owner pass, 2026-10-04). #}
     <span class="post-date">{{ entry.date|date:"Y-m-d" }}</span>
+    {# The audience tag (visibility V1). It renders on a row the reader is #}
+    {# allowed to read, which for a private row means its author alone, so the #}
+    {# tag is a member telling themselves which of their own posts went out — #}
+    {# never an advertisement for something nobody may open. #}
+    {% if entry.audience_label %}<span class="audience">{{ entry.audience_label }}</span>{% endif %}
     {# The control takes the *narrower* flag (R84): "may I put a control here", never "may I open this". Since increment 5 that set includes mirrors — an Applaud now reaches their home instance. #}
     {# Icon-only, no text: the accessible name and the tooltip both come from #}
     {# the label below. data-state carries WHO has applauded, which is two #}

@@ -1122,6 +1122,53 @@ ul.errorlist {
   color: var(--white);
 }
 
+/* The audience tag (visibility V1). A member has to be able to tell at a glance
+   which audience one of their own posts went to, and a tag is the cheapest way
+   to say it without a sentence. Only rows the reader is allowed to read ever
+   carry one - a private row is invisible to everyone but its author - so the tag
+   never advertises a post nobody may open. Metadata treatment, not chrome: the
+   UI face every other small label in the row already uses, the thin brown rule,
+   and the muted tone, so it reads as a fact about the row rather than something
+   to click. */
+.audience {
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-family: var(--ui);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  padding: 0 0.4rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* The audience choice in the finish modal (visibility V1). The modal's other
+   controls are a star row and a textarea, so this stays a plain fieldset: two
+   options, one legend, nothing to learn. The thin brown rule and the small
+   uppercase legend are the treatment every other metadata label in the app
+   already wears, so the control does not arrive as a new kind of chrome. */
+.audience-choice {
+  border: 1px solid var(--line);
+  margin: 0.75rem 0;
+  padding: 0.4rem 0.75rem 0.5rem;
+}
+
+.audience-choice legend {
+  color: var(--muted);
+  font-family: var(--ui);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  padding: 0 0.4rem;
+  text-transform: uppercase;
+}
+
+.audience-choice label {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.35rem;
+  margin: 0.15rem 1.25rem 0 0;
+}
+
 .review-author {
   font-weight: 600;
   /* Remote handles like fedb@192.168.1.138:3031 are one unbreakable word —
