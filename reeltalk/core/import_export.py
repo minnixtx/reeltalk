@@ -188,13 +188,27 @@ def import_row(
     ).exists():
         return status, "you already have a review; rating not imported", film
 
-    ShelfFilm.objects.get_or_create(shelf=watched, film=film, defaults={"user": user})
+    # Visibility V4: an imported rating carries the account's default
+    # audience, not a hardcoded public. The setting reads "default audience
+    # for new reviews" and an imported rating is a new review; a member who
+    # keeps their reviews private should not have their import be the one
+    # write path that ignores that. An existing shelf row keeps its own
+    # audience - the get_or_create only sets it on creation (D6).
+    ShelfFilm.objects.get_or_create(
+        shelf=watched,
+        film=film,
+        defaults={"user": user, "visibility": user.default_visibility},
+    )
     # D1: Watchlist and Watched are mutually exclusive.
     ShelfFilm.objects.filter(shelf=watchlist, film=film).delete()
     # A bulk import is data migration, not sharing — when federation lands
     # (M4) these entries must not broadcast.
     Status.objects.create(
-        user=user, film=film, status_type=Status.Type.REVIEW_RATING, rating=rating
+        user=user,
+        film=film,
+        status_type=Status.Type.REVIEW_RATING,
+        rating=rating,
+        visibility=user.default_visibility,
     )
     return status, f"Watched — {rating} stars", film
 

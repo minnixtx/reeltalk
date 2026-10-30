@@ -196,6 +196,17 @@ def queue_cards(actor):
                 # pins a status report's target to the status's author —
                 # asking the same question of either half is the same
                 # question, and the target is the one the card is about.
+                # The "view post" link is only drawn when clicking it opens
+                # the page (visibility V4). The post page 404s on a deleted
+                # row and on any audience the reader may not read, so on
+                # those cards the link was a dead end - the card already
+                # renders the text inline, and a moderator who cannot open
+                # the post should not be offered a link that says so with a
+                # 404. ``may_read`` is the post page's own rule, so the
+                # link and the page cannot drift.
+                "can_view_post": bool(status)
+                and not status.deleted
+                and may_read(status, actor),
                 "can_delete": bool(status)
                 and not status.deleted
                 and can_act_on(actor, target),

@@ -131,6 +131,9 @@ urlpatterns = [
     path("", include("reeltalk.moderation.urls")),
     # Getting-started page (M6): the core loop for new users; public.
     path("welcome/", social_views.welcome, name="welcome"),
+    # The audiences explained plainly (visibility V4): public, like welcome
+    # and about - the promises it makes bind visitors' expectations too.
+    path("help/", social_views.help_page, name="help"),
     # The human profile page at the actor URL (M5): Person JSON-LD for AP
     # clients by content negotiation, the profile for browsers. It matches
     # before the activitypub include so it owns the bare /user/<localname>/;

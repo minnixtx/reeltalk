@@ -35,6 +35,7 @@ from reeltalk.activitypub.statuses import visibility_from_audience
 from reeltalk.core.import_export import export_film_csv
 from reeltalk.core.models import (
     Film,
+    Like,
     ShelfFilm,
     Status,
     Visibility,
@@ -457,6 +458,32 @@ def test_the_like_and_reply_routes_refuse_a_post_the_viewer_cannot_read(
         reverse("status-reply", args=[posts["private"].id]),
     ):
         assert client.post(url, {"content": "hello"}).status_code == 404
+
+
+@pytest.mark.django_db
+def test_a_follower_can_like_and_reply_to_a_followers_only_post(
+    db, author, follower, posts
+):
+    """The acceptance half of the refusal above (visibility V4).
+
+    A follower may read a followers-only post, so both write doors must stand
+    open to them - the like lands and the reply inherits the parent's audience
+    (the thread can never widen past its root). Before V4 this direction was
+    only implied by ``may_read`` and never actually clicked.
+    """
+    follower.follows.add(author)
+    client = _login("follower")
+    target = posts["followers"]
+    assert client.post(reverse("status-like", args=[target.id])).status_code == 200
+    assert Like.objects.filter(user=follower, status=target).exists()
+    assert (
+        client.post(
+            reverse("status-reply", args=[target.id]), {"content": "Agreed"}
+        ).status_code
+        == 200
+    )
+    reply = Status.objects.get(reply_parent=target, user=follower)
+    assert reply.visibility == Visibility.FOLLOWERS
 
 
 @pytest.mark.django_db

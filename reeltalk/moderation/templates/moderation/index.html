@@ -32,13 +32,23 @@
               <a href="{% url 'user-profile' card.target_user.localname %}">@{{ card.target_user.localname }}</a>
             {% endif %}
           </span>
-          {% if card.target_status %}
+          {% if card.target_status and card.target_status.visibility != "public" %}
+          {# The audience tag (visibility V4). The queue shows reported #}
+          {# posts whatever their audience - a moderator decides from the #}
+          {# text - but they are entitled to know they are reading something #}
+          {# the author did not publish to the world. Same tag the feed row, #}
+          {# the film page and the post page draw. #}
+          <span class="audience">{{ card.target_status.get_visibility_display }}</span>
+          {% endif %}
+          {% if card.can_view_post %}
             {# A link to the post itself, alongside the copy rendered below. #}
             {# The inline copy is so a moderator can triage without leaving #}
             {# the queue; this is so they can go read the thread when the #}
             {# copy is not enough. Both are needed — one without the other #}
             {# is either a queue you cannot decide from or a queue you #}
-            {# cannot investigate. #}
+            {# cannot investigate. Drawn only when it opens (V4): the post #}
+            {# page refuses a deleted row and an audience the moderator may #}
+            {# not read, and a dead link on a card is worse than none. #}
             <a class="report-target-link" href="{% url 'status' card.target_status.id %}">view post</a>
           {% endif %}
           <span class="muted">
@@ -59,6 +69,17 @@
             {% if card.target_status.deleted %}
               <p class="muted">This post has since been deleted — its content is no longer here.</p>
             {% else %}
+              {% if card.target_status.visibility != "public" %}
+              {# The promise written down where it bites (visibility V4): the #}
+              {# queue reveals a reported post to moderators whatever its #}
+              {# audience, and the moderator sees that stated next to the #}
+              {# text, not only on the help page. #}
+              <p class="muted">
+                This post is marked {{ card.target_status.get_visibility_display }}.
+                A reported post is shown to moderators whatever its audience,
+                so they can decide.
+              </p>
+              {% endif %}
               {% if card.target_status.film %}
                 <p class="muted">
                   on <a href="{% url 'film' card.target_status.film.id %}">{{ card.target_status.film.title }}</a>

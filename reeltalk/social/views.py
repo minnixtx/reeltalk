@@ -296,6 +296,20 @@ def welcome(request):
     return render(request, "welcome.html")
 
 
+def help_page(request):
+    """The audiences explained plainly (visibility V4).
+
+    Static and public, like ``welcome`` and ``about``: the promises this page
+    makes are mostly about limits ("private does not mean the operator cannot
+    read it", "a reported post is shown to moderators"), and a promise is
+    only worth writing down where the person it binds can find it. The
+    composer and the settings select carry no audience prose at all - the
+    owner cut that at the V3 browser review - so this page is where the D8
+    sentence and the moderation rule live.
+    """
+    return render(request, "help.html")
+
+
 def signup(request):
     if not has_admin():
         return redirect("setup")

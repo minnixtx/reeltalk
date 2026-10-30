@@ -370,4 +370,9 @@ def test_nothing_in_the_rail_footer_is_a_lit_control(admin, alice):
     footer = _element_spans(body, "footer")[0]
     assert "<button" not in rail["inner"]
     assert 'class="btn' not in rail["inner"]
-    assert footer["inner"].count("<a ") == 3
+    # 4, not 3: visibility V4 added the Help link (the audiences page is
+    # where the operator-disk and moderation promises are written down).
+    # The count is a drift-detector, not a rule about the number itself -
+    # the rule is the two lines above, and the Help link honors it: plain
+    # anchor, no ``.btn``.
+    assert footer["inner"].count("<a ") == 4

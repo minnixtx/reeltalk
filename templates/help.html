@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Help - ReelTalk{% endblock %}
+
+{% block content %}
+<h1>Help</h1>
+<p class="muted">Who can see what you post here, and what those choices do not promise.</p>
+
+<h2>Who can see a review</h2>
+<p>Every review carries the audience that was chosen for it when it was written:</p>
+<ul>
+  <li><strong>Public</strong> - anyone can read it, on this site and on the other servers this instance talks to.</li>
+  <li><strong>Followers</strong> - only the accounts that follow the author. They see it in their feed whether they live here or on another server.</li>
+  <li><strong>Private</strong> - only the author. It appears in their own feed and on their own pages; nothing about it is delivered to other members or to other servers.</li>
+</ul>
+<p>
+  {% if user.is_authenticated %}
+  Your <a href="{% url 'profile-edit' %}">Profile / Settings</a> page sets the audience new reviews start with.
+  {% else %}
+  Every member's Profile / Settings page sets the audience their new reviews start with.
+  {% endif %}
+  The audience is chosen when a review is written and does not change afterwards. A reply is seen by whoever can see the post it answers.
+</p>
+
+<h2>What "Private" does not mean</h2>
+<p>
+  Private means hidden from other members and from other servers. It does not mean hidden from the person
+  who runs this instance: the database sits on their machine, and the site's admin tools can read everything
+  stored here, private posts included.
+</p>
+
+<h2>If your post is reported</h2>
+<p>
+  A member can only report a post they can actually see - a post you keep to yourself cannot be reported by
+  someone who cannot read it. Once a post is reported, it is shown to moderators whatever audience it was
+  written for, so they can read what the report is about and decide what to do. The audience marker travels
+  with it, so a moderator can see the post was not public.
+</p>
+{% endblock %}
