@@ -1108,6 +1108,9 @@ def profile_edit(request):
             user.summary = render_markdown(raw_summary)
             if data["avatar"]:
                 user.avatar = data["avatar"]
+            # The V3 account default. It preselects the finish modal only;
+            # nothing here touches a review that already exists (D6).
+            user.default_visibility = data["default_visibility"]
             user.save()
             messages.success(request, "Profile updated.")
             return redirect("user-profile", localname=user.localname)
@@ -1116,6 +1119,7 @@ def profile_edit(request):
             initial={
                 "display_name": user.display_name,
                 "summary": user.raw_summary,
+                "default_visibility": user.default_visibility,
             }
         )
     return render(request, "social/profile_edit.html", {"form": form})

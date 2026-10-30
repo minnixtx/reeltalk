@@ -10,6 +10,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.views.decorators.debug import sensitive_variables
 
+from reeltalk.core.models import Visibility
 from reeltalk.proxy_trust import client_ip
 from reeltalk.social import attempts
 
@@ -293,6 +294,20 @@ class ProfileForm(forms.Form):
         help_text="Markdown. Links are kept only for the instance's allowed domains.",
     )
     avatar = forms.ImageField(required=False)
+    # The account default audience (visibility V3, D4). Required rather than
+    # optional: the widget is a select that always carries a value, so a POST
+    # without the field did not come from this form, and silently reading the
+    # missing value as "public" would post a public review on an account that
+    # says Private. The form boundary is where a human gets told.
+    default_visibility = forms.ChoiceField(
+        choices=Visibility.choices,
+        label="Default audience for new reviews",
+        help_text=(
+            "Sets the audience preselected when you write a review. You can "
+            "still change it on each review. This does not change reviews you "
+            "already posted."
+        ),
+    )
 
 
 class NewPasswordPairMixin:

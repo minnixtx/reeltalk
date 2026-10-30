@@ -296,6 +296,9 @@ def test_profile_edit_saves_name_bio_and_avatar(client):
             "display_name": "Alice Anderson",
             "summary": "Likes *noir*. See https://example.com/x.",
             "avatar": SimpleUploadedFile("a.jpg", _tiny_jpeg(), "image/jpeg"),
+            # The V3 account default rides the same form; the browser always
+            # sends the select, so the test sends what the browser sends.
+            "default_visibility": "public",
         },
     )
     assert response.status_code == 302
@@ -318,7 +321,7 @@ def test_profile_edit_keeps_existing_avatar_when_none_uploaded(client):
     client.login(username="alice", password="p")
     client.post(
         "/preferences/profile/",
-        {"display_name": "A.", "summary": ""},
+        {"display_name": "A.", "summary": "", "default_visibility": "public"},
     )
     user.refresh_from_db()
     assert user.avatar.name.endswith("old.jpg")

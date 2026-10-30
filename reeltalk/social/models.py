@@ -19,7 +19,7 @@ from django.utils import timezone
 from django.utils.dateformat import format as date_format
 
 from reeltalk.activitypub.crypto import generate_keypair
-from reeltalk.core.models import Film, Shelf, ShelfFilm, Status, audience_q
+from reeltalk.core.models import Film, Shelf, ShelfFilm, Status, Visibility, audience_q
 
 # A minted invite stays open this long before it lapses unused (R82). Long
 # enough that a link pasted into a chat app gets opened from it days later;
@@ -194,6 +194,17 @@ class User(AbstractBaseUser, PermissionsMixin):
     # empty — their summary is sanitized HTML fetched from the home document.
     raw_summary = models.TextField(blank=True, default="")
     avatar = models.ImageField(upload_to="avatars/", null=True, blank=True)
+    # The audience preselected in the finish modal when this member writes a
+    # new review (visibility V3, D4). A preselection, not an enforcement: the
+    # composer still offers all three audiences on every review, the audience
+    # of a post is fixed at writing (D6) so changing this never rewrites a
+    # review that exists, and a reply takes its parent's audience whatever
+    # this says. Default public and back-filled public on purpose - anything
+    # else would rewrite what every existing account means; the personal-log
+    # mode is opt-in.
+    default_visibility = models.CharField(
+        max_length=10, choices=Visibility.choices, default=Visibility.PUBLIC
+    )
     # Local users are full accounts; remote users (M4) are lightweight mirrors
     # populated from federation.
     local = models.BooleanField(default=True)

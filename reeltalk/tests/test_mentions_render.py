@@ -398,7 +398,13 @@ def test_the_bio_route_does_not_link_mentions(alice, bob):
     """
     response = login(alice).post(
         "/preferences/profile/",
-        {"display_name": "Alice", "summary": "hello @bob over here"},
+        {
+            "display_name": "Alice",
+            "summary": "hello @bob over here",
+            # Required since V3 put the account default on this form; the
+            # select always rides, so the POST sends it.
+            "default_visibility": "public",
+        },
     )
     assert response.status_code == 302
     alice.refresh_from_db()

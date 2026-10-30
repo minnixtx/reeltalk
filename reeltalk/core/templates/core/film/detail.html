@@ -114,9 +114,14 @@
         {# makes a peer file it as its own private post rather than a public one. #}
         <fieldset class="audience-choice">
           <legend>Who can see this</legend>
-          <label><input type="radio" name="visibility" value="public" checked> Public</label>
-          <label><input type="radio" name="visibility" value="followers"> Followers</label>
-          <label><input type="radio" name="visibility" value="private"> Private</label>
+          {# The checked radio comes from the member's account default #}
+          {# (visibility V3). Public carries the check for anything else, #}
+          {# which is the same fallback _posted_visibility applies #}
+          {# server-side, so the form and the stored row cannot disagree #}
+          {# about a value no form offered. #}
+          <label><input type="radio" name="visibility" value="public" {% if user.default_visibility != "followers" and user.default_visibility != "private" %}checked{% endif %}> Public</label>
+          <label><input type="radio" name="visibility" value="followers" {% if user.default_visibility == "followers" %}checked{% endif %}> Followers</label>
+          <label><input type="radio" name="visibility" value="private" {% if user.default_visibility == "private" %}checked{% endif %}> Private</label>
         </fieldset>
       {% endif %}
       <button type="submit" disabled class="btn cinema-button cinema-button--primary">{% if user_review %}Save changes{% else %}Mark as watched{% endif %}</button>
