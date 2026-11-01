@@ -24,6 +24,9 @@
   --mustard: #c79836;  /* mustard */
   --teal:    #43868a;  /* teal tertiary */
   --gold:    #f1b51a;  /* star ratings */
+  --star-empty: #7d6a50;  /* the unfilled layer of a star row: worn bronze at
+     3.86:1 on the page, so the five-star track stays legible as the graphic
+     that says what a rating is out of (--line measured 2.17) */
   --line:    #5a432c;  /* thin amber/brown borders */
   --steel:   #5c5852;  /* dirty steel gray — search trim (mockup) */
   --avatar-ring: #d9c3b3;  /* worn cream bezel around an avatar disc */
@@ -457,6 +460,23 @@ a {
   font: 13px sans-serif;
   color: #a99a85;
   margin-top: 5px;
+}
+
+/* The bio field on the settings form. A bare `<textarea>` renders
+   browser-default here — a white plate at its intrinsic 20-column width,
+   which both fights the dark theme and measures 397px, so it pushed the page
+   past a 375px and a 320px viewport. Same field treatment the reply composer
+   and the list editor give theirs; only a browser catches this class of thing. */
+.profile-form textarea {
+  width: 100%;
+  max-width: 42rem;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  color: inherit;
+  background: var(--field);
+  border: 1px solid var(--brown);
+  border-radius: 4px;
+  margin-top: 0.25rem;
 }
 
 @media (max-width: 1023px) {
@@ -998,7 +1018,7 @@ ul.errorlist {
 }
 
 .stars-bg {
-  color: var(--border);
+  color: var(--star-empty);
 }
 
 .stars-fg {
@@ -1167,6 +1187,23 @@ ul.errorlist {
   display: inline-flex;
   gap: 0.35rem;
   margin: 0.15rem 1.25rem 0 0;
+}
+
+/* The report box's free-text field (_report_form.html, on the post page and
+   the profile). It has never had a rule of its own, so it opens as a
+   browser-default white plate with black text in the middle of a page built
+   out of near-black browns. Same field treatment as every other textarea on
+   this theme; the layout was already fine, this is the colour. */
+.report-form textarea {
+  width: 100%;
+  max-width: 42rem;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  color: inherit;
+  background: var(--field);
+  border: 1px solid var(--brown);
+  border-radius: 4px;
+  margin-top: 0.25rem;
 }
 
 .review-author {
@@ -1464,6 +1501,10 @@ ul.errorlist {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  /* At a 320px viewport the avatar, the handle and the Follow control cannot
+     share one row, and the control was pushed 33px past the window edge. The
+     row wraps instead; nothing about the desktop row changes. */
+  flex-wrap: wrap;
 }
 
 /* Every avatar disc, at every size: a worn cream bezel with saturated red hugging

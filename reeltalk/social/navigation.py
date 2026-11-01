@@ -43,6 +43,8 @@ from dataclasses import dataclass
 
 from django.urls import reverse
 
+from reeltalk.moderation.decorators import may_moderate
+
 
 @dataclass(frozen=True)
 class NavItem:
@@ -237,9 +239,19 @@ def nav_items(request):
     One processor, three lists: the desktop menu, the phone bar, the sheet.
     All three answer ``[]`` signed out, so the anonymous render pays nothing
     it did not pay before.
+
+    ``can_moderate`` rides alongside because Profile / Settings lists Moderate
+    as a destination, and a destination listed is a destination that has to
+    answer the same question the page itself asks -- ``may_moderate``, which
+    admits a moderator, a staff account and a superuser alike. Gating that
+    row on the moderator flag alone left an admin with a working queue and no
+    link to it anywhere on the site. The header's and the More sheet's own
+    shortcuts stay flag-only on purpose; they are pinned in
+    ``test_moderator_gate.py`` and ``test_mobile_nav.py``.
     """
     return {
         "sidebar_items": sidebar_nav(request),
         "bottom_items": bottom_nav(request),
         "more_items": more_nav(request),
+        "can_moderate": may_moderate(request.user),
     }

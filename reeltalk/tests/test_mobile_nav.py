@@ -16,8 +16,8 @@ the contract the new surfaces must hold:
   ``test_notifications_badge.py`` and ``test_moderator_gate.py`` stay green
   because the CSS names the corner's parts, never those classes);
 * the search page carries its own field for phones, and the profile page
-  is the settings hub (Import, Export, Moderate for moderators) with the
-  edit form untouched;
+  is the settings hub (Import, Export, and Moderate for anyone the queue
+  itself admits) with the edit form untouched;
 * the mobile treatment lives under the 1024px line in the stylesheet.
 """
 
@@ -241,7 +241,10 @@ def test_the_profile_page_is_the_settings_hub(alice):
 
 
 @pytest.mark.django_db
-def test_the_settings_hub_offers_moderate_only_to_moderators(alice, wendy):
+def test_the_settings_hub_offers_moderate_only_to_those_who_may_moderate(alice, wendy):
+    # The row follows the queue's own predicate, so a moderator sees it and a
+    # plain member does not; the staff and superuser halves of that predicate
+    # are pinned in ``test_moderator_gate.py``.
     assert ">Moderate<" not in _settings_links(
         _login("alice").get("/preferences/profile/").content.decode()
     )

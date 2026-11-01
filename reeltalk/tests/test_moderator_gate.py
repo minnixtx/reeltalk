@@ -21,6 +21,8 @@ Ordered by how each failure would bite:
 * The grant is made through the real admin form and does not widen to staff.
 * A moderator cannot flip the flag — on someone else, or on themselves.
 * The header link appears for a moderator and for nobody else.
+* The Profile / Settings row appears for anyone the queue itself admits --
+  a moderator, a staff account, a superuser -- and for nobody else.
 """
 
 import pytest
@@ -40,6 +42,9 @@ ADMIN_LOGIN_TEMPLATE = "admin/login.html"
 ADMIN_INDEX_TEMPLATE = "admin/index.html"
 
 MODERATOR_LINK = 'class="moderation-link"'
+# The Profile / Settings row that names the queue as a destination.
+SETTINGS_LINK = ">Moderate<span"
+SETTINGS_PAGE = reverse("profile-edit")
 # A page that renders for any signed-in member with no gate of its own, so a
 # header assertion on it cannot be passing on a redirect. (``/`` is the
 # wrong choice: the first-run wizard sends it to /setup/ until a superuser
@@ -298,6 +303,35 @@ def test_a_staff_user_without_the_flag_sees_no_link(staff):
     # permission but are not advertised a moderator role they do not hold.
     body = logged_in_client(staff).get(HEADER_PAGE).content.decode()
     assert MODERATOR_LINK not in body
+
+
+# --- the Profile / Settings link ------------------------------------------
+
+
+def test_moderator_sees_the_settings_link(moderator):
+    body = logged_in_client(moderator).get(SETTINGS_PAGE).content.decode()
+    assert SETTINGS_LINK in body
+
+
+def test_site_admin_sees_the_settings_link(site_admin):
+    body = logged_in_client(site_admin).get(SETTINGS_PAGE).content.decode()
+    assert SETTINGS_LINK in body
+
+
+def test_staff_without_the_flag_sees_the_settings_link(staff):
+    # The row is listed by the queue's own predicate rather than the flag, so
+    # an account that can open /moderate/ is shown a way there. Without this
+    # the only route for such an account was typing the address.
+    body = logged_in_client(staff).get(SETTINGS_PAGE).content.decode()
+    assert SETTINGS_LINK in body
+    # And it is still not advertised as a moderator.
+    assert MODERATOR_LINK not in body
+
+
+def test_a_plain_member_sees_no_settings_link(member):
+    body = logged_in_client(member).get(SETTINGS_PAGE).content.decode()
+    assert SETTINGS_LINK not in body
+    assert 'href="/moderate/"' not in body
 
 
 def test_no_css_was_added_for_the_moderation_link():
