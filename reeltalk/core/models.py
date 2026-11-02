@@ -1275,6 +1275,23 @@ def _attach_interaction_counts(entries: list["FeedEntry"], user) -> None:
             entry.reply_count = replies.get(entry.status_id, 0)
 
 
+def status_feed_entries(statuses, viewer) -> list["FeedEntry"]:
+    """Turn a page of ``Status`` rows into feed rows for ``viewer``.
+
+    The public door onto the pair :func:`public_feed` uses internally:
+    :func:`_status_entry` per row, then one batched
+    :func:`_attach_interaction_counts` for the page. A surface outside this
+    app that renders ``_feed_row.html`` builds its rows here rather than
+    hand-assembling ``FeedEntry`` values - the flags the row reads
+    (``interactive``, ``replyable``, the like and reply tallies) are the
+    difference between a control that works and one that only looks live,
+    and a dead-looking control is worse than no control (R85).
+    """
+    entries = [_status_entry(status) for status in statuses]
+    _attach_interaction_counts(entries, viewer)
+    return entries
+
+
 def audience_q(viewer, *, field: str = "visibility", author: str = "user_id"):
     """The Q that keeps a queryset to the rows ``viewer`` may read (visibility V1).
 

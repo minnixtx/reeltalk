@@ -27,9 +27,12 @@ nobody (D7), the 404 rather than 403 on both machine-facing doors (D9), and an
 inbound mirror marked with what the peer's own ``to``/``cc`` said.
 """
 
+from datetime import timedelta
+
 import pytest
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from reeltalk.activitypub.statuses import visibility_from_audience
 from reeltalk.core.import_export import export_film_csv
@@ -48,7 +51,7 @@ from reeltalk.core.models import (
 )
 from reeltalk.mentions.notify import record_mentions
 from reeltalk.notifications.models import Notification
-from reeltalk.tests.members import member, site_admin
+from reeltalk.tests.members import member, moderator, site_admin
 
 PASSWORD = "s3cretpass"
 
@@ -150,16 +153,20 @@ def _surfaces(posts) -> list[tuple[str, str]]:
 
 # The subset of the inventory that draws a post's body. The others are in the
 # walk for the leak direction (a private body must never reach them) but cannot
-# carry one in the positive direction: the profile draws shelves and counts, the
-# notifications page draws events, the outbox draws wire documents, and a public
-# scope is public by definition - the author's own private post is not supposed to
-# appear there, which is its own test below.
+# carry one in the positive direction: the profile's Films tab draws shelves,
+# the notifications page draws events, the outbox draws wire documents, and a
+# public scope is public by definition - the author's own private post is not
+# supposed to appear there, which is its own test below.
+#
+# "profile" joined the set with the profile-reviews increment: the profile body
+# is now the member's review list, so it draws bodies and belongs here.
 POST_BODY_SURFACES = {
     "home following",
     "feed page following",
     "film page",
     "status page",
     "genre",
+    "profile",
 }
 
 
@@ -727,3 +734,158 @@ def test_a_non_public_finish_announces_no_watchlist_removal(
     # did not. That is D5 for the new audience: the shelf has no shape of its own
     # on the wire, so a non-public finish leaves peers holding a stale row.
     assert shelf_events == [True]
+
+
+# --- Profile reviews (profile-reviews increment) -------------------------------
+
+# The profile's body is now the member's review list, so the profile joined the
+# surfaces that draw a body - and these tests pin what the list is beyond the
+# leak direction the walk already covers: who reads what (the audience matrix
+# per viewer class), and the owner's settled shape (D1-D5, D7): reviews lead,
+# ``REVIEW_TYPES`` only, newest first, 50 to a page, the tab always shown.
+
+
+@pytest.mark.django_db
+def test_the_profile_body_is_the_review_list_with_reviews_as_the_active_tab(
+    db, author, posts
+):
+    """D1: the writing is what a visitor came to read, so it is the body, and
+    the Reviews tab points at the profile itself rather than a new URL."""
+    page = Client().get("/user/author/").content.decode()
+    assert PUBLIC_MARK in page
+    assert '<a href="/user/author/" class="active">Reviews</a>' in page
+    assert 'href="/user/author/films/"' in page
+
+
+@pytest.mark.django_db
+def test_an_account_with_no_reviews_shows_the_empty_state_not_a_hidden_tab(
+    db, stranger
+):
+    """D5: the tab is always shown, never hidden for being empty - so an
+    account with nothing readable needs the film page's "No reviews yet."
+    rather than a tab strip over nothing."""
+    page = Client().get("/user/stranger/").content.decode()
+    assert "No reviews yet." in page
+    assert ">Reviews<" in page
+
+
+@pytest.mark.django_db
+def test_a_follower_reads_public_and_followers_reviews_on_the_profile(
+    db, author, follower, posts
+):
+    follower.follows.add(author)
+    body = _login("follower").get("/user/author/").content.decode()
+    assert PUBLIC_MARK in body
+    assert FOLLOWERS_MARK in body
+    assert PRIVATE_MARK not in body
+
+
+@pytest.mark.django_db
+def test_the_author_reads_their_whole_list_with_its_markers(db, author, posts):
+    body = _login("author").get("/user/author/").content.decode()
+    for mark in (PUBLIC_MARK, FOLLOWERS_MARK, PRIVATE_MARK):
+        assert mark in body
+    # The rendered tag, not the bare word - same trap as the home-feed marker
+    # test above: "Private" appears in other markup, and a substring test
+    # would pass on a page that drew no marker at all.
+    assert '<span class="audience">Private</span>' in body
+    assert '<span class="audience">Followers</span>' in body
+
+
+@pytest.mark.django_db
+def test_a_moderator_reads_no_more_on_a_profile_than_a_stranger_does(db, author, posts):
+    """The profile is not the moderation queue. V4a's rule is that a *reported*
+    post reaches moderators whatever its audience; nothing widens that to every
+    followers-only and private review on an ordinary profile."""
+    moderator(localname="mod", password=PASSWORD)
+    body = _login("mod").get("/user/author/").content.decode()
+    assert PUBLIC_MARK in body
+    assert FOLLOWERS_MARK not in body
+    assert PRIVATE_MARK not in body
+
+
+@pytest.mark.django_db
+def test_a_rating_only_review_is_on_the_list_and_a_bare_shelf_event_is_not(
+    db, author, films
+):
+    """D2: the list is ``REVIEW_TYPES`` - written reviews and star-only ones -
+    and shelf entries stay in the Films tab, which already is a list of titles."""
+    Status.objects.create(
+        user=author,
+        film=films[0],
+        status_type=Status.Type.REVIEW_RATING,
+        rating=3,
+        content="",
+        visibility=Visibility.PUBLIC,
+    )
+    # A Watchlist add with no review behind it: a shelf row and nothing else.
+    _login("author").post(reverse("film-shelve", args=[films[1].id]))
+    body = Client().get("/user/author/").content.decode()
+    assert "Dune" in body  # the rating-only review's film
+    assert "Arrival" not in body  # the shelf-only film
+
+
+@pytest.mark.django_db
+def test_the_list_is_newest_first(db, author, films):
+    """D3: a visitor judging a person reads their latest thinking first."""
+    now = timezone.now()
+    for offset, (film, mark) in enumerate(
+        zip(films, ("NEWEST-MARK", "MIDDLE-MARK", "OLDEST-MARK"))
+    ):
+        status = _review(author, film, mark, Visibility.PUBLIC)
+        Status.objects.filter(pk=status.pk).update(
+            published_date=now - timedelta(days=offset)
+        )
+    body = Client().get("/user/author/").content.decode()
+    assert (
+        body.index("NEWEST-MARK")
+        < body.index("MIDDLE-MARK")
+        < body.index("OLDEST-MARK")
+    )
+
+
+@pytest.mark.django_db
+def test_the_list_pages_at_fifty_to_a_page(db, author):
+    """The house page size and the house ``?page=`` shape, matching the Films
+    tab - including its 404 on an out-of-range page."""
+    now = timezone.now()
+    for i in range(51):
+        film = Film.objects.create(title=f"Paged {i}", year=2000 + i)
+        Status.objects.create(
+            user=author,
+            film=film,
+            status_type=Status.Type.REVIEW,
+            content=f"<p>PAGED-MARK-{i:02d}</p>",
+            visibility=Visibility.PUBLIC,
+            published_date=now + timedelta(minutes=i),
+        )
+    page1 = Client().get("/user/author/").content.decode()
+    page2 = Client().get("/user/author/?page=2").content.decode()
+    assert "PAGED-MARK-50" in page1
+    assert "PAGED-MARK-01" in page1
+    assert "PAGED-MARK-00" not in page1
+    assert "PAGED-MARK-00" in page2
+    assert Client().get("/user/author/?page=99").status_code == 404
+
+
+@pytest.mark.django_db
+def test_a_deleted_review_is_off_the_list_even_for_its_author(db, author, posts):
+    posts["public"].delete()
+    body = _login("author").get("/user/author/").content.decode()
+    assert PUBLIC_MARK not in body
+
+
+@pytest.mark.django_db
+def test_the_like_control_on_a_profile_row_is_wired_not_decorative(
+    db, author, stranger, posts
+):
+    """The trap of this increment: likes.js binds document-wide, so it works on
+    any page - but only where the template ships it, and the row withholds the
+    button from anonymous readers (the like route is ``login_required``). The
+    script follows the control, not the page - same split as the home feed."""
+    anonymous = Client().get("/user/author/").content.decode()
+    assert "applaud-btn" not in anonymous
+    assert "js/likes.js" not in anonymous
+    member_page = _login("stranger").get("/user/author/").content.decode()
+    assert "applaud-btn" in member_page
+    assert "js/likes.js" in member_page

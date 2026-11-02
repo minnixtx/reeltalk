@@ -56,9 +56,12 @@ from reeltalk.activitypub.mirrors import (
 from reeltalk.core.models import (
     FEED_PAGE_SIZE,
     Shelf,
+    Status,
+    audience_q,
     feed_entries,
     popular_genres,
     public_feed,
+    status_feed_entries,
     trending_films,
 )
 from reeltalk.core.utils import render_markdown
@@ -812,15 +815,22 @@ def _resolve_profile_user(localname):
     return User.objects.filter(local=False, localname=localname).first()
 
 
+# Same page size as the Films tab: one row budget per page, one scroll shape
+# for everything a profile lists.
+USER_REVIEWS_PAGE_SIZE = 50
+
+
 def user_profile(request, localname):
     """The human profile page at the actor URL (M5; supersedes R40's 302).
 
     ActivityPub clients keep the Person document (R40 content negotiation) —
     for local users only: a mirror's canonical document lives on its home
     instance (R42), so AP clients get 404 here. Browsers get the profile:
-    avatar, display name + handle, bio, and the films link. A remote mirror
-    missing an avatar or bio triggers one throttled best-effort fetch of the
-    home Person document (``refresh_mirror_profile``) before rendering.
+    avatar, display name + handle, bio, and the member's reviews — the
+    writing a visitor reads before deciding on the follow (profile-reviews
+    D1). A remote mirror missing an avatar or bio triggers one throttled
+    best-effort fetch of the home Person document
+    (``refresh_mirror_profile``) before rendering.
     """
     user = _resolve_profile_user(localname)
     if user is None:
@@ -903,6 +913,43 @@ def user_profile(request, localname):
     if not user.local:
         # The home instance the mirror came from (the actor URL's netloc).
         data["home_instance"] = urlparse(user.actor_url).netloc
+    # The profile's body is the member's reviews (profile-reviews D1): what
+    # they wrote, newest first, so a visitor can read the writing before
+    # deciding on the follow. The audience filter is the whole design - a
+    # stranger reads the public rows, a follower adds the followers rows
+    # their follow reaches, the member reads their own everything - and the
+    # leak direction is pinned in test_visibility_read_paths.py. For a remote
+    # mirror this is the copy this instance holds and nothing more (D4): what
+    # was federated to us, with no claim that it is the member's whole list.
+    viewer = request.user if request.user.is_authenticated else None
+    reviews = (
+        Status.objects.filter(
+            user=user,
+            status_type__in=list(Status.REVIEW_TYPES),
+            deleted=False,
+            # The same four filters as the film page's review query, kept
+            # together on purpose. A suspended account short-circuits to the
+            # suspended-state render above, so this clause never bites on
+            # this page today; it stays because every other review-listing
+            # query carries it and this one should not be the exception.
+            user__suspended_at__isnull=True,
+        )
+        .filter(audience_q(viewer))
+        .select_related("user", "film")
+        .order_by("-published_date")
+    )
+    paginator = Paginator(reviews, USER_REVIEWS_PAGE_SIZE)
+    try:
+        page_obj = paginator.page(request.GET.get("page"))
+    except PageNotAnInteger:
+        page_obj = paginator.page(1)
+    except EmptyPage:
+        raise Http404("Page not found.") from None
+    # Feed rows, not raw Statuses: the template draws the home feed's card
+    # (D6), and status_feed_entries is what fills the flags and tallies that
+    # make the row's controls real rather than decorative.
+    data["reviews"] = status_feed_entries(page_obj.object_list, viewer)
+    data["page_obj"] = page_obj
     return render(request, "social/profile.html", data)
 
 

@@ -92,7 +92,16 @@
 <script src="{% static 'js/invite.js' %}" defer></script>
 {% endif %}
 
+{% comment %}
+The tab strip sits above the body, like every tabbed surface the site has:
+the strip says where you are, the body below it is what you are looking at.
+Reviews is the profile's own body (D1), so its tab points at the profile
+URL itself - there is no third URL to page. It is always shown, never
+hidden for being empty (D5); the empty state below is what an empty list
+looks like.
+{% endcomment %}
 <nav class="tabs">
+  <a href="{% url 'user-profile' profile_user.localname %}" class="active">Reviews</a>
   <a href="{% url 'user-films' profile_user.localname %}">Films</a>
   {% comment %}
   The Lists tab (L7). Hidden when the member has made no lists — R138
@@ -105,4 +114,37 @@
   <a href="{% url 'user-lists' profile_user.localname %}">Lists</a>
   {% endif %}
 </nav>
+
+{% comment %}
+The profile's body is the member's reviews (profile-reviews D1): a visitor
+opens the page to decide whether the writing is worth following, so the
+writing is what it shows. Each row is the home feed's card - same partial,
+same view-model - so a review looks the same everywhere it appears. The
+view has already filtered the list to what this reader may read; a row they
+cannot see is simply absent, no placeholder, no teaser.
+{% endcomment %}
+{% if reviews %}
+<ul class="review-list">
+  {% for entry in reviews %}{% include "_feed_row.html" %}{% endfor %}
+</ul>
+{% if page_obj.paginator.num_pages > 1 %}
+<nav class="pager">
+  {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">← Previous</a>{% endif %}
+  <span class="muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+  {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Next →</a>{% endif %}
+</nav>
+{% endif %}
+{% else %}
+<p class="muted">No reviews yet.</p>
+{% endif %}
+{% comment %}
+likes.js binds .applaud-btn document-wide, so it works on this page too -
+but only where the template ships it. It follows the control rather than
+the page: the row withholds the button from anonymous readers (the like
+route is login_required), so the script stays member-only - same split as
+the home feed.
+{% endcomment %}
+{% if user.is_authenticated %}
+<script src="{% static 'js/likes.js' %}" defer></script>
+{% endif %}
 {% endblock %}
