@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import IntegrityError, models, transaction
-from django.db.models import Count, Max, Q
+from django.db.models import Count, F, Max, Q
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -1927,6 +1927,100 @@ def trending_films(
         TrendingFilm(films[row["film_id"]], row["review_count"])
         for row in rows
         if row["film_id"] in films
+    ]
+
+
+TOP_REVIEWS_LIMIT = 5
+TOP_REVIEW_EXCERPT_CHARS = 60
+
+
+@dataclass
+class TopReview:
+    """One "Top Reviews" rail row (reviewer-discovery increment): the review,
+    its reader-response score, and the excerpt the row opens with."""
+
+    status: Status
+    score: int
+    excerpt: str
+
+
+def _review_excerpt(raw_content: str) -> str:
+    """The opening words of a review, for the rail's third line.
+
+    The rail has one line of text per row: whitespace is flattened (raw
+    markdown carries newlines), the cut lands on a word boundary, and an
+    ellipsis marks that the line was cut - the row promises more and the
+    link delivers it. No markdown stripping beyond flattening: the excerpt
+    is a whisper of the row, not a rendering.
+    """
+    text = " ".join(raw_content.split())
+    if len(text) <= TOP_REVIEW_EXCERPT_CHARS:
+        return text
+    cut = text[:TOP_REVIEW_EXCERPT_CHARS].rsplit(" ", 1)[0]
+    return f"{cut}..."
+
+
+def top_reviews(
+    viewer=None,
+    *,
+    window: timedelta = TRENDING_WINDOW,
+    limit: int = TOP_REVIEWS_LIMIT,
+) -> list[TopReview]:
+    """The instance's best-received written reviews, most-received first.
+
+    The rail ranks **reviews**, not reviewers, by reader response - the
+    owner's rule against a first draft that ranked members by volume, which
+    paid for quantity before anything had been read. Score is likes + live
+    replies, equal weight; a review needs at least one of either to
+    qualify, so a quiet box hides itself rather than padding with zeros.
+
+    The author's own like never counts. The page never offers a like button
+    on your own post, but the like route accepts one, so the ranking
+    excludes it explicitly - nobody can pad their own score. A suspended
+    account's like and replies are out of the score, the same server-wide
+    exclusion ``like_counts`` and ``reply_counts`` already apply; a blocked
+    viewer simply does not see the blocked reviewer's rows, as on every
+    list surface (R85).
+
+    Audience is ``live_reviews(viewer)`` as always: a reader is ranked only
+    among reviews they may open, so the box can never promise a row that
+    404s. Written reviews only - a rating-only entry has no text to excerpt,
+    and this box is about the writing. Ties break to the newest, then id,
+    so the order is stable between requests.
+    """
+    statuses = live_reviews(viewer).filter(
+        status_type=Status.Type.REVIEW,
+        published_date__gte=timezone.now() - window,
+    )
+    if viewer is not None:
+        blocked = list(viewer.blocks.values_list("id", flat=True))
+        if blocked:
+            statuses = statuses.exclude(user_id__in=blocked)
+    rows = (
+        statuses.annotate(
+            like_n=Count(
+                "likes",
+                filter=Q(likes__user__suspended_at__isnull=True)
+                & ~Q(likes__user_id=F("user_id")),
+                distinct=True,
+            ),
+            reply_n=Count(
+                "replies",
+                filter=Q(
+                    replies__deleted=False,
+                    replies__user__suspended_at__isnull=True,
+                ),
+                distinct=True,
+            ),
+        )
+        .annotate(score=F("like_n") + F("reply_n"))
+        .filter(score__gte=1)
+        .order_by("-score", "-published_date", "-id")[:limit]
+        .select_related("user", "film")
+    )
+    return [
+        TopReview(status, status.score, _review_excerpt(status.raw_content))
+        for status in rows
     ]
 
 

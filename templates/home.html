@@ -98,7 +98,7 @@ from the footer partial's direction.
       {% endcomment %}
       <div class="feed-sentinel" id="feed-sentinel" data-next="{{ next_cursor|default:'' }}" aria-hidden="true"></div>
     {% else %}
-      <p class="muted">{% if user.is_authenticated %}Nothing here yet — add a film to your watchlist or mark one watched.{% else %}Nothing has been posted here yet.{% endif %}</p>
+      <p class="muted">{% if user.is_authenticated %}Nothing here yet — add a film to your watchlist, mark one watched{% if feed_scope == "following" %}, or browse the <a href="{% url 'index' %}?scope=local">Local feed</a> to find reviewers to follow{% endif %}.{% else %}Nothing has been posted here yet.{% endif %}</p>
     {% endif %}
   </section>
   {% comment %}
@@ -144,6 +144,34 @@ from the footer partial's direction.
         <p class="muted">No reviews in the last 30 days.</p>
       {% endif %}
     </section>
+
+    {% comment %}
+    The Top Reviews box (reviewer-discovery increment): the instance's
+    best-received written reviews, ranked by reader response - likes plus
+    replies - so a review that missed your feed keeps surfacing while people
+    keep answering it. The view has already ranked only what this reader may
+    read; when nothing qualifies the whole box is absent, because a box of
+    zeros is noise and a stub graphic with nothing under it worse. Rows link
+    to the review itself for every visitor, anonymous included: the profile
+    and the public post are exactly what a stranger came for.
+    {% endcomment %}
+    {% if top %}
+    <img class="rail-banner" src="{% static 'images/top-reviews.png' %}" alt="Top Reviews">
+    <section class="rail-panel" aria-labelledby="top-reviews-title">
+      <h2 id="top-reviews-title" class="visually-hidden">Top Reviews</h2>
+      <ul class="top-reviews-list">
+        {% for row in top %}
+          <li>
+            <a class="top-review" href="{% url 'status' row.status.id %}">
+              <span class="top-review-who">{{ row.status.user.localname }}{% if row.status.rating %} <span class="top-review-stars" title="{{ row.status.rating|floatformat:'-1' }} / 5">{{ row.status.rating|stars }}</span>{% endif %}</span>
+              <span class="top-review-film"><span class="top-review-film-name">{{ row.status.film.title }}</span>{% if row.status.film.year %} ({{ row.status.film.year }}){% endif %}</span>
+              <span class="top-review-excerpt">{{ row.excerpt }}</span>
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
 
     <img class="rail-banner" src="{% static 'images/popular-genres.png' %}" alt="Popular Genres">
     <section class="rail-panel" aria-labelledby="genres-title">

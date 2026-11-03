@@ -62,6 +62,7 @@ from reeltalk.core.models import (
     popular_genres,
     public_feed,
     status_feed_entries,
+    top_reviews,
     trending_films,
 )
 from reeltalk.core.utils import render_markdown
@@ -217,6 +218,7 @@ def index(request):
     data = {
         "site": SiteSettings.get_instance(),
         "trending": trending_films(viewer=viewer),
+        "top": top_reviews(viewer),
         "genres": popular_genres(viewer=viewer),
     }
     # URL-only scope state (N1 Q6): no session write, no stored preference —
@@ -894,6 +896,15 @@ def user_profile(request, localname):
     # counts the live lists only, because FilmList.delete() is soft and a
     # deleted list is still a row in the table.
     data["list_count"] = FilmList.objects.filter(user=user, deleted=False).count()
+    # Follower counts (reviewer-discovery increment): audience size is part of
+    # the follow decision the profile exists to serve. Counted as this instance
+    # holds them - the profile-reviews D4 rule: show what you hold, say nothing
+    # about the rest. Suspended and banned accounts are invisible server-wide,
+    # so they are out of both tallies; that is a server fact, not per-viewer
+    # state, which keeps one profile one page for every reader.
+    visible = {"suspended_at__isnull": True, "banned_at__isnull": True}
+    data["follower_count"] = user.followers.filter(**visible).count()
+    data["following_count"] = user.follows.filter(**visible).count()
     if is_self:
         # The invite box only lives on one's own profile (R82).
         data.update(_invite_context(request, user))
@@ -1117,7 +1128,20 @@ def find_user(request):
     error = None
     if request.method == "POST":
         if value.count("@") != 1:
-            error = "Enter a full handle: user@domain."
+            if value and "@" not in value:
+                # A bare name is a local lookup (reviewer-discovery
+                # increment): the obvious thing to type for someone who
+                # lives here. Remote people keep requiring the full handle,
+                # and the resolver's no-`@` branch is already the local-only
+                # door - one answer, same anti-drift rule as the same-domain
+                # branch below.
+                user = _resolve_profile_user(value)
+                if user is None:
+                    error = f"No user named {value!r} on this instance."
+                else:
+                    return redirect("user-profile", localname=user.localname)
+            else:
+                error = "Enter a full handle: user@domain."
         else:
             localname, _, domain = value.partition("@")
             localname, domain = localname.strip(), domain.strip()

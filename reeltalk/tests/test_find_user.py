@@ -99,10 +99,62 @@ def test_find_renders_the_form(client):
 def test_find_malformed_input_renders_error(client):
     member(localname="alice", password="p")
     client.login(username="alice", password="p")
-    for value in ("", "no-at-sign", "@remote.example", "carol@", "a@b@c"):
+    # "no-at-sign" left this list when bare names became local lookups:
+    # an unknown bare name is now a *miss* ("No user named ..."), not a
+    # malformed handle. The halves here are the ones with an @ that is
+    # missing a side, or one too many.
+    for value in ("", "@remote.example", "carol@", "a@b@c"):
         response = client.post("/find/", {"q": value})
         assert response.status_code == 200
         assert b"Enter a full handle" in response.content
+
+
+# --- Bare local names (reviewer-discovery increment) ---------------------------
+#
+# The owner's constraint: a bare name is a **local** lookup only. Remote
+# people keep requiring the full handle, because a bare name on a remote is
+# guesswork this instance has no standing to resolve.
+
+
+@pytest.mark.django_db
+def test_find_bare_local_name_redirects_to_profile(client):
+    member(localname="alice", password="p")
+    client.login(username="alice", password="p")
+    response = client.post("/find/", {"q": "alice"})
+    assert response.status_code == 302
+    assert response["Location"] == "/user/alice/"
+
+
+@pytest.mark.django_db
+def test_find_bare_name_is_case_insensitive(client):
+    member(localname="alice", password="p")
+    client.login(username="alice", password="p")
+    response = client.post("/find/", {"q": "ALICE"})
+    assert response.status_code == 302
+    assert response["Location"] == "/user/alice/"
+
+
+@pytest.mark.django_db
+def test_find_unknown_bare_name_renders_error(client):
+    member(localname="alice", password="p")
+    client.login(username="alice", password="p")
+    response = client.post("/find/", {"q": "nobody"})
+    assert response.status_code == 200
+    assert b"No user named" in response.content
+
+
+@pytest.mark.django_db
+def test_find_bare_name_does_not_match_a_remote_mirror(client):
+    # A mirror whose stored localname happens to have no @ (an artificial
+    # shape - federation stores carol@remote.example) must still not answer
+    # to the bare-name door. Remote people are found by full handle only.
+    member(localname="alice", password="p")
+    client.login(username="alice", password="p")
+    ghost = member(localname="carol", password="p")
+    User.objects.filter(pk=ghost.pk).update(local=False)
+    response = client.post("/find/", {"q": "carol"})
+    assert response.status_code == 200
+    assert b"No user named" in response.content
 
 
 # --- Same-domain handles: local resolution, no network -------------------------

@@ -1558,6 +1558,23 @@ ul.errorlist {
   font-size: 0.9rem;
 }
 
+/* Audience size under the handle (reviewer-discovery increment): reads as
+   quiet metadata beside it, with the numbers a shade brighter so they carry
+   the glance. */
+.profile-counts {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.profile-count {
+  color: var(--cream-muted);
+}
+
+.profile-count-sep {
+  margin: 0 0.3rem;
+}
+
 .profile-summary {
   margin: 1rem 0;
 }
@@ -2292,6 +2309,66 @@ a.trending-film:hover {
   color: var(--muted);
 }
 
+/* The Top Reviews card (reviewer-discovery increment): the trending card's
+   list feel with no rank chip - the order is the ranking. Each row is one
+   link to the review, stacking the owner's three lines: reviewer and stars,
+   film and year, the opening words. */
+.top-reviews-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.top-reviews-list li {
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid rgba(233, 223, 203, 0.12);
+}
+
+.top-reviews-list li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.top-review {
+  display: grid;
+  gap: 0.12rem;
+  text-decoration: none;
+}
+
+.top-review-who {
+  /* The owner's sizing rule from the browser review: the name and stars read
+     at the feed row's sizes - 0.95rem identity, stars at the shared 1.25rem
+     the .stars class already carries. */
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--cream);
+}
+
+a.top-review:hover .top-review-who {
+  color: var(--link);
+}
+
+.top-review-stars {
+  vertical-align: -1px;
+}
+
+.top-review-film {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.top-review-film-name {
+  font-weight: 700;
+}
+
+.top-review-excerpt {
+  color: var(--cream-muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
 /* Heading a graphic already shows sighted readers (the ticket banner). */
 .visually-hidden {
   position: absolute;
@@ -2401,6 +2478,7 @@ h2 {
 
 .meta-list,
 .handle,
+.profile-counts,
 table.results th,
 .search-row .watchlist-btn,
 .pane-sub,

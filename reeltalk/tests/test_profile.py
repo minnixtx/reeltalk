@@ -325,3 +325,40 @@ def test_profile_edit_keeps_existing_avatar_when_none_uploaded(client):
     )
     user.refresh_from_db()
     assert user.avatar.name.endswith("old.jpg")
+
+
+# --- Follower counts (reviewer-discovery increment) ----------------------------
+#
+# The header counts what this instance holds - the same rule as the profile's
+# review list: show what you hold, say nothing about the rest. Suspended and
+# banned accounts are out on both sides: that invisibility is a server-wide
+# fact (like the like tallies), not per-viewer state.
+
+
+@pytest.mark.django_db
+def test_profile_header_shows_follower_counts(client):
+    alice = member(localname="alice", password="p")
+    for i in range(3):
+        fan = member(localname=f"fan{i}", password="p")
+        fan.follows.add(alice)
+    bob = member(localname="bob", password="p")
+    alice.follows.add(bob)
+    content = client.get("/user/alice/").content
+    assert b"3 Followers" in content
+    assert b"1 Following" in content
+
+
+@pytest.mark.django_db
+def test_suspended_and_banned_accounts_are_out_of_the_counts(client):
+    alice = member(localname="alice", password="p")
+    fan = member(localname="fan", password="p")
+    ghost = member(localname="ghost", password="p")
+    exiled = member(localname="exiled", password="p")
+    for admirer in (fan, ghost, exiled):
+        admirer.follows.add(alice)
+    alice.follows.add(fan, ghost, exiled)
+    ghost.suspend()
+    exiled.ban(reason="gone")
+    content = client.get("/user/alice/").content
+    assert b"1 Follower" in content  # singular - pluralize is the template's
+    assert b"1 Following" in content

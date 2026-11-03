@@ -13,6 +13,16 @@
   <div class="profile-id">
     <h1>{{ profile_user.get_full_name }}</h1>
     <p class="handle">@{{ profile_user.username }}{% if not profile_user.local %} · on {{ home_instance }}{% endif %}</p>
+    {% comment %}
+    Audience size, counted as this instance holds them (reviewer-discovery
+    increment): part of the follow decision the profile exists to serve.
+    The view has already excluded the accounts this server hides.
+    {% endcomment %}
+    <p class="profile-counts">
+      <span class="profile-count">{{ follower_count }} Follower{{ follower_count|pluralize }}</span>
+      <span class="profile-count-sep">·</span>
+      <span class="profile-count">{{ following_count }} Following</span>
+    </p>
   </div>
   <div class="profile-actions">
     {% if is_self %}

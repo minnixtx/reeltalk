@@ -339,3 +339,20 @@ def test_an_empty_feed_renders_no_list_and_no_scroll_state(alice, admin):
     body = _member_client().get("/").content.decode()
     assert "Nothing here yet" in body
     assert 'id="feed-sentinel"' not in body
+
+
+def test_an_empty_following_feed_points_at_the_local_feed(alice, admin):
+    """The cold start (reviewer-discovery increment): a new member's empty
+    Following feed names the way to people - the Local tab - instead of
+    leaving the empty state read as "produce content first"."""
+    body = _member_client().get("/").content.decode()
+    assert "?scope=local" in body
+    assert "find reviewers" in body
+
+
+def test_the_local_scope_empty_state_does_not_point_at_itself(alice, admin):
+    """The nudge belongs to Following only: telling a reader on Local to go
+    to Local is noise, and the copy would name the tab they are standing on."""
+    body = _member_client().get("/?scope=local").content.decode()
+    assert "Nothing here yet" in body
+    assert "find reviewers" not in body

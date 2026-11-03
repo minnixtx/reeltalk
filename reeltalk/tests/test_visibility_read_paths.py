@@ -889,3 +889,91 @@ def test_the_like_control_on_a_profile_row_is_wired_not_decorative(
     member_page = _login("stranger").get("/user/author/").content.decode()
     assert "applaud-btn" in member_page
     assert "js/likes.js" in member_page
+
+
+# --- The Top Reviews rail (reviewer-discovery increment) ----------------------
+#
+# The rail ranks reviews by reader response, so an engaged review actually
+# reaches the box - which the walk's engagement-free fixtures cannot do. The
+# rules asked of the new surface are the same rules: audience decides, blocks
+# hide for the blocker alone, and a moderator gets no elevation on the home
+# page. The ranking itself (window, threshold, self-like, ties) is pinned in
+# ``test_top_reviews.py``.
+#
+# The marker lives in ``raw_content`` alone, on purpose: the rail excerpts
+# raw text while the feed renders ``content``, so a marker here can only be
+# satisfied by the rail. The first cut of these tests put the marker in
+# ``content`` and the follower's presence assertion passed off the feed row
+# while the rail rendered nothing - a rail assertion vacuous in exactly the
+# direction it was written to guard.
+
+
+def _rail_review(user, film, marker, visibility) -> Status:
+    return Status.objects.create(
+        user=user,
+        film=film,
+        status_type=Status.Type.REVIEW,
+        content="<p>an ordinary body the rail never shows</p>",
+        raw_content=f"{marker} opening words of the review",
+        rating=4,
+        visibility=visibility,
+    )
+
+
+@pytest.mark.django_db
+def test_a_followers_review_on_the_rail_reaches_only_readers_owed_it(
+    db, author, follower, stranger, films
+):
+    review = _rail_review(author, films[0], "RAIL-FOLLOWERS", Visibility.FOLLOWERS)
+    follower.follows.add(author)
+    Like.objects.create(user=follower, status=review)
+
+    assert "RAIL-FOLLOWERS" in _login("follower").get("/").content.decode()
+    assert "RAIL-FOLLOWERS" in _login("author").get("/").content.decode()
+    assert "RAIL-FOLLOWERS" not in Client().get("/").content.decode()
+    assert "RAIL-FOLLOWERS" not in _login("stranger").get("/").content.decode()
+
+
+@pytest.mark.django_db
+def test_a_private_review_on_the_rail_reaches_only_its_author(
+    db, author, follower, stranger, films
+):
+    # Reachable engagement for a private row: the author can reply under their
+    # own post and replies count toward the score like likes do. A like from
+    # anybody else would need ``may_read``, which only the author has.
+    review = _rail_review(author, films[0], "RAIL-PRIVATE", Visibility.PRIVATE)
+    add_reply(author, review, content="<p>note to self</p>", raw_content="note to self")
+
+    assert "RAIL-PRIVATE" in _login("author").get("/").content.decode()
+    assert "RAIL-PRIVATE" not in Client().get("/").content.decode()
+    assert "RAIL-PRIVATE" not in _login("stranger").get("/").content.decode()
+    assert "RAIL-PRIVATE" not in _login("follower").get("/").content.decode()
+
+
+@pytest.mark.django_db
+def test_a_reviewer_the_viewer_blocked_leaves_the_rail_for_that_viewer_only(
+    db, author, stranger, films
+):
+    review = _rail_review(author, films[0], "RAIL-BLOCKED", Visibility.PUBLIC)
+    Like.objects.create(user=stranger, status=review)
+    blocker = member(localname="blocker", password=PASSWORD)
+    blocker.blocks.add(author)
+    # The review qualifies (one like, public, in the window) - and is absent
+    # for the one member who blocked its author, present for everyone else.
+    assert "RAIL-BLOCKED" in Client().get("/").content.decode()
+    assert "RAIL-BLOCKED" not in _login("blocker").get("/").content.decode()
+    assert "RAIL-BLOCKED" in _login("stranger").get("/").content.decode()
+
+
+@pytest.mark.django_db
+def test_the_rail_gives_a_moderator_nothing_a_stranger_lacks(
+    db, author, stranger, films
+):
+    moderator(localname="mod", password=PASSWORD)
+    pub = _rail_review(author, films[0], "RAIL-MOD-PUBLIC", Visibility.PUBLIC)
+    hidden = _rail_review(author, films[1], "RAIL-MOD-HIDDEN", Visibility.FOLLOWERS)
+    Like.objects.create(user=stranger, status=pub)
+    Like.objects.create(user=stranger, status=hidden)
+    body = _login("mod").get("/").content.decode()
+    assert "RAIL-MOD-PUBLIC" in body
+    assert "RAIL-MOD-HIDDEN" not in body
