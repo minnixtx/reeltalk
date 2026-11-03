@@ -36,7 +36,11 @@ def may_moderate(user):
 
     A moderator flag alone is enough; staff and superusers pass because the
     site admin acts on the same ``/moderate/`` queue (R103), not through a
-    second surface with a second rule.
+    second surface with a second rule. Under the owner's flag model (R158,
+    2026-11-03) the admin carries all three flags and a moderator passes on
+    the flag alone - staff is the admin site's door and a moderator does
+    not hold it. The staff and superuser clauses stay written out as
+    defense-in-depth for a row whose flags were set by hand.
 
     ``is_authenticated`` is tested first and short-circuits: ``AnonymousUser``
     has no ``is_moderator`` attribute, so any reordering here raises
@@ -58,8 +62,9 @@ def can_act_on(actor, target) -> bool:
     * **a regular user** — neither.
 
     ``is_staff`` is not a fourth kind. It is Django's door to ``/admin/``,
-    and R100 keeps a moderator's copy of it ``False`` precisely so a
-    moderator never reaches admin chrome. What it does decide here is which
+    and under the owner's flag model (R158, 2026-11-03) only the admin
+    holds it - a moderator carries the moderator flag alone, so a
+    moderator never reaches admin chrome. What it decides here is which
     side of the line an account sits on: an account holding the admin door
     is on the admin's side, so a moderator never touches it. That is the
     narrowest reading of "only a regular user", and it needs no new role to

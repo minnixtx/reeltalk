@@ -59,6 +59,10 @@ def test_setup_post_creates_admin_but_does_not_log_it_in(client):
     admin = User.objects.get(localname="alice")
     assert admin.is_superuser is True
     assert admin.is_staff is True
+    # R158 (owner 2026-11-03): the wizard's admin carries the moderator
+    # flag too, so the header shortcut and the queue agree from the first
+    # request - there is no admin who must discover moderation afterwards.
+    assert admin.is_moderator is True
     # The session holds nobody. Asserting the absence is the point: a test
     # that only checked the redirect would pass against a view that logged the
     # admin in and redirected anyway.

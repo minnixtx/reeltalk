@@ -18,7 +18,10 @@ Ordered by how each failure would bite:
 
 * A moderator opens ``/moderate/`` and cannot open the admin.
 * A member is refused with 403; an anonymous visitor is sent to log in.
-* The grant is made through the real admin form and does not widen to staff.
+* The grant is made through the real admin form and does not widen to
+  staff - and it refuses staff even when ticked (R158, owner 2026-11-03:
+  ``is_staff`` is Django's door to ``/admin/`` and a moderator does not
+  hold it).
 * A moderator cannot flip the flag — on someone else, or on themselves.
 * The header link appears for a moderator and for nobody else.
 * The Profile / Settings row appears for anyone the queue itself admits --
@@ -75,7 +78,8 @@ def staff(db):
 
 @pytest.fixture
 def moderator(db):
-    """Flagged to moderate, and pointedly NOT staff (R100)."""
+    """Flagged to moderate, and pointedly NOT staff (R100, reaffirmed by
+    R158: staff is the /admin/ door and a moderator does not hold it)."""
     return create_member(localname="mod", password=PASSWORD, is_moderator=True)
 
 
@@ -126,7 +130,8 @@ def test_staff_and_superuser_pass_the_gate(site_admin, staff):
 
 
 def test_the_moderator_flag_alone_does_not_grant_staff(moderator):
-    # The decoupling R100 is built on, asserted on the row the fixture made.
+    # The decoupling R100 is built on, reaffirmed by R158: staff is the
+    # /admin/ door, and moderating never carries it.
     assert moderator.is_moderator is True
     assert moderator.is_staff is False
     assert moderator.is_superuser is False
@@ -230,8 +235,41 @@ def test_a_staff_session_grants_the_flag_through_the_real_admin_form(
     assert resp.status_code == 302
     member.refresh_from_db()
     assert member.is_moderator is True
-    # Granting moderation did not hand over the admin.
+    # Granting moderation did not hand over the admin (R158, owner
+    # 2026-11-03: is_staff is Django's door to /admin/ and a moderator
+    # does not hold it).
     assert member.is_staff is False
+    # And the grant never reaches superuser from here either: only an
+    # account that already holds it can hand it out (F13).
+    assert member.is_superuser is False
+
+
+def test_a_grant_that_ticks_staff_beside_the_flag_refuses_it(site_admin, member):
+    # The R158 rule is composed, not hoped for: even a form post that
+    # ticks staff beside the moderator flag lands without it, because a
+    # moderator who is not the site admin must stay out of /admin/.
+    resp = logged_in_client(site_admin).post(
+        f"/admin/social/user/{member.pk}/change/",
+        change_payload(member, is_moderator="on", is_staff="on"),
+    )
+    assert resp.status_code == 302
+    member.refresh_from_db()
+    assert member.is_moderator is True
+    assert member.is_staff is False
+
+
+def test_a_superuser_grant_lands_all_three_flags(site_admin, member):
+    # The other half of R158: the site admin carries staff, moderator and
+    # superuser, so promoting a member to admin composes the whole shape.
+    resp = logged_in_client(site_admin).post(
+        f"/admin/social/user/{member.pk}/change/",
+        change_payload(member, is_superuser="on"),
+    )
+    assert resp.status_code == 302
+    member.refresh_from_db()
+    assert member.is_superuser is True
+    assert member.is_staff is True
+    assert member.is_moderator is True
 
 
 def test_the_granted_member_moderates_and_still_cannot_open_admin(site_admin, member):

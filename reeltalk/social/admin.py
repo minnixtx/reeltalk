@@ -184,6 +184,25 @@ class AdminUserChangeForm(NewPasswordPairMixin, UserChangeForm):
             "report_email",
         )
 
+    def clean(self):
+        cleaned = super().clean()
+        # The owner's flag model (R158, 2026-11-03): the site admin carries
+        # all three flags, and a moderator carries the moderator flag alone.
+        # is_staff is Django's door to /admin/ and nothing else, so a
+        # moderator who is not the site admin must not hold it - the grant
+        # surface composes that shape rather than trusting whoever ticks the
+        # boxes. The rule lives here, not in Model.save, so a bare column
+        # write - a fixture, a shell - stays exactly what it wrote. A
+        # non-superuser requester never sees these fields at all (F13 strips
+        # the role columns from the form), so .get() is the honest read:
+        # absent means this form was never the one granting anything.
+        if cleaned.get("is_superuser"):
+            cleaned["is_staff"] = True
+            cleaned["is_moderator"] = True
+        elif cleaned.get("is_moderator"):
+            cleaned["is_staff"] = False
+        return cleaned
+
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):

@@ -31,15 +31,19 @@ def test_create_user_normalizes_missing_email():
 
 @pytest.mark.django_db
 def test_create_superuser_sets_flags():
+    # R158 (owner 2026-11-03): the site admin carries all three flags, so
+    # the setup wizard and createsuperuser compose the whole shape here.
     user = User.objects.create_superuser(localname="admin", password="s3cretpass")
     assert user.is_staff is True
     assert user.is_superuser is True
+    assert user.is_moderator is True
 
 
 @pytest.mark.django_db
-def test_create_superuser_rejects_non_superuser():
+@pytest.mark.parametrize("flag", ["is_staff", "is_superuser", "is_moderator"])
+def test_create_superuser_rejects_a_missing_role_flag(flag):
     with pytest.raises(ValueError):
-        User.objects.create_superuser(localname="x", password="p", is_superuser=False)
+        User.objects.create_superuser(localname="x", password="p", **{flag: False})
 
 
 @pytest.mark.parametrize(

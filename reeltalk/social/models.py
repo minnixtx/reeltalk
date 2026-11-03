@@ -108,14 +108,22 @@ class UserManager(BaseUserManager):
         return self._create_user(localname, password, email=email or "", **extra_fields)
 
     def create_superuser(self, localname, password=None, email="", **extra_fields):
+        # The owner's flag model (R158, 2026-11-03): the site admin carries
+        # all three flags - staff, moderator, superuser - so the one account
+        # that can reach every role surface is composed here rather than left
+        # to whoever remembers to tick boxes afterwards. Every admin-creation
+        # route (the setup wizard, createsuperuser) lands on this shape.
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
+        extra_fields.setdefault("is_moderator", True)
         if (
             extra_fields.get("is_staff") is not True
             or extra_fields.get("is_superuser") is not True
+            or extra_fields.get("is_moderator") is not True
         ):
             raise ValueError(
-                "Superuser must have is_staff and is_superuser set to True."
+                "Superuser must have is_staff, is_superuser and "
+                "is_moderator set to True."
             )
         return self._create_user(localname, password, email=email or "", **extra_fields)
 
@@ -229,18 +237,21 @@ class User(AbstractBaseUser, PermissionsMixin):
         default=False,
         help_text="Designates whether the user can log into this admin site.",
     )
-    # Deliberately a separate field rather than a reuse of is_staff (R100).
-    # is_staff is what Django's admin site checks, so "promote to moderator"
-    # through that field would silently mean "hand over the whole admin" —
-    # site settings, user records, the merge tool. A moderator's is_staff
-    # stays False, so /admin/ still refuses them, and the grant happens only
-    # in UserAdmin's Roles fieldset, which itself requires is_staff to reach.
-    # The escalation path is therefore absent rather than merely checked.
+    # Deliberately a separate field rather than a reuse of is_staff (R100),
+    # with the flag model stated by the owner on 2026-11-03 (R158): the
+    # site admin carries all three flags, and a moderator carries the
+    # moderator flag alone. is_staff is Django's door to /admin/ and
+    # nothing else, so a moderator's copy stays False and /admin/ refuses
+    # them outright - the escalation path is absent rather than merely
+    # checked. AdminUserChangeForm.clean composes that shape at the grant
+    # surface, so the model holds even when someone ticks staff beside the
+    # moderator flag.
     is_moderator = models.BooleanField(
         default=False,
         help_text=(
-            "Designates a site moderator. Independent of staff status: a "
-            "moderator can moderate /moderate/ and cannot open the admin."
+            "Designates a site moderator. Moderating does not open the "
+            "admin site: a moderator's staff status stays off, and only "
+            "the site admin carries it."
         ),
     )
     # Whether this account gets the staff email about newly filed reports
