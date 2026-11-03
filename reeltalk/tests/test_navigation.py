@@ -20,12 +20,16 @@ extraction must not break:
 * the group rules come from ``NavItem.group``, not from markup that would
   have to be edited in step with the list.
 
-Import, Export and Moderate are absent from the menu by design (they live
-inside Profile / Settings), so their absence is pinned too: a future edit
-that re-lists them here would silently undo the approved grouping.
+Import, Export are absent from the menu by design (they live inside Profile /
+Settings), so their absence is pinned too: a future edit that re-lists them
+here would silently undo the approved grouping. Moderate and Administration
+are the M1 exception (moderation/notifications arc, owner rulings D1-D2):
+they ride the menu and the More sheet for the accounts that hold them --
+Administration on ``is_staff``, Moderate on ``may_moderate`` -- and the
+matrix member / moderator / admin / staff-only is pinned at the registry.
 
-The corner (search box, badge, Moderate, avatar) is untouched by N4 and
-pinned by ``test_search.py``, ``test_notifications_badge.py`` and
+The corner (search box, badge, avatar) is untouched by N4 and pinned by
+``test_search.py``, ``test_notifications_badge.py`` and
 ``test_moderator_gate.py``; it is not duplicated here. The phone surfaces are
 pinned by ``test_mobile_nav.py``.
 """
@@ -40,7 +44,7 @@ from django.contrib.staticfiles import finders
 from django.test import Client, RequestFactory
 
 from reeltalk.social.navigation import nav_items, sidebar_nav
-from reeltalk.tests.members import member
+from reeltalk.tests.members import member, site_admin
 
 PASSWORD = "s3cretpass"
 
@@ -48,6 +52,23 @@ PASSWORD = "s3cretpass"
 @pytest.fixture
 def alice(db):
     return member(localname="alice", password=PASSWORD)
+
+
+@pytest.fixture
+def mod(db):
+    """A moderator flag alone (R158): no staff, so no Administration row."""
+    return member(localname="mod", password=PASSWORD, is_moderator=True)
+
+
+@pytest.fixture
+def root(db):
+    return site_admin(localname="root", password=PASSWORD)
+
+
+@pytest.fixture
+def helper(db):
+    """Staff without the moderator flag: may_moderate passes, so both rows."""
+    return member(localname="helper", password=PASSWORD, is_staff=True)
 
 
 def _login(localname: str) -> Client:
@@ -125,12 +146,63 @@ def test_the_rows_are_grouped_for_the_menu_dividers(alice):
 
 
 @pytest.mark.django_db
-def test_import_export_and_moderate_ride_in_the_menu_by_design(alice):
-    """The approved design nests these inside Profile / Settings."""
+def test_import_and_export_ride_in_the_menu_by_design(alice):
+    """The approved design nests these two inside Profile / Settings."""
     keys = [i.key for i in sidebar_nav(_request("/find/", alice))]
     assert "import" not in keys
     assert "export" not in keys
+
+
+@pytest.mark.django_db
+def test_a_member_menu_carries_no_staff_rows(alice):
+    """M1's member half: neither Administration nor Moderate."""
+    keys = [i.key for i in sidebar_nav(_request("/find/", alice))]
+    assert "admin" not in keys
     assert "moderate" not in keys
+
+
+@pytest.mark.django_db
+def test_a_moderator_gains_moderate_alone_in_the_account_block(mod):
+    """R158's moderator carries the flag alone, so only the queue row appears."""
+    items = sidebar_nav(_request("/find/", mod))
+    assert [i.key for i in items][-3:] == ["settings", "moderate", "logout"]
+    moderate = [i for i in items if i.key == "moderate"][0]
+    assert (moderate.url, moderate.group) == ("/moderate/", "account")
+
+
+@pytest.mark.django_db
+def test_an_admin_gains_administration_above_moderate(root):
+    """D1's order, and both gates hold at once for the account that holds both."""
+    items = sidebar_nav(_request("/find/", root))
+    assert [i.key for i in items][-4:] == ["settings", "admin", "moderate", "logout"]
+    by_key = {i.key: i for i in items}
+    assert (by_key["admin"].url, by_key["admin"].group) == ("/admin/", "account")
+    assert (by_key["moderate"].url, by_key["moderate"].group) == (
+        "/moderate/",
+        "account",
+    )
+
+
+@pytest.mark.django_db
+def test_a_staff_account_without_the_flag_sees_both_rows(helper):
+    """D2: Moderate answers ``may_moderate``, which staff passes -- the row is
+    the queue's own predicate, not the moderator flag. Administration answers
+    ``is_staff``, which this account holds."""
+    keys = [i.key for i in sidebar_nav(_request("/find/", helper))]
+    assert keys[-4:] == ["settings", "admin", "moderate", "logout"]
+
+
+@pytest.mark.django_db
+def test_the_moderate_row_lights_on_the_queue_itself(mod):
+    """Exact-equality active rule, applied to the new row on its own page."""
+    items = sidebar_nav(_request("/moderate/", mod))
+    assert [i.key for i in items if i.current] == ["moderate"]
+
+
+@pytest.mark.django_db
+def test_the_administration_row_lights_on_the_admin_site(helper):
+    items = sidebar_nav(_request("/admin/", helper))
+    assert [i.key for i in items if i.current] == ["admin"]
 
 
 @pytest.mark.django_db
@@ -189,11 +261,40 @@ def test_the_member_menu_renders_every_row(alice):
 
 
 @pytest.mark.django_db
-def test_every_row_carries_its_icon(alice):
+def test_the_menu_renders_the_staff_rows_for_an_admin(root):
+    nav = _site_nav(_login("root").get("/find/").content.decode())
+    assert 'href="/admin/"' in nav
+    assert 'href="/moderate/"' in nav
+    assert ">Administration<" in nav
+    assert ">Moderate<" in nav
+
+
+@pytest.mark.django_db
+def test_the_menu_renders_no_staff_rows_for_a_moderator_flag_alone(mod):
+    """The sheet pins the flag-only case too; the menu must not disagree."""
+    nav = _site_nav(_login("mod").get("/find/").content.decode())
+    assert 'href="/moderate/"' in nav
+    assert 'href="/admin/"' not in nav
+    assert ">Administration<" not in nav
+
+
+@pytest.mark.django_db
+def test_the_menu_renders_no_staff_rows_for_a_member(alice):
+    nav = _site_nav(_login("alice").get("/find/").content.decode())
+    assert 'href="/moderate/"' not in nav
+    assert 'href="/admin/"' not in nav
+
+
+@pytest.mark.django_db
+def test_every_row_carries_its_icon(alice, root):
     """The menu is the icon-and-label surface; a row that lost its drawing
-    would render as a text-only row and read as a different design."""
+    would render as a text-only row and read as a different design. Seven
+    rows for a member; an admin carries the two staff rows too, and the
+    Administration key is one of the drawings."""
     nav = _site_nav(_login("alice").get("/find/").content.decode())
     assert nav.count("<svg") == 7
+    admin_nav = _site_nav(_login("root").get("/find/").content.decode())
+    assert admin_nav.count("<svg") == 9
 
 
 @pytest.mark.django_db
@@ -211,11 +312,15 @@ def test_a_page_outside_the_menu_lights_nothing(alice):
 
 
 @pytest.mark.django_db
-def test_the_group_rules_are_drawn_where_the_group_changes(alice):
+def test_the_group_rules_are_drawn_where_the_group_changes(alice, root):
     """Three group changes (feed -> discover -> account -> session), so three
-    rules -- and none before the first row."""
+    rules -- and none before the first row. The staff rows join the account
+    block, so an admin's menu keeps the same three rules: the plan's ruling
+    that no new rule splits Profile / Settings from its staff rows."""
     nav = _site_nav(_login("alice").get("/find/").content.decode())
     assert nav.count("<hr>") == 3
+    admin_nav = _site_nav(_login("root").get("/find/").content.decode())
+    assert admin_nav.count("<hr>") == 3
 
 
 @pytest.mark.django_db

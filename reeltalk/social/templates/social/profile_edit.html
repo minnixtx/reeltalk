@@ -19,11 +19,6 @@
 <nav class="settings-links" aria-label="Settings">
   <a href="{% url 'import-films' %}">Import<span><small>Bring your film library into ReelTalk</small></span></a>
   <a href="{% url 'export-films' %}">Export<span><small>Download your film library</small></span></a>
-  {# The queue's own predicate, not the moderator flag alone: a staff or #}
-  {# superuser account can open /moderate/ and was given no link to it. #}
-  {% if can_moderate %}
-  <a href="{% url 'moderation' %}">Moderate<span><small>The reports queue</small></span></a>
-  {% endif %}
 </nav>
 
 {% if can_invite %}

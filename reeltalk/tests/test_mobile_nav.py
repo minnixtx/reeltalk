@@ -9,15 +9,16 @@ the contract the new surfaces must hold:
 * the rendered surfaces: one bottom-bar landmark for members and nothing
   signed out; the active item alone carries ``aria-current="page"``;
 * Log out inside the sheet is still the POST+CSRF form, never a GET link;
-* the sheet's Moderate row follows the moderator flag, and the corner's
-  desk Moderate sits in its ``.corner-desk`` wrapper;
+* the sheet's staff rows follow the moderation arc's D1/D2: Administration
+  above Moderate, gated on ``is_staff`` and ``may_moderate`` -- the same
+  rows and order the desktop menu carries;
 * the badge anchor now carries the bell parts the stylesheet swaps per
-  breakpoint (the ``notifications-link``/``moderation-link`` CSS bans in
-  ``test_notifications_badge.py`` and ``test_moderator_gate.py`` stay green
-  because the CSS names the corner's parts, never those classes);
+  breakpoint (the ``notifications-link`` CSS ban in
+  ``test_notifications_badge.py`` stays green because the CSS names the
+  corner's parts, never that class);
 * the search page carries its own field for phones, and the profile page
-  is the settings hub (Import, Export, and Moderate for anyone the queue
-  itself admits) with the edit form untouched;
+  is the settings hub (Import and Export; M1 moved Moderate out of it and
+  into the menus) with the edit form untouched;
 * the mobile treatment lives under the 1024px line in the stylesheet.
 """
 
@@ -32,7 +33,7 @@ from django.test import Client, RequestFactory
 
 from reeltalk.notifications.models import Notification, notify
 from reeltalk.social.navigation import bottom_nav, more_nav
-from reeltalk.tests.members import member, moderator
+from reeltalk.tests.members import member, site_admin
 
 PASSWORD = "s3cretpass"
 
@@ -44,7 +45,19 @@ def alice(db):
 
 @pytest.fixture
 def wendy(db):
-    return moderator(localname="wendy", password=PASSWORD)
+    """Moderator flag alone (R158): the queue row yes, the admin row no."""
+    return member(localname="wendy", password=PASSWORD, is_moderator=True)
+
+
+@pytest.fixture
+def helper(db):
+    """Staff without the moderator flag: passes may_moderate, holds is_staff."""
+    return member(localname="helper", password=PASSWORD, is_staff=True)
+
+
+@pytest.fixture
+def root(db):
+    return site_admin(localname="root", password=PASSWORD)
 
 
 @pytest.fixture
@@ -139,7 +152,15 @@ def test_the_more_sheet_lists_its_destinations_with_log_out_last(alice):
 
 
 @pytest.mark.django_db
-def test_moderate_joins_the_sheet_only_for_a_moderator(alice, wendy):
+def test_a_members_sheet_carries_no_staff_rows(alice):
+    keys = [i.key for i in more_nav(_request("/find/", alice))]
+    assert "admin" not in keys
+    assert "moderate" not in keys
+
+
+@pytest.mark.django_db
+def test_a_moderator_gains_moderate_alone_in_the_sheet(alice, wendy):
+    """D2 on the flag-only account: may_moderate passes, is_staff does not."""
     assert "moderate" not in [i.key for i in more_nav(_request("/find/", alice))]
     assert [i.key for i in more_nav(_request("/find/", wendy))] == [
         "find",
@@ -148,6 +169,24 @@ def test_moderate_joins_the_sheet_only_for_a_moderator(alice, wendy):
         "moderate",
         "logout",
     ]
+
+
+@pytest.mark.django_db
+def test_staff_and_admin_carry_administration_above_moderate_in_the_sheet(helper, root):
+    """D1's order and D2's gates, on the account that holds one flag and the
+    account that holds all three alike."""
+    for user in (helper, root):
+        assert [i.key for i in more_nav(_request("/find/", user))] == [
+            "find",
+            "notifications",
+            "settings",
+            "admin",
+            "moderate",
+            "logout",
+        ]
+    by_key = {i.key: i for i in more_nav(_request("/find/", root))}
+    assert (by_key["admin"].url, by_key["moderate"].url) == ("/admin/", "/moderate/")
+    assert all(i.icon for i in more_nav(_request("/find/", root)))
 
 
 # --- the rendered surfaces -----------------------------------------------------
@@ -192,11 +231,17 @@ def test_the_sheet_renders_log_out_as_a_post_form_with_csrf(alice):
 
 
 @pytest.mark.django_db
-def test_the_sheet_offers_moderate_only_to_a_moderator(alice, wendy):
-    assert ">Moderate<" not in _more_sheet(
-        _login("alice").get("/find/").content.decode()
-    )
-    assert ">Moderate<" in _more_sheet(_login("wendy").get("/find/").content.decode())
+def test_the_sheet_offers_the_staff_rows_per_d1_and_d2(alice, wendy, root):
+    member_sheet = _more_sheet(_login("alice").get("/find/").content.decode())
+    assert ">Moderate<" not in member_sheet
+    assert ">Administration<" not in member_sheet
+    mod_sheet = _more_sheet(_login("wendy").get("/find/").content.decode())
+    assert ">Moderate<" in mod_sheet
+    assert ">Administration<" not in mod_sheet
+    admin_sheet = _more_sheet(_login("root").get("/find/").content.decode())
+    assert ">Administration<" in admin_sheet
+    # D1's order: Administration above Moderate, as in the desktop menu.
+    assert admin_sheet.index(">Administration<") < admin_sheet.index(">Moderate<")
 
 
 @pytest.mark.django_db
@@ -210,16 +255,17 @@ def test_the_sheet_counts_unread_on_the_notifications_row(alice, bob):
 
 
 @pytest.mark.django_db
-def test_the_corner_carries_the_bell_parts_and_the_desk_wrapper(alice, bob, wendy):
+def test_the_corner_carries_the_bell_parts_and_no_moderate(alice, bob, wendy):
     notify(alice, bob, Notification.Kind.FOLLOW)
     corner = _header_user(_login("alice").get("/find/").content.decode())
     assert 'class="corner-icon"' in corner
     assert 'class="corner-count"' in corner
     assert '<span class="corner-label">1 unread</span>' in corner
-    # The desk Moderate sits inside its wrapper, so the mobile CSS can hide
-    # the wrapper without ever naming the guarded moderation-link class.
-    desk = _header_user(_login("wendy").get("/find/").content.decode())
-    assert '<span class="corner-desk"><a class="moderation-link"' in desk
+    # M1 retired the corner's desk Moderate: the menus carry the queue now,
+    # so even a moderator's corner holds no Moderate link.
+    mod_corner = _header_user(_login("wendy").get("/find/").content.decode())
+    assert "Moderate" not in mod_corner
+    assert "corner-desk" not in mod_corner
 
 
 @pytest.mark.django_db
@@ -241,16 +287,16 @@ def test_the_profile_page_is_the_settings_hub(alice):
 
 
 @pytest.mark.django_db
-def test_the_settings_hub_offers_moderate_only_to_those_who_may_moderate(alice, wendy):
-    # The row follows the queue's own predicate, so a moderator sees it and a
-    # plain member does not; the staff and superuser halves of that predicate
-    # are pinned in ``test_moderator_gate.py``.
-    assert ">Moderate<" not in _settings_links(
-        _login("alice").get("/preferences/profile/").content.decode()
-    )
-    assert ">Moderate<" in _settings_links(
-        _login("wendy").get("/preferences/profile/").content.decode()
-    )
+def test_the_settings_hub_no_longer_lists_moderate(alice, wendy):
+    """M1 moved the queue's row from this hub into the menus, so the hub
+    lists Import and Export only -- for a moderator as much as a member.
+    The menu and sheet halves of that move are pinned above and in
+    ``test_navigation.py``."""
+    for who in ("alice", "wendy"):
+        body = _login(who).get("/preferences/profile/").content.decode()
+        hub = _settings_links(body)
+        assert ">Moderate<" not in hub
+        assert 'href="/moderate/"' not in hub
 
 
 # --- the wiring and the stylesheet ----------------------------------------------

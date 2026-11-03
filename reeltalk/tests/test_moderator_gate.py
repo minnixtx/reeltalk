@@ -23,10 +23,15 @@ Ordered by how each failure would bite:
   ``is_staff`` is Django's door to ``/admin/`` and a moderator does not
   hold it).
 * A moderator cannot flip the flag — on someone else, or on themselves.
-* The header link appears for a moderator and for nobody else.
-* The Profile / Settings row appears for anyone the queue itself admits --
-  a moderator, a staff account, a superuser -- and for nobody else.
+* The menus carry the staff rows per the moderation arc's D1/D2: Moderate
+  for anyone the queue's own predicate admits -- a moderator, a staff
+  account, a superuser -- in both the desktop menu and the More sheet, and
+  Administration for ``is_staff`` alone; a member sees neither row anywhere.
+* The surfaces M1 retired stay retired: the settings page lists no Moderate
+  row, the header corner carries none, and no CSS names the old corner parts.
 """
+
+import re
 
 import pytest
 from django.contrib.staticfiles import finders
@@ -44,12 +49,9 @@ ADMIN_USER_CHANGELIST = "/admin/social/user/"
 ADMIN_LOGIN_TEMPLATE = "admin/login.html"
 ADMIN_INDEX_TEMPLATE = "admin/index.html"
 
-MODERATOR_LINK = 'class="moderation-link"'
-# The Profile / Settings row that names the queue as a destination.
-SETTINGS_LINK = ">Moderate<span"
 SETTINGS_PAGE = reverse("profile-edit")
 # A page that renders for any signed-in member with no gate of its own, so a
-# header assertion on it cannot be passing on a redirect. (``/`` is the
+# menu assertion on it cannot be passing on a redirect. (``/`` is the
 # wrong choice: the first-run wizard sends it to /setup/ until a superuser
 # exists.)
 HEADER_PAGE = reverse("find-user")
@@ -63,6 +65,21 @@ def logged_in_client(user):
     client = Client()
     client.force_login(user)
     return client
+
+
+def _site_nav(client, path):
+    """The desktop menu's own landmark, scoped like ``test_navigation``."""
+    body = client.get(path).content.decode()
+    match = re.search(r'<nav class="site-nav".*?</nav>', body, re.S)
+    assert match, "no .site-nav menu rendered"
+    return match.group(0)
+
+
+def _more_sheet(client, path):
+    body = client.get(path).content.decode()
+    match = re.search(r'<dialog id="more-sheet".*?</dialog>', body, re.S)
+    assert match, "no More sheet rendered"
+    return match.group(0)
 
 
 @pytest.fixture
@@ -312,70 +329,104 @@ def test_the_moderator_field_is_on_the_admin_change_form_only(site_admin, member
     assert 'name="is_moderator"' not in add_body
 
 
-# --- the header link ------------------------------------------------------
+# --- the staff rows in the two menus (M1, owner rulings D1/D2) -------------
 
 
-def test_moderator_sees_the_header_link(moderator):
-    body = logged_in_client(moderator).get(HEADER_PAGE).content.decode()
-    assert MODERATOR_LINK in body
-    assert 'href="/moderate/"' in body
-    # An <a> that only navigates must not wear .btn — that is the lit
-    # crimson control (R96), and the markup looks harmless either way.
-    assert "btn" not in body.split(MODERATOR_LINK)[1][:40]
+def test_moderator_sees_moderate_only_in_the_menu(moderator):
+    client = logged_in_client(moderator)
+    nav = _site_nav(client, HEADER_PAGE)
+    assert '<a href="/moderate/"' in nav
+    assert ">Moderate<" in nav
+    # The flag-only moderator (R158) holds no staff, so no admin row.
+    assert 'href="/admin/"' not in nav
+    assert ">Administration<" not in nav
 
 
-def test_member_sees_no_moderator_link(member):
-    body = logged_in_client(member).get(HEADER_PAGE).content.decode()
-    assert MODERATOR_LINK not in body
-    assert 'href="/moderate/"' not in body
+def test_moderator_sees_moderate_in_the_more_sheet(moderator):
+    sheet = _more_sheet(logged_in_client(moderator), HEADER_PAGE)
+    assert ">Moderate<" in sheet
+    assert ">Administration<" not in sheet
 
 
-def test_anonymous_sees_no_moderator_link():
+def test_member_sees_neither_row_anywhere(member):
+    client = logged_in_client(member)
+    for surface in (_site_nav(client, HEADER_PAGE), _more_sheet(client, HEADER_PAGE)):
+        assert 'href="/moderate/"' not in surface
+        assert 'href="/admin/"' not in surface
+        assert ">Moderate<" not in surface
+        assert ">Administration<" not in surface
+
+
+def test_anonymous_sees_neither_row():
     body = Client().get(HEADER_PAGE).content.decode()
-    assert MODERATOR_LINK not in body
     assert 'href="/moderate/"' not in body
+    assert 'href="/admin/"' not in body
 
 
-def test_a_staff_user_without_the_flag_sees_no_link(staff):
-    # The link reads is_moderator, not the gate: staff reach /moderate/ by
-    # permission but are not advertised a moderator role they do not hold.
-    body = logged_in_client(staff).get(HEADER_PAGE).content.decode()
-    assert MODERATOR_LINK not in body
+def test_the_site_admin_sees_both_rows_in_both_surfaces(site_admin):
+    client = logged_in_client(site_admin)
+    nav = _site_nav(client, HEADER_PAGE)
+    assert 'href="/admin/"' in nav and 'href="/moderate/"' in nav
+    # D1's order in the menu: Administration above Moderate.
+    assert nav.index(">Administration<") < nav.index(">Moderate<")
+    sheet = _more_sheet(client, HEADER_PAGE)
+    assert ">Administration<" in sheet and ">Moderate<" in sheet
+    assert sheet.index(">Administration<") < sheet.index(">Moderate<")
 
 
-# --- the Profile / Settings link ------------------------------------------
+def test_a_staff_account_without_the_flag_sees_both_rows(staff):
+    # D2 widened the queue row's gate to the queue's own predicate: staff
+    # pass may_moderate (R103's defense-in-depth), so the row is a way onto
+    # the queue the account can actually open -- and Administration is the
+    # staff door it always was.
+    client = logged_in_client(staff)
+    nav = _site_nav(client, HEADER_PAGE)
+    assert 'href="/moderate/"' in nav and 'href="/admin/"' in nav
 
 
-def test_moderator_sees_the_settings_link(moderator):
-    body = logged_in_client(moderator).get(SETTINGS_PAGE).content.decode()
-    assert SETTINGS_LINK in body
+def test_the_moderate_row_lights_as_current_on_the_queue(moderator):
+    # The exact-equality active rule applied to the row on its own page:
+    # exactly one lit row, and it is Moderate.
+    nav = _site_nav(logged_in_client(moderator), MODERATE_URL)
+    assert nav.count('aria-current="page"') == 1
+    assert '<a href="/moderate/" class="active" aria-current="page">' in nav
 
 
-def test_site_admin_sees_the_settings_link(site_admin):
-    body = logged_in_client(site_admin).get(SETTINGS_PAGE).content.decode()
-    assert SETTINGS_LINK in body
+# --- the surfaces M1 retired ------------------------------------------------
 
 
-def test_staff_without_the_flag_sees_the_settings_link(staff):
-    # The row is listed by the queue's own predicate rather than the flag, so
-    # an account that can open /moderate/ is shown a way there. Without this
-    # the only route for such an account was typing the address.
-    body = logged_in_client(staff).get(SETTINGS_PAGE).content.decode()
-    assert SETTINGS_LINK in body
-    # And it is still not advertised as a moderator.
-    assert MODERATOR_LINK not in body
+def test_the_settings_page_lists_no_moderate_for_anyone(moderator, site_admin, staff):
+    # The row moved into the menus; the hub keeps Import and Export only,
+    # even for the accounts whose menus now carry the queue row.
+    for user in (moderator, site_admin, staff):
+        body = logged_in_client(user).get(SETTINGS_PAGE).content.decode()
+        hub = re.search(r'<nav class="settings-links".*?</nav>', body, re.S)
+        assert hub, "no settings links nav rendered"
+        assert ">Moderate<" not in hub.group(0)
+        assert 'href="/moderate/"' not in hub.group(0)
+        # Control: the hub rendered its two survivors, so the absence above
+        # is about the moved row, not an empty page.
+        assert ">Import<" in hub.group(0) and ">Export<" in hub.group(0)
 
 
-def test_a_plain_member_sees_no_settings_link(member):
-    body = logged_in_client(member).get(SETTINGS_PAGE).content.decode()
-    assert SETTINGS_LINK not in body
-    assert 'href="/moderate/"' not in body
+def test_the_header_corner_carries_no_moderate(moderator):
+    # The corner used to hold the moderator's desk link (R101); M1 deleted
+    # it, so a moderator's corner holds the badge and the handle only.
+    content = logged_in_client(moderator).get(HEADER_PAGE).content.decode()
+    start = content.index('<div class="header-user">')
+    corner = content[start : content.index("</div>", start)]
+    assert "Moderate" not in corner
+    assert "corner-desk" not in corner
 
 
-def test_no_css_was_added_for_the_moderation_link():
-    # R101: the surface reuses existing classes and adds no stylesheet rules.
+def test_no_css_names_the_retired_corner_parts():
+    # The corner link's markup is gone (pinned above via base.html through
+    # the rendered corner); this pins that its CSS followed it, so no orphan
+    # rule survives the deletion.
     from pathlib import Path
 
     found = finders.find("css/reeltalk.css")
     assert found
-    assert "moderation-link" not in Path(found).read_text()
+    css = Path(found).read_text()
+    assert "moderation-link" not in css
+    assert "corner-desk" not in css

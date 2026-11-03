@@ -517,12 +517,6 @@ a {
     height: 28px;
   }
 
-  /* The corner's Moderate is desktop's; on phones Moderate rides in the
-     More sheet. */
-  .corner-desk {
-    display: none;
-  }
-
   .bottom-nav {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));

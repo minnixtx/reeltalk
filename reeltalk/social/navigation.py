@@ -12,11 +12,14 @@ the More button is a control, not a destination, so the template renders it
 after the list -- and ``more_nav`` is the sheet's destinations with Log out
 last. N4 replaced the desktop row with ``sidebar_nav``, the wide left menu the
 approved design asks for; its labels now agree with the bar's (Feed, Lists)
-because one menu speaks at each width instead of two competing ones. Import,
-Export and Moderate ride in none of them by design: they live inside Profile /
-Settings, which every surface links to. The icons are the approved mockup's
-24x24 single-path SVG data, held here so a surface renders from data instead
-of copying markup per destination.
+because one menu speaks at each width instead of two competing ones. M1 of the
+moderation/notifications arc moved Moderate out of the header corner and the
+settings page into both menus, and gave it an Administration companion: the
+two staff rows ride the sidebar and the sheet for the accounts that hold
+them, and nothing else. Import and Export still ride in none of them by
+design: they live inside Profile / Settings, which every surface links to.
+The icons are the approved mockup's 24x24 single-path SVG data, held here so
+a surface renders from data instead of copying markup per destination.
 
 The sidebar is the grouped surface: ``group`` names the block an item sits in
 and the partial draws a rule wherever the group changes, so the grouping lives
@@ -78,6 +81,11 @@ ICONS = {
         "M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z"
     ),
     "shield": "M12 3l8 3v6c0 4.5-3.2 7.6-8 9-4.8-1.4-8-4.5-8-9V6l8-3z",
+    # Administration's key: a ring and a shaft with one tooth. It is drawn
+    # along the same top-left-to-bottom-right diagonal the search icon runs,
+    # so the rows align side by side by visible body -- which the raw ink
+    # bbox of a path would not guarantee (known side-by-side alignment trap).
+    "admin": "M12 8a4 4 0 1 1-8 0 4 4 0 0 1 8 0M11 11 20 20M16 16l3-3",
     "logout": "M9 3H3v18h6M9 12h12M16 7l5 5-5 5",
 }
 
@@ -88,18 +96,23 @@ def sidebar_nav(request):
     Members only (N1 decision 8): a signed-out visitor gets no menu, because
     the wordmark is the way home and the corner carries Log in / Sign up.
 
-    Import, Export and Moderate are deliberately absent. The approved design
-    nests them inside Profile / Settings, so the menu stays seven rows instead
-    of ten and the destinations stay reachable from the one page that acts on
-    them. The moderator keeps the corner's own Moderate link (R101), which the
-    stylesheet retires below 1024px in favor of the More sheet's row.
+    Import and Export are deliberately absent. The approved design nests them
+    inside Profile / Settings, so a member's menu stays seven rows instead of
+    ten and the destinations stay reachable from the one page that acts on
+    them. The two staff rows are the exception M1 made: Administration rides
+    for ``is_staff`` (Django's own door to ``/admin/``, D2) and Moderate for
+    ``may_moderate`` (the queue's own predicate, so a staff account that was
+    given no way onto ``/moderate/`` is no longer one typed address away
+    from it). They sit in the ``account`` group beside Profile / Settings --
+    staff rows belong to the account block, and a group of their own would
+    draw a rule splitting three rows that read as one block.
     """
     user = request.user
     if not user.is_authenticated:
         return []
     path = request.path
     name = user.localname
-    return [
+    items = [
         _item("feed", "Feed", "index", path, icon=ICONS["feed"], group="feed"),
         _item(
             "films",
@@ -143,6 +156,30 @@ def sidebar_nav(request):
             icon=ICONS["settings"],
             group="account",
         ),
+    ]
+    if user.is_staff:
+        items.append(
+            _item(
+                "admin",
+                "Administration",
+                "admin:index",
+                path,
+                icon=ICONS["admin"],
+                group="account",
+            )
+        )
+    if may_moderate(user):
+        items.append(
+            _item(
+                "moderate",
+                "Moderate",
+                "moderation",
+                path,
+                icon=ICONS["shield"],
+                group="account",
+            )
+        )
+    items.append(
         NavItem(
             "logout",
             "Log out",
@@ -150,8 +187,9 @@ def sidebar_nav(request):
             kind="form",
             icon=ICONS["logout"],
             group="session",
-        ),
-    ]
+        )
+    )
+    return items
 
 
 def bottom_nav(request):
@@ -183,6 +221,13 @@ def more_nav(request):
     groups, not a destination. The unread count rides the Notifications row
     from the badge processor's own context value, so the sheet costs no
     second ledger query (the badge's one-query budget stands).
+
+    The two staff rows mirror the sidebar (D1): Administration above Moderate,
+    same order, same gates -- Administration for ``is_staff``, Moderate for
+    ``may_moderate``. The sheet's Moderate row used to read the moderator flag
+    alone; once M1 retired the settings-page row, that flag-only rule would
+    have left a staff-only account with no phone route to the queue at all.
+    D2 settled both surfaces on the queue's own predicate.
     """
     user = request.user
     if not user.is_authenticated:
@@ -205,7 +250,11 @@ def more_nav(request):
             icon=ICONS["settings"],
         ),
     ]
-    if user.is_moderator:
+    if user.is_staff:
+        items.append(
+            _item("admin", "Administration", "admin:index", path, icon=ICONS["admin"])
+        )
+    if may_moderate(user):
         items.append(
             _item("moderate", "Moderate", "moderation", path, icon=ICONS["shield"])
         )
@@ -240,18 +289,14 @@ def nav_items(request):
     All three answer ``[]`` signed out, so the anonymous render pays nothing
     it did not pay before.
 
-    ``can_moderate`` rides alongside because Profile / Settings lists Moderate
-    as a destination, and a destination listed is a destination that has to
-    answer the same question the page itself asks -- ``may_moderate``, which
-    admits a moderator, a staff account and a superuser alike. Gating that
-    row on the moderator flag alone left an admin with a working queue and no
-    link to it anywhere on the site. The header's and the More sheet's own
-    shortcuts stay flag-only on purpose; they are pinned in
-    ``test_moderator_gate.py`` and ``test_mobile_nav.py``.
+    The processor used to also answer ``can_moderate`` for the Profile /
+    Settings page's Moderate row, which had to ask the queue's own predicate
+    rather than the moderator flag alone. M1 moved that row into the menus,
+    where ``sidebar_nav`` and ``more_nav`` consult ``may_moderate`` directly,
+    so the context key had no reader left and retired with it.
     """
     return {
         "sidebar_items": sidebar_nav(request),
         "bottom_items": bottom_nav(request),
         "more_items": more_nav(request),
-        "can_moderate": may_moderate(request.user),
     }
