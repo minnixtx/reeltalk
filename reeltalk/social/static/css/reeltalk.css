@@ -2538,6 +2538,28 @@ form.inline button,
   font-weight: 600;
 }
 
+/* House focus ring, site-wide (V4b/N7 filed note 1, owner-approved
+   2026-11-03; widened to every link the same day when the owner found feed
+   rows and list titles still wearing the browser's default). Before this,
+   focus rings were the browser's decision surface by surface: measured fine
+   on the build we swept, invisible-by-choice on another. One global rule is
+   the deterministic answer - every link, button and disclosure summary on
+   the site paints the same ring, and a new surface is covered the day it is
+   written rather than waiting to be enumerated. The recipe is the lit
+   controls' (2px, offset 3px) in the deeper cream - the owner found --cream
+   too white against the dark; --cream-muted is the house's cream at 8.8:1
+   on the page, well over the 3:1 bar for a focus indicator. :focus-visible
+   only, so a mouse click paints nothing. Two surfaces keep their own extra
+   treatment on top of the ring: the feed row's identity links also
+   underline (the N7 pass), and form fields have their own border rule -
+   inputs are deliberately not in this list. */
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--cream-muted);
+  outline-offset: 3px;
+}
+
 /* --- Invite box (R82) -------------------------------------------------
    The pitch and the INVITE control on one's own profile, with the freshly
    minted single-use link under it once generated. Panel treatment matches
@@ -3348,12 +3370,8 @@ form.inline button,
     0 0 5px rgba(255, 45, 32, 0.3);
 }
 
-.film-actions button:focus-visible,
-.film-actions .btn:focus-visible,
-.btn.cinema-button:focus-visible {
-  outline: 2px solid var(--cream);
-  outline-offset: 3px;
-}
+/* The lit controls' focus ring is the site-wide `button:focus-visible` rule
+   above - it was listed here first, but the global rule made this redundant. */
 
 .film-actions svg,
 .cinema-button svg {

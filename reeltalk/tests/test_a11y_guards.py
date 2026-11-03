@@ -102,6 +102,32 @@ def test_the_focus_ring_colour_is_visible_on_the_page():
     assert ratio >= 3.0, f"--accent is {ratio:.2f}:1 on the page, needs 3:1"
 
 
+def test_the_site_wears_the_house_focus_ring():
+    """V4b/N7 filed note 1, closed 2026-11-03 on the owner's approval.
+
+    Focus rings used to be the browser's decision, surface by surface - fine
+    on the build we measured, invisible-by-choice on another. One global rule
+    now paints every link, button and disclosure summary with the house ring
+    (2px, offset 3px, in ``--cream-muted`` - the deeper cream the owner
+    picked over --cream, which read white on the dark), so a new surface is
+    covered the day it is written rather than waiting to be enumerated. If
+    this test fails, the keyboard path is back to the browser's default,
+    which is the whole thing this pin prevents. Form fields deliberately
+    ride their own border rule instead and are not in the list.
+    """
+    for selector in (
+        "a:focus-visible",
+        "button:focus-visible",
+        "summary:focus-visible",
+    ):
+        assert _decl(selector, "outline") == "2px solid var(--cream-muted)"
+        assert _decl(selector, "outline-offset") == "3px"
+    # The ring colour has to read on the page: SC 1.4.11 wants 3:1, and this
+    # pairs the rule above to the token it paints.
+    ratio = _ratio(_root_var("cream-muted"), _root_var("black"))
+    assert ratio >= 3.0, f"--cream-muted is {ratio:.2f}:1 on the page, needs 3:1"
+
+
 def test_the_settings_form_and_its_field_rule_cannot_drift_apart():
     """The bio textarea shipped browser-default: a white plate at its intrinsic
     20-column width, which overflowed a 375px and a 320px viewport. The class on
