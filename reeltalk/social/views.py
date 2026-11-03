@@ -449,11 +449,11 @@ def invite_create(request):
     and a GET that mints would let a link on a page (or a browser prefetch)
     spend the inviter's allowance by accident.
 
-    The new code is handed to the inviter's *own* profile through the session
-    rather than the URL, so the mint keeps the same redirect-then-render shape
-    the rest of the POST surfaces use without putting the code in a query
+    The new code is handed to the inviter's own settings page through the
+    session rather than the URL, so the mint keeps the same redirect-then-render
+    shape the rest of the POST surfaces use without putting the code in a query
     string (F10). ``_invite_context`` renders it once and consumes it, gated
-    again on the code belonging to the profile's owner.
+    again on the code belonging to the page's own user.
     """
     if not SiteSettings.get_instance().may_send_invites(request.user):
         messages.error(
@@ -461,10 +461,10 @@ def invite_create(request):
             "This instance only lets its admins send invites — ask one to "
             "send you a link.",
         )
-        return redirect("user-profile", localname=request.user.localname)
+        return redirect("profile-edit")
     invite = Invite.mint(request.user)
     request.session[INVITE_SESSION_KEY] = invite.code
-    return redirect("user-profile", localname=request.user.localname)
+    return redirect("profile-edit")
 
 
 def invite_accept(request, code):
@@ -782,15 +782,15 @@ def password_reset_confirm(request, code):
 
 
 def _invite_context(request, profile_user) -> dict:
-    """The invite block for a profile the visitor owns (R82).
+    """The invite block for the member's own settings page (R82).
 
     The freshly minted code is read from the requester's own session, where
     ``invite_create`` left it, and consumed here so a later visit does not keep
     re-showing a spent or expired link. ``invite_link`` is still built only for
-    a code the profile's owner minted: that scoping is not cosmetic, because
+    a code the page's own user minted: that scoping is not cosmetic, because
     without it the block could confirm whether an arbitrary code exists. The
     code is never read from the URL, so a forwarded or guessed ``?invite=``
-    renders nothing on any profile (F10).
+    renders nothing on any page (F10).
     """
     can = SiteSettings.get_instance().may_send_invites(request.user)
     out = {"can_invite": can}
@@ -820,6 +820,53 @@ def _resolve_profile_user(localname):
 # Same page size as the Films tab: one row budget per page, one scroll shape
 # for everything a profile lists.
 USER_REVIEWS_PAGE_SIZE = 50
+
+
+def _profile_head_context(request, profile, is_self) -> dict:
+    """The context the shared profile header and tab strip render from.
+
+    One builder for the three surfaces the Reviews / Films / Lists strip
+    spans (profile, films, lists), so the header cannot answer differently
+    per page - the same reason the pages share the banned/suspended answers.
+    Carries: the Lists-tab count, the follower tallies, and the visitor's
+    follow/block/report state.
+
+    The "Lists" tab is hidden when the member has made none (R138 decision
+    3): a tab that leads to nothing is worse than one that appears when
+    there is something behind it. The count is the whole decision, so it is
+    made here rather than in the template - and it counts the live lists
+    only, because FilmList.delete() is soft and a deleted list is still a
+    row in the table.
+
+    Follower counts (reviewer-discovery increment): audience size is part
+    of the follow decision the profile exists to serve. Counted as this
+    instance holds them - the profile-reviews D4 rule: show what you hold,
+    say nothing about the rest. Suspended and banned accounts are invisible
+    server-wide, so they are out of both tallies; that is a server fact, not
+    per-viewer state, which keeps one profile one page for every reader.
+    """
+    data = {"profile_user": profile, "is_self": is_self}
+    data["list_count"] = FilmList.objects.filter(user=profile, deleted=False).count()
+    visible = {"suspended_at__isnull": True, "banned_at__isnull": True}
+    data["follower_count"] = profile.followers.filter(**visible).count()
+    data["following_count"] = profile.follows.filter(**visible).count()
+    if request.user.is_authenticated and not is_self:
+        # The follow + block buttons' state (the template hides the controls
+        # on one's own profile and for anonymous visitors).
+        data["is_following"] = request.user.follows.filter(pk=profile.pk).exists()
+        data["is_blocked"] = request.user.blocks.filter(pk=profile.pk).exists()
+        # The report control (moderation increment 2) rides the same gate as
+        # those two buttons. ``report_state`` is shared with the post page so
+        # the two host pages cannot drift on who may report what, and it
+        # returns R107's dedup state so the profile says "already reported"
+        # rather than offering a button that would quietly do nothing.
+        can_report, already_reported = report_state(request.user, target_user=profile)
+        data["can_report"] = can_report
+        data["already_reported"] = already_reported
+    if not profile.local:
+        # The home instance the mirror came from (the actor URL's netloc).
+        data["home_instance"] = urlparse(profile.actor_url).netloc
+    return data
 
 
 def user_profile(request, localname):
@@ -888,42 +935,7 @@ def user_profile(request, localname):
         refresh_mirror_profile(user)
         user.refresh_from_db()
     is_self = request.user.is_authenticated and request.user.pk == user.pk
-    data = {"profile_user": user, "is_self": is_self}
-    # The "Lists" tab is hidden when the member has made none (R138
-    # decision 3): a tab that leads to nothing is worse than one that
-    # appears when there is something behind it. The count is the whole
-    # decision, so it is made here rather than in the template — and it
-    # counts the live lists only, because FilmList.delete() is soft and a
-    # deleted list is still a row in the table.
-    data["list_count"] = FilmList.objects.filter(user=user, deleted=False).count()
-    # Follower counts (reviewer-discovery increment): audience size is part of
-    # the follow decision the profile exists to serve. Counted as this instance
-    # holds them - the profile-reviews D4 rule: show what you hold, say nothing
-    # about the rest. Suspended and banned accounts are invisible server-wide,
-    # so they are out of both tallies; that is a server fact, not per-viewer
-    # state, which keeps one profile one page for every reader.
-    visible = {"suspended_at__isnull": True, "banned_at__isnull": True}
-    data["follower_count"] = user.followers.filter(**visible).count()
-    data["following_count"] = user.follows.filter(**visible).count()
-    if is_self:
-        # The invite box only lives on one's own profile (R82).
-        data.update(_invite_context(request, user))
-    if request.user.is_authenticated and not is_self:
-        # The follow + block buttons' state (the template hides the controls
-        # on one's own profile and for anonymous visitors).
-        data["is_following"] = request.user.follows.filter(pk=user.pk).exists()
-        data["is_blocked"] = request.user.blocks.filter(pk=user.pk).exists()
-        # The report control (moderation increment 2) rides the same gate as
-        # those two buttons. ``report_state`` is shared with the post page so
-        # the two host pages cannot drift on who may report what, and it
-        # returns R107's dedup state so the profile says "already reported"
-        # rather than offering a button that would quietly do nothing.
-        can_report, already_reported = report_state(request.user, target_user=user)
-        data["can_report"] = can_report
-        data["already_reported"] = already_reported
-    if not user.local:
-        # The home instance the mirror came from (the actor URL's netloc).
-        data["home_instance"] = urlparse(user.actor_url).netloc
+    data = _profile_head_context(request, user, is_self)
     # The profile's body is the member's reviews (profile-reviews D1): what
     # they wrote, newest first, so a visitor can read the writing before
     # deciding on the follow. The audience filter is the whole design - a
@@ -1207,7 +1219,11 @@ def profile_edit(request):
                 "default_visibility": user.default_visibility,
             }
         )
-    return render(request, "social/profile_edit.html", {"form": form})
+    return render(
+        request,
+        "social/profile_edit.html",
+        {"form": form, **_invite_context(request, user)},
+    )
 
 
 # The owner's 1,378-film watchlist crashed the browser rendered in one page
@@ -1264,14 +1280,17 @@ def user_films(request, localname):
     # Pagination links keep the active tab in the URL (the "all" tab has no
     # query param, matching the tab nav).
     page_query = "?" if tab == "all" else f"?tab={tab}&"
-    return render(
-        request,
-        "social/user_films.html",
+    # The shared profile chrome (header with counts and follow controls, plus
+    # the Reviews / Films / Lists strip) - one builder, so the films page can
+    # never answer header state differently from the profile itself.
+    is_self = request.user.is_authenticated and request.user.pk == profile.pk
+    data = _profile_head_context(request, profile, is_self)
+    data.update(
         {
-            "profile_user": profile,
             "tab": tab,
             "films": page_obj.object_list,
             "page_obj": page_obj,
             "page_query": page_query,
-        },
+        }
     )
+    return render(request, "social/user_films.html", data)

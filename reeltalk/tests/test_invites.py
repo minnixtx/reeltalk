@@ -3,8 +3,8 @@
 Three things get exercised here. The ``Invite`` model and the atomic
 redemption that is the whole reason a single-use link is safe rather than
 merely single-use-looking. The ``invite_scope`` setting that decides who may
-mint a link. And the two views: the POST that mints one on the inviter's
-own profile, and the public landing page the invitee opens.
+mint a link. And the two views: the POST that mints one for the inviter's
+own settings page, and the public landing page the invitee opens.
 
 The load-bearing property is that the liveness check and the marking happen
 inside one row lock. Checked-and-then-marked as two statements is true until
@@ -212,16 +212,16 @@ def test_minting_is_post_only(client, owner):
 
 
 @pytest.mark.django_db
-def test_an_admin_mints_a_link_onto_their_own_profile(client, owner):
+def test_an_admin_mints_a_link_onto_their_settings_page(client, owner):
     client.force_login(owner)
     resp = client.post("/invite/create/")
     invite = Invite.objects.get()
     assert invite.created_by == owner
     # F10: the code travels in the session, never the URL. The redirect is the
-    # bare profile path, so the minted code is in no query string to leak.
-    assert resp["Location"] == f"/user/{owner.localname}/"
+    # bare settings path, so the minted code is in no query string to leak.
+    assert resp["Location"] == "/preferences/profile/"
     assert invite.code not in resp["Location"]
-    body = client.get(resp["Location"]).content.decode()
+    body = client.get(resp["Location"], follow=True).content.decode()
     assert PITCH in body
     assert invite.code in body
 
@@ -231,7 +231,7 @@ def test_a_member_is_refused_under_the_admins_scope(client, member):
     client.force_login(member)
     resp = client.post("/invite/create/")
     assert Invite.objects.count() == 0
-    assert resp["Location"] == f"/user/{member.localname}/"
+    assert resp["Location"] == "/preferences/profile/"
     # Refused out loud — a silent no-op reads as a broken button.
     assert "only lets its admins send invites" in (
         client.get(resp["Location"]).content.decode()
@@ -360,33 +360,43 @@ def test_a_rejected_form_leaves_the_invite_live(client, owner):
     assert "invited you to join ReelTalk" in resp.content.decode()
 
 
-# --- the box on the profile --------------------------------------------------
+# --- the box on the settings page --------------------------------------------
 
 
 @pytest.mark.django_db
-def test_the_box_sits_on_your_own_profile_and_nobody_elses(client, owner, member):
+def test_the_box_sits_on_the_settings_page_and_on_no_profile(client, owner, member):
+    """The box moved off the profile (new-chrome pass): on the profile it
+    pushed the Reviews / Films / Lists strip down on one's own page only, so
+    the strip jumped position when you clicked between the tabs. Nothing on
+    any profile may reintroduce that jump."""
     client.force_login(owner)
-    assert PITCH in client.get("/user/owner/").content.decode()
+    assert PITCH in client.get("/preferences/profile/").content.decode()
+    assert PITCH not in client.get("/user/owner/").content.decode()
     assert PITCH not in client.get(f"/user/{member.localname}/").content.decode()
 
 
 @pytest.mark.django_db
 def test_the_box_is_hidden_for_a_member_without_permission(client, member):
     client.force_login(member)
-    assert PITCH not in client.get(f"/user/{member.localname}/").content.decode()
+    assert PITCH not in client.get("/preferences/profile/").content.decode()
 
 
 @pytest.mark.django_db
 def test_the_box_is_hidden_for_anonymous(client, owner):
+    # The settings page answers the login redirect for an anonymous visitor,
+    # and the profile - which used to carry the box for the owner - shows it
+    # to nobody.
+    resp = Client().get("/preferences/profile/")
+    assert resp.status_code == 302
     assert PITCH not in Client().get("/user/owner/").content.decode()
 
 
 @pytest.mark.django_db
 def test_a_minted_code_shows_only_in_the_minters_own_session(client, owner, member):
     # Scope opened so `can` is not what is doing the work here. The minted code
-    # reaches the profile through the minter's own session and nowhere else:
-    # handing the same code in through the URL renders nothing, so the profile
-    # is not an oracle that confirms whether a guessed code exists (F10).
+    # reaches the settings page through the minter's own session and nowhere
+    # else: handing the same code in through the URL renders nothing, so the
+    # page is not an oracle that confirms whether a guessed code exists (F10).
     site = SiteSettings.get_instance()
     site.invite_scope = SiteSettings.INVITE_ALL
     site.save()
@@ -396,21 +406,21 @@ def test_a_minted_code_shows_only_in_the_minters_own_session(client, owner, memb
     mint.post("/invite/create/")
     invite = Invite.objects.get()
 
-    # The minter sees it on their own profile: absolute, and built from the
-    # request's own scheme + host.
-    own = mint.get(f"/user/{owner.localname}/").content.decode()
+    # The minter sees it on their own settings page: absolute, and built from
+    # the request's own scheme + host.
+    own = mint.get("/preferences/profile/").content.decode()
     assert "invite-url" in own
     assert f'value="http://testserver/invite/{invite.code}/"' in own
 
     # A second visit does not re-show it: the session value is consumed once.
-    again = mint.get(f"/user/{owner.localname}/").content.decode()
+    again = mint.get("/preferences/profile/").content.decode()
     assert "invite-url" not in again
 
     # Another member's own session carries no code, and the same code handed in
-    # through the URL renders nothing on their profile.
+    # through the URL renders nothing on their settings page.
     other = Client()
     other.force_login(member)
-    body = other.get(f"/user/{member.localname}/?invite={invite.code}").content.decode()
+    body = other.get(f"/preferences/profile/?invite={invite.code}").content.decode()
     assert "invite-url" not in body
     assert invite.code not in body
 
@@ -418,11 +428,9 @@ def test_a_minted_code_shows_only_in_the_minters_own_session(client, owner, memb
 @pytest.mark.django_db
 def test_the_copy_script_loads_only_where_there_is_a_button(client, owner, member):
     client.force_login(owner)
-    assert "js/invite.js" in client.get("/user/owner/").content.decode()
+    assert "js/invite.js" in client.get("/preferences/profile/").content.decode()
     client.force_login(member)
-    assert (
-        "js/invite.js" not in client.get(f"/user/{member.localname}/").content.decode()
-    )
+    assert "js/invite.js" not in client.get("/preferences/profile/").content.decode()
 
 
 # --- the admin ledger --------------------------------------------------------

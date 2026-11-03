@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Profile / Settings — ReelTalk{% endblock %}
 
@@ -24,4 +25,38 @@
   <a href="{% url 'moderation' %}">Moderate<span><small>The reports queue</small></span></a>
   {% endif %}
 </nav>
+
+{% if can_invite %}
+{# R82: the invite box is for a user the instance lets mint links #}
+{# (SiteSettings.invite_scope), and it lives here at the bottom of the #}
+{# member's own settings page. It used to sit on the profile, where it #}
+{# pushed the Reviews / Films / Lists strip down on one's own page only - #}
+{# the strip jumped position as you clicked between the tabs. This page is #}
+{# the settings hub already, and it is a member-only page, which the box #}
+{# was anyway: an anonymous visitor never saw it. #}
+<section class="invite-box" aria-labelledby="invite-pitch">
+  <p class="invite-pitch" id="invite-pitch">Invite a fellow movie freak to ReelTalk</p>
+  <form method="post" action="{% url 'invite-create' %}" class="invite-form">
+    {% csrf_token %}
+    <button type="submit" class="btn cinema-button cinema-button--primary">Invite</button>
+  </form>
+  {% if invite_link %}
+  <div class="invite-result">
+    <label class="visually-hidden" for="invite-url">Your invite link</label>
+    <input type="text" id="invite-url" class="invite-url" readonly value="{{ invite_link }}">
+    <button type="button" class="btn invite-copy cinema-button" data-copy-target="invite-url">Copy link</button>
+    <p class="invite-note">
+      {% if invite.used_at %}
+        Used — {{ invite.used_by.get_full_name }} joined on {{ invite.used_at|date:"F j, Y" }}.
+      {% elif invite.is_live %}
+        Opens exactly one account, until {{ invite.expires_at|date:"F j, Y" }}.
+      {% else %}
+        This link expired on {{ invite.expires_at|date:"F j, Y" }} — send a new one.
+      {% endif %}
+    </p>
+  </div>
+  {% endif %}
+</section>
+<script src="{% static 'js/invite.js' %}" defer></script>
+{% endif %}
 {% endblock %}

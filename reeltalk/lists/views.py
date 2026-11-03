@@ -62,7 +62,7 @@ from reeltalk.lists.services import (
     soft_delete_list,
     unsave_list,
 )
-from reeltalk.social.views import _resolve_profile_user
+from reeltalk.social.views import _profile_head_context, _resolve_profile_user
 
 
 def list_detail(request, list_id):
@@ -215,8 +215,7 @@ def user_lists(request, localname):
         request,
         "lists/user_lists.html",
         {
-            "profile_user": profile,
-            "is_self": is_self,
+            **_profile_head_context(request, profile, is_self),
             "tab": tab,
             "made": made,
             "saves": saves,

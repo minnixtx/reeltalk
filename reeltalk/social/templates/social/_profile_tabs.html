@@ -1,0 +1,26 @@
+{% comment %}
+The tab strip shared by the three surfaces it spans (profile, films, lists):
+it sits above the body, like every tabbed surface the site has - the strip
+says where you are, the body below it is what you are looking at. The caller
+names the active tab: ``with profile_tab="reviews"`` (or "films", "lists").
+Reviews is the profile's own body (D1), so its tab points at the profile
+URL itself - there is no third URL to page. The strip is always shown, never
+hidden for being empty (D5); the empty state in the body is what an empty
+list looks like.
+
+The Lists tab is hidden when the member has made no lists - R138 decision 3
+- rather than shown with an empty state, because a tab that leads nowhere is
+worse than one that appears when there is something behind it. ``list_count``
+is the whole decision and the view makes it via ``_profile_head_context``;
+the template never reaches for the database. The one exception is the lists
+page itself: a strip that hides the tab you are standing on would say you
+are nowhere, and on your own lists page the tab plainly leads somewhere -
+it just brought you there.
+{% endcomment %}
+<nav class="tabs">
+  <a href="{% url 'user-profile' profile_user.localname %}"{% if profile_tab == "reviews" %} class="active"{% endif %}>Reviews</a>
+  <a href="{% url 'user-films' profile_user.localname %}"{% if profile_tab == "films" %} class="active"{% endif %}>Films</a>
+  {% if list_count or profile_tab == "lists" %}
+  <a href="{% url 'user-lists' profile_user.localname %}"{% if profile_tab == "lists" %} class="active"{% endif %}>Lists</a>
+  {% endif %}
+</nav>

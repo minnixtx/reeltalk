@@ -4,12 +4,15 @@
 {% block title %}{{ profile_user.localname }}'s films — ReelTalk{% endblock %}
 
 {% block content %}
-<header class="profile-head">
-  {% if profile_user.avatar %}
-    <img class="avatar" src="{{ profile_user.avatar.url }}" alt="">
-  {% endif %}
-  <h1>{{ profile_user.get_full_name }}</h1>
-</header>
+{% comment %}
+New-chrome pass: the shared profile header and the Reviews / Films / Lists
+strip, so this page is visibly one of the member's three surfaces instead
+of a different-looking page that happens to name the member. The shelf
+tabs below (All films / Watchlist / Watched) are this tab's own body
+controls, not navigation between people, so they stay a separate row.
+{% endcomment %}
+{% include "social/_profile_head.html" %}
+{% include "social/_profile_tabs.html" with profile_tab="films" %}
 
 <nav class="tabs">
   <a href="{% url 'user-films' profile_user.localname %}"{% if tab == "all" %} class="active"{% endif %}>All films</a>

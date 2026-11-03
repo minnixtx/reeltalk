@@ -114,15 +114,21 @@ def _rows(body: str) -> list[str]:
 
 
 def _tabs(body: str) -> str:
-    """The page's own ``.tabs`` nav, and nothing else.
+    """The self-only My Lists / Saved Lists row, and nothing else.
 
-    Required rather than convenient: the header nav carries a "My Lists"
-    item on every authenticated page, so an unscoped ``">My Lists</a>"
-    not in body`` check would fail on the header while saying nothing about
-    the tab row it means to test.
+    Required rather than convenient twice over. The header nav carries a
+    "My Lists" item on every authenticated page, so an unscoped
+    ``">My Lists</a>" not in body`` check would fail on the header while
+    saying nothing about the tab row it means to test. And since the
+    new-chrome pass the page carries a second ``.tabs`` nav above this one
+    - the shared Reviews / Films / Lists strip - so "the first .tabs nav"
+    no longer names the row either; the Saved Lists link is what only the
+    self row has, and its absence is exactly what the negative tests pin.
     """
-    match = re.search(r'<nav class="tabs">.*?</nav>', body, re.S)
-    return match.group(0) if match else ""
+    for match in re.finditer(r'<nav class="tabs">.*?</nav>', body, re.S):
+        if "Saved Lists" in match.group(0):
+            return match.group(0)
+    return ""
 
 
 # --- the URL shape (R138 decision 1) ---------------------------------------
