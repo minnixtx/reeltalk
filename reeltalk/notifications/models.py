@@ -34,6 +34,14 @@ class Notification(models.Model):
     closed with "if mentions arrive later, the kind joins with the parser, not
     before it". ``reeltalk.mentions`` (increments 1–3) is that parser, so the
     kind lands with its producers in increment 4 rather than ahead of them.
+
+    ``REPORT`` is the fifth, and it also arrives with its producer: the staff
+    write path in :mod:`reeltalk.moderation.notify` (owner ruling D3, which
+    amends R99). It is the one kind that does **not** come through ``notify()``
+    below — that function's block guard is right for a person's own inbox and
+    would be a censorship primitive on the moderation queue, so the staff path
+    computes its own permission-derived recipients and writes these rows
+    directly. The guard's whole argument survives the amendment intact.
     """
 
     class Kind(models.TextChoices):
@@ -41,6 +49,7 @@ class Notification(models.Model):
         LIKE = "like", "Like"
         REPLY = "reply", "Reply"
         MENTION = "mention", "Mention"
+        REPORT = "report", "Report"
 
     # CASCADE: a notification is addressed to a person and means nothing
     # without them. This is the one edge that decides how the table is read, so
@@ -68,6 +77,23 @@ class Notification(models.Model):
     # renders such a row without its deep link.
     status = models.ForeignKey(
         "core.Status",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notifications",
+    )
+    # The pile a report row announces (D3/D5). Set only by the staff write
+    # path in ``moderation/notify.py``; null for every other kind. The row
+    # itself could not render the D5 line without this pointer: reporter,
+    # target and category are the queue's facts, and ``kind`` + ``actor`` +
+    # ``status=None`` carry no join key to the report — matching on
+    # reporter-plus-timestamp would be a heuristic two clocks can break.
+    # SET_NULL because the alert happened whatever later became of the report
+    # row (the reporter's deletion CASCADEs the report away), and the page
+    # renders a pointer-less report row with a fallback line like every other
+    # gone target.
+    report = models.ForeignKey(
+        "moderation.Report",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

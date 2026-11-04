@@ -685,20 +685,29 @@ def test_the_inbound_reporter_is_not_emailed_about_their_own_report(accused, db)
     assert staff_email_recipients(report) == []
 
 
-# --- R99 still holds ------------------------------------------------------
+# --- R99 as amended (D3) still holds --------------------------------------
 
 
-def test_the_notification_ledger_is_untouched(member, mod, review):
-    """R99. No ``Kind.REPORT``, no ledger row, no unread badge.
+def test_the_notification_ledger_carries_the_staff_rows_and_nothing_else(
+    member, mod, review
+):
+    """R99 as amended (D3). The ledger carries exactly the staff rows the
+    filing is owed — and the mail path adds none of its own.
 
+    The old pin counted the table at zero. The amended guarantee is that the
+    two surfaces stay separate: filing writes one report row per staff
+    account, and the whole email send afterwards writes nothing more.
     Counted across a full file-and-notify cycle rather than asserted from
     the absence of an import.
     """
-    before = Notification.objects.count()
     with TestCase.captureOnCommitCallbacks(execute=True):
         report, _ = file_against_status(member, review)
+    assert Notification.objects.count() == 1  # the one the filing wrote
     send_report_email(report.pk, mod.pk)
-    assert Notification.objects.count() == before
+    assert Notification.objects.count() == 1
+    row = Notification.objects.get()
+    assert row.kind == "report"
+    assert row.recipient_id == mod.pk
 
 
 def test_a_reporter_who_blocked_every_moderator_still_triggers_the_email(
@@ -723,6 +732,11 @@ def test_a_reporter_who_blocked_every_moderator_still_triggers_the_email(
     send_report_email(report.pk, mod.pk)
     send_report_email(report.pk, mod2.pk)
     assert sorted(m.to[0] for m in mail.outbox) == sorted([mod.email, mod2.email])
+    # The ledger half of D3's amendment: the same block that must not touch
+    # the mail must not touch the in-app alert either. Both moderators get
+    # their row despite having been blocked by the reporter.
+    rows = Notification.objects.filter(kind="report")
+    assert {n.recipient_id for n in rows} == {mod.pk, mod2.pk}
 
 
 # --- R116: the toggle lives in UserAdmin ---------------------------------

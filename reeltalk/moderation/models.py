@@ -6,7 +6,11 @@ notification ledger (R99). ``notify()`` refuses to deliver anything to a
 recipient who has blocked the actor — a guard that is exactly right for a
 person's own inbox and exactly wrong here, because it would let a member
 mute the entire moderation queue by blocking every moderator. Nothing in
-this module calls ``notify()``, and there is no ``Notification.Kind.REPORT``.
+this module calls ``notify()``. R99 was amended on 2026-11-03 (owner ruling
+D3) to admit ``Notification.Kind.REPORT``, but the amendment kept the guard
+out rather than routing around it: report ledger rows are written by the
+dedicated staff path in :mod:`reeltalk.moderation.notify`, which computes
+its recipients from the moderator permission and never touches ``notify()``.
 If a later session "unifies" the two for convenience, that guard becomes a
 censorship primitive and nothing will announce it.
 

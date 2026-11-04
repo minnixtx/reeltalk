@@ -668,8 +668,13 @@ def test_no_report_is_required_to_suspend_an_account(alice, siteadmin):
 
 def test_a_suspend_writes_no_notification(alice, bob, review, mod):
     """R99 holds through the heavier action: a suspend is not an event a
-    person is owed."""
-    before = Notification.objects.count()
+    person is owed.
+
+    The baseline is taken *after* the filing: since D3 the filing itself
+    writes the staff ledger rows, and this pin is about the suspend acting,
+    not the report filing.
+    """
     report = report_a_post(bob, review)
+    before = Notification.objects.count()
     logged_in(mod).post(suspend_url(report), {"note": "spam"})
     assert Notification.objects.count() == before

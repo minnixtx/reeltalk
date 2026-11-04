@@ -72,6 +72,27 @@
             {# than confidently wrong. A follow's deep link is the actor's #}
             {# profile, already drawn above. #}
             followed you
+          {% elif note.kind == "report" %}
+            {% comment %}
+            D5: the report line is a pointer, not a mirror. It names the
+            reporter (drawn above as the actor), the target, the category,
+            and links to the queue — and carries neither the reported
+            content nor the reporter's comment, the same principle as the
+            staff email. The target label follows the queue card and the
+            email: the author's handle for both the post variant and the
+            profile variant. A remote reporter needs no branch of its own:
+            remote mirrors carry their home domain in the localname, so the
+            actor link above already renders them the way every other page
+            surface renders them.
+            {% endcomment %}
+            {% if note.report %}
+              reported <a href="{% url 'user-profile' note.report.target_user.localname %}">@{{ note.report.target_user.localname }}</a> · {{ note.report.get_category_display }} · <a href="{% url 'moderation' %}">open the queue</a>
+            {% else %}
+              {# SET_NULL report: the report row is gone (its reporter was #}
+              {# deleted), the alert still happened. The queue link stays — #}
+              {# it is the row's whole point. #}
+              filed a report that is no longer here · <a href="{% url 'moderation' %}">open the queue</a>
+            {% endif %}
           {% endif %}
           <span class="muted">{{ note.created|date:"Y-m-d" }}</span>
         </div>

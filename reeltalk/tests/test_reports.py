@@ -24,6 +24,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from reeltalk.core.models import Film, Status
+from reeltalk.moderation.decorators import may_moderate
 from reeltalk.moderation.models import (
     Report,
     dismiss_report,
@@ -48,6 +49,17 @@ def bob(db):
 @pytest.fixture
 def carol(db):
     return User.objects.create_user(localname="carol", password="s3cretpass")
+
+
+@pytest.fixture
+def warden(db):
+    """The one staff account, so "addressed to staff only" has a witness.
+
+    Flag-only (R158): passes ``may_moderate`` on the moderator flag alone.
+    """
+    return User.objects.create_user(
+        localname="warden", password="s3cretpass", is_moderator=True
+    )
 
 
 @pytest.fixture
@@ -365,42 +377,88 @@ def test_the_report_row_is_the_whole_record(bob, review, carol):
     assert Report.objects.count() == 1
 
 
-# --- R99: a report is NOT a notification ---------------------------------
+# --- R99 as amended (D3): reports reach the ledger, never notify() --------
 
 
-def test_filing_a_report_writes_no_notification(bob, alice, review):
-    """R99's pin: reports never touch the notification ledger.
+def test_filing_a_report_addresses_ledger_rows_to_staff_only(
+    bob, alice, review, warden
+):
+    """R99's whole-table pin, amended by D3 rather than deleted.
 
-    The ledger's ``notify()`` refuses delivery to a recipient who blocked the
-    actor. Route reports through it and a member could mute the entire
-    moderation queue by blocking every moderator — the guard that protects
-    a personal inbox becoming a way to hide abuse. Asserted by counting the
-    whole table rather than filtering, so a stray write of any kind fails
-    here.
+    The old pin counted the table at zero. Reports now enter the ledger as
+    ``Kind.REPORT`` rows — but only through the dedicated staff path, so the
+    amended guarantee is the one that was ever load-bearing: every row a
+    filing writes is a report row addressed to an account that passes
+    ``may_moderate``, and nothing else about the ledger changes. Counted
+    across the whole table rather than filtered, so a stray write of any
+    other kind still fails here.
     """
     file_report(reporter=bob, target_status=review, category="spam")
-    file_report(reporter=bob, target_user=alice, category="spam")
-    assert Notification.objects.count() == 0
+    file_report(reporter=bob, target_user=alice, category="other")
+    rows = list(Notification.objects.all())
+    assert len(rows) == 2, "one row per unresolved target pile, not per half"
+    assert all(n.kind == Notification.Kind.REPORT for n in rows)
+    assert all(may_moderate(n.recipient) for n in rows)
+    # The accused and the reporter are not staff; neither is owed the alert.
+    assert {n.recipient_id for n in rows} == {warden.pk}
 
 
-def test_there_is_no_report_kind_on_the_notification_enum():
-    assert "report" not in Notification.Kind.values
-    assert set(Notification.Kind.values) == {"follow", "like", "reply", "mention"}
+def test_filing_a_report_never_reaches_notify(monkeypatch, bob, review):
+    """The amended R99's other half (D3): the staff path never borrows the
+    one door.
+
+    ``notify()``'s block guard is what makes routing reports through it a
+    censorship primitive — a member blocking every moderator would mute the
+    whole pile. The tripwire is the direct pin; the block-survival tests are
+    the behavioural one. Patched at both names a call site could bind: the
+    door in its own module, and the name the writer module would import.
+    """
+
+    def tripwire(*args, **kwargs):
+        raise AssertionError("the staff report path must never call notify()")
+
+    monkeypatch.setattr("reeltalk.notifications.models.notify", tripwire)
+    monkeypatch.setattr("reeltalk.moderation.notify.notify", tripwire, raising=False)
+    file_report(reporter=bob, target_status=review, category="spam")
 
 
-def test_a_report_survives_the_reporter_blocking_the_moderator(bob, carol, review):
+def test_the_report_kind_is_on_the_notification_enum():
+    """The enum pin, amended by D3: ``report`` joined with its producer.
+
+    Still pinned as the exact set — a sixth value with no producer is what
+    the original pin existed to refuse, and the amendment does not loosen
+    that.
+    """
+    assert set(Notification.Kind.values) == {
+        "follow",
+        "like",
+        "reply",
+        "mention",
+        "report",
+    }
+
+
+def test_a_report_survives_the_reporter_blocking_the_moderator(
+    bob, carol, review, warden
+):
     """The block guard must not reach the queue.
 
     Bob reports a post, then blocks the moderator. His report must still
     exist and still be unresolved — otherwise a reporter could withdraw a
     report by blocking staff, and the queue would be silently filterable by
-    the person who filed it.
+    the person who filed it. The ledger half is D3's amendment: the block
+    must not reach the staff alert either — not the row already written, and
+    not a later filing made behind the block.
     """
     report, _ = file_report(reporter=bob, target_status=review, category="spam")
     bob.blocks.add(carol)
+    bob.blocks.add(warden)
     report.refresh_from_db()
     assert report.resolved_at is None
     assert Report.unresolved().filter(pk=report.pk).exists()
+    assert Notification.objects.filter(recipient=warden, kind="report").count() == 1
+    file_report(reporter=bob, target_user=carol, category="spam")
+    assert Notification.objects.filter(recipient=warden, kind="report").count() == 2
 
 
 # --- FK behaviour --------------------------------------------------------

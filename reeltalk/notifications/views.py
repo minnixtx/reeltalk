@@ -45,7 +45,7 @@ def notifications(request):
     """
     paginator = Paginator(
         Notification.objects.filter(recipient=request.user)
-        .select_related("actor", "status")
+        .select_related("actor", "status", "report__target_user")
         .order_by("-created"),
         NOTIFICATIONS_PAGE_SIZE,
     )

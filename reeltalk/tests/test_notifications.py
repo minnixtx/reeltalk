@@ -90,11 +90,16 @@ def test_the_kind_enum_holds_only_events_that_have_a_producer():
     # "mention" joined in mentions increment 4 for exactly that reason — the
     # parser (increments 1–2), the renderer and the outbound wire (3) all
     # landed first, so this set still names only reachable events.
+    # "report" joined the same way under R99's amendment (owner ruling D3):
+    # the staff write path in moderation/notify.py is its producer and landed
+    # in the same change, written directly rather than through notify() so
+    # the block guard can never mute the queue.
     assert {kind.value for kind in Notification.Kind} == {
         "follow",
         "like",
         "reply",
         "mention",
+        "report",
     }
 
 

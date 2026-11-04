@@ -494,7 +494,9 @@ def test_the_whole_loop_member_reports_moderator_sees_and_dismisses(bob, review,
     assert "sessionid" in reporter.cookies
     reporter.post(reverse("report-status", args=[review.id]), report_payload())
     assert Report.objects.count() == 1
-    assert Notification.objects.count() == 0, "R99: a report wrote a notification"
+    # R99 as amended (D3): the filing may write ledger rows, but the only
+    # account it may address them to is the staff one that reads this queue.
+    assert [n.recipient_id for n in Notification.objects.all()] == [mod.pk]
 
     moderator = logged_in(mod)
     assert "sessionid" in moderator.cookies

@@ -283,12 +283,22 @@ def test_the_pipeline_reports_flag_as_handled(member):
 
 
 @pytest.mark.django_db
-def test_an_inbound_flag_writes_no_notification(member):
-    """R99 holds on the inbound path too."""
+def test_an_inbound_flag_writes_staff_ledger_rows_only(member):
+    """R99 as amended (D3): the inbound path reaches the ledger too.
+
+    The peer's report is filed through ``file_report``, so the same
+    dedicated staff path runs as for a local filing — and what it writes is
+    exactly the staff rows: one report row per local account passing
+    ``may_moderate``, actor the verified sender, and nothing addressed to
+    anybody else.
+    """
+    warden = create_member(localname="warden", is_moderator=True)
     sender = peer_sender()
-    before = Notification.objects.count()
     handle_flag(flag_activity(["https://testserver/user/member/"]), sender, request())
-    assert Notification.objects.count() == before
+    rows = list(Notification.objects.all())
+    assert [n.recipient_id for n in rows] == [warden.pk]
+    assert rows[0].kind == "report"
+    assert rows[0].actor_id == sender.pk
 
 
 @pytest.mark.django_db

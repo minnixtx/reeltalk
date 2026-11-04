@@ -1,16 +1,18 @@
-"""Telling staff that a report exists (2E).
+"""Telling staff that a report exists (2E; ledger half added by M2, D3-D5).
 
 Before this module a report reached staff only if somebody already thought to
-open ``/moderate/``. This is the alert that finds them instead.
+open ``/moderate/``. This is the alert that finds them instead, on two
+surfaces: the staff email (2E) and the in-app notification ledger (M2).
 
 **Nothing here goes through** :func:`reeltalk.notifications.models.notify`,
-and there is still no ``Notification.Kind.REPORT``. R99 forbids that, and it
-forbids it for a reason that does not apply here: ``notify()``'s third guard
-refuses to deliver anything to a recipient who has blocked the actor, which
-is right for a person's own inbox and would be a censorship primitive on
-the moderation queue — a member blocking every moderator would mute the
-whole pile. This module computes its own recipient set from the moderator
-permission and sends to *addresses*, so a block changes nothing about it.
+and that survived the R99 amendment (owner ruling D3) rather than being
+worked around it: ``notify()``'s block guard refuses to deliver anything to
+a recipient who has blocked the actor, which is right for a person's own
+inbox and would be a censorship primitive on the moderation queue — a
+member blocking every moderator would mute the whole pile. Both surfaces
+here therefore compute their own recipient set from the moderator
+permission — the mail path sends to *addresses*, the ledger path writes
+``Notification`` rows directly — so a block changes nothing about either.
 **The trap that motivated R99 is absent here by construction, not by
 checking for it.**
 
@@ -33,6 +35,7 @@ from django.db import transaction
 from django.template.loader import render_to_string
 
 from reeltalk.activitypub.identity import absolute_uri
+from reeltalk.notifications.models import Notification
 from reeltalk.social.models import SiteSettings, User
 
 from .decorators import may_moderate
@@ -74,6 +77,53 @@ def staff_email_recipients(report) -> list:
     return [
         user for user in candidates if user.pk != reporter_id and may_moderate(user)
     ]
+
+
+def staff_ledger_recipients(report) -> list:
+    """The accounts to write a ledger row for about ``report`` (D3).
+
+    The same permission-derived rule as :func:`staff_email_recipients`,
+    narrowed by nothing except locality and the reporter exclusion. The
+    address and ``report_email`` halves are **mail-only** and deliberately
+    absent here: a moderator who cannot be emailed must still see the queue
+    bell light, or the ledger would re-introduce exactly the silent gap the
+    opt-out was checked for on the mail side. The candidate walk follows the
+    mail path's shape for the same stated reason — ``may_moderate`` stays
+    the single authority on the role half.
+    """
+    reporter_id = report.reporter_id
+    candidates = User.objects.filter(local=True)
+    return [
+        user for user in candidates if user.pk != reporter_id and may_moderate(user)
+    ]
+
+
+def write_report_ledger_rows(report) -> int:
+    """One ``Kind.REPORT`` row per staff recipient — the in-app half (D3).
+
+    Written directly, never through ``notify()``: every guard that function
+    refuses on is either mail-parity (self, remote) or, in the block case,
+    the censorship primitive this module exists to keep absent. The recipient
+    set is permission-derived, so a member blocking every moderator changes
+    nothing — the rows land anyway, which is the property R99's amendment
+    (D3) keeps rather than grants.
+
+    Synchronous and in the filing transaction: this is a local write, and a
+    report that rolled back must not leave alerts behind — the same property
+    the mail path gets from ``transaction.on_commit``, gotten here by simply
+    being the write instead of the send.
+    """
+    rows = [
+        Notification(
+            recipient=user,
+            actor=report.reporter,
+            kind=Notification.Kind.REPORT,
+            report=report,
+        )
+        for user in staff_ledger_recipients(report)
+    ]
+    Notification.objects.bulk_create(rows)
+    return len(rows)
 
 
 def console_backend_active() -> bool:
@@ -169,16 +219,19 @@ def _site_name() -> str:
 
 
 def notify_staff_of_report(report) -> dict:
-    """Work out who to tell about ``report`` and queue the telling.
+    """Work out who to tell about ``report``, tell them in-app, and queue
+    the mail.
 
     Returns a small dict describing the decision — ``{"enqueued": n,
-    "reason": ...}`` — so a caller and a test can see *why* nothing
-    happened rather than inferring it from an empty outbox.
+    "ledger": n, "reason": ...}`` — so a caller and a test can see *why*
+    nothing happened rather than inferring it from an empty outbox.
 
-    **The dedup is checked here, before anything is enqueued** (D-c), not
+    **The dedup is checked here, before either surface is touched** (D-c,
+    and D4's "one alert per unresolved target pile" for both surfaces), not
     inside the task. A burst of reports on one target would otherwise put N
     tasks on the cluster before any of them ran and saw the siblings;
-    checking at the door means the burst costs one alert. This mirrors
+    checking at the door means the burst costs one alert of each kind. This
+    mirrors
     Mastodon's ``return if @report.unresolved_siblings?`` gating the whole
     block, and uses this codebase's existing primitive —
     :meth:`Report.unresolved_for_target` — over the same ``target_key`` the
@@ -206,22 +259,35 @@ def notify_staff_of_report(report) -> dict:
             report.pk,
             report.target_key,
         )
-        return {"enqueued": 0, "reason": "target-already-has-an-open-report"}
+        return {
+            "enqueued": 0,
+            "ledger": 0,
+            "reason": "target-already-has-an-open-report",
+        }
+
+    # The ledger half (D3/D4): written under this same gate, so N reports on
+    # one target produce one alert of each kind — one mail per eligible
+    # address, one row per staff account, never one per report row.
+    ledger = write_report_ledger_rows(report)
 
     recipients = staff_email_recipients(report)
     if not recipients:
-        # Loud, not silent: a report exists that nobody is going to hear
-        # about. This is the case an operator most needs to see, and it is
-        # reachable by two ordinary causes — every moderator has the opt
-        # off, or none of them has an email address on file.
+        # Loud, not silent: a report exists that no email is going to carry.
+        # This is the case an operator most needs to see, and it is reachable
+        # by two ordinary causes — every moderator has the opt off, or none
+        # of them has an email address on file. The in-app ledger is
+        # unaffected, which is exactly why the count rides the message: the
+        # warning names the surface that went quiet, not the whole feature.
         logger.warning(
-            "NO STAFF NOTIFICATION FOR REPORT %s: no eligible recipient. "
-            "Either every moderator has report_email turned off or none has "
-            "a non-empty email address. The report is filed and nobody has "
-            "been told. Check the Roles fieldset in the user admin.",
+            "NO STAFF NOTIFICATION FOR REPORT %s: no eligible email "
+            "recipient. Either every moderator has report_email turned off "
+            "or none has a non-empty email address. The report is filed and "
+            "%d in-app ledger row(s) were written, but no email went to "
+            "anybody. Check the Roles fieldset in the user admin.",
             report.pk,
+            ledger,
         )
-        return {"enqueued": 0, "reason": "no-eligible-recipients"}
+        return {"enqueued": 0, "ledger": ledger, "reason": "no-eligible-recipients"}
 
     _warn_if_console_backend(len(recipients))
 
@@ -233,7 +299,7 @@ def notify_staff_of_report(report) -> dict:
         report.pk,
         len(recipient_ids),
     )
-    return {"enqueued": len(recipient_ids), "reason": ""}
+    return {"enqueued": len(recipient_ids), "ledger": ledger, "reason": ""}
 
 
 def _enqueue_report_emails(report_pk: int, recipient_ids: list) -> None:
