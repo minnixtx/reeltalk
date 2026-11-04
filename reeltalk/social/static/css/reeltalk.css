@@ -276,17 +276,18 @@ a {
    phone part starts hidden here (the bell parts, the bar, the page field),
    and every change to shared chrome lives under the 1024px line where the
    design retires the nav row. The corner rules name the corner's own parts
-   and .header-user > a, never the unread badge's own class or the
-   moderator's corner link: those two carry standing "no CSS was written
-   for it" guards (R96, R101) and stay green. */
+   and .header-user > a, never the moderator's retired corner link, which
+   carries a standing "no CSS was written for it" guard (R101) and stays
+   green. The unread badge gained its own rule below by owner ruling
+   (2026-11-04), replacing R96's "no CSS" guard. */
 
-/* The unread bell is the corner's treatment at every width now (N4): the
-   approved desktop corner is a bell with a count bubble, not the "N unread"
-   sentence the retired row's corner carried. The label stays in the DOM,
-   clipped rather than display:none, so the link keeps its accessible name.
-   Named on the corner's own parts and .header-user > a, never the badge's or
-   the moderator's own classes: those two carry standing "no CSS was written
-   for it" guards (R96, R101) and stay green. */
+/* The unread bell is the corner's phone treatment (owner ruling 2026-11-04,
+   replacing N4's all-width corner bell): from 1024px up the desktop menu
+   carries the count on its own Notifications row, so the corner bell hides
+   and the handle keeps the corner. Below the line the sidebar is gone and
+   the bell returns -- restored inside the mobile block. The label stays in
+   the DOM, clipped rather than display:none, so the link keeps its
+   accessible name. */
 .header-user > a {
   /* position:relative is what the count bubble sits on. */
   position: relative;
@@ -295,6 +296,12 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Two classes deep on purpose: .header-user > a above is (0,1,1) and a bare
+   .notifications-link would lose the display fight to it. */
+.header-user .notifications-link {
+  display: none;
 }
 
 .corner-icon {
@@ -506,6 +513,13 @@ a {
     grid-column: 2;
     min-width: 0;
     gap: 0.55rem;
+  }
+
+  /* The corner bell is the phone's unread surface (owner ruling 2026-11-04):
+     the base sheet hides it from 1024px up, where the sidebar carries the
+     count instead. Here the sidebar is gone, so the bell comes back. */
+  .header-user .notifications-link {
+    display: inline-flex;
   }
 
   .header-user .user-handle {
@@ -771,6 +785,27 @@ a {
     stroke-width: 1.7;
     stroke-linecap: round;
     stroke-linejoin: round;
+  }
+
+  /* The unread count rides the Notifications bell (owner ruling
+     2026-11-04): the wrapper is what the bubble sits on, and the bubble
+     repeats the phone corner's treatment -- red pill, white numeral --
+     so one visual language names unread everywhere. */
+  .site-nav .nav-icon {
+    position: relative;
+    display: inline-flex;
+    flex: none;
+  }
+
+  .site-nav .nav-count {
+    position: absolute;
+    top: -7px;
+    right: -12px;
+    font: 700 0.62rem/1 var(--ui);
+    background: var(--red);
+    color: #fff;
+    border-radius: 0.6rem;
+    padding: 0.16rem 0.34rem;
   }
 
   .site-nav a:hover,

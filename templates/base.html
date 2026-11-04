@@ -31,10 +31,13 @@
         {# navigates, so it wears the header link's own look; the mark-all- #}
         {# read control it leads to really acts, so that one is a <button>. #}
         {# Ahead of the handle so the handle keeps the right grid edge (R80). #}
-        {# N3: the bell and count are the phone treatment, the "N unread" #}
-        {# label the desktop one; the stylesheet picks which half shows. #}
-        {# The label stays in the DOM (clipped, not display:none) so the #}
-        {# link keeps its accessible name on phones. #}
+        {# Owner ruling 2026-11-04: this corner bell is the phone surface #}
+        {# only — the stylesheet hides it from 1024px up, where the sidebar #}
+        {# carries the count on its own Notifications row. The markup still #}
+        {# renders at every width (the server does not know the viewport); #}
+        {# the hide is CSS, pinned in test_notifications_badge.py. The #}
+        {# "N unread" label stays in the DOM (clipped, not display:none) so #}
+        {# the link keeps its accessible name. #}
         <a class="notifications-link" href="{% url 'notifications' %}">
           <svg class="corner-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg>
           <span class="corner-count" aria-hidden="true">{{ unread_notifications }}</span>

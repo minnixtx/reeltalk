@@ -20,7 +20,18 @@
   </form>
   {% else %}
   <a href="{{ item.url }}"{% if item.current %} class="active" aria-current="page"{% endif %}>
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{ item.icon }}"></path></svg>
+    {# The icon rides a wrapper so the unread count can sit on the bell #}
+    {# (owner ruling 2026-11-04: the desktop count lives here, not in the #}
+    {# header corner). The visible bubble is aria-hidden and the clipped #}
+    {# "N unread" names the row, the same split the phone corner badge #}
+    {# uses. #}
+    <span class="nav-icon">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{ item.icon }}"></path></svg>
+      {% if item.key == "notifications" and unread_notifications %}
+      <span class="nav-count" aria-hidden="true">{{ unread_notifications }}</span>
+      <span class="visually-hidden">{{ unread_notifications }} unread</span>
+      {% endif %}
+    </span>
     <span class="nav-label">{{ item.label }}</span>
   </a>
   {% endif %}

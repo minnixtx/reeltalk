@@ -1,8 +1,7 @@
-"""The header badge (increment 4, R94/R96).
+"""The unread badge: the phone corner bell and the desktop sidebar count.
 
-The badge is one number in one corner of the header, and the ways it can be
-wrong are few but specific, so the tests are ordered by how each one would
-bite:
+The badge is one number, and the ways it can be wrong are few but specific,
+so the tests are ordered by how each one would bite:
 
 * **It shows the viewer's unread count and nothing else.** Not the whole
   ledger, not another member's ledger, not a number that survives
@@ -16,6 +15,11 @@ bite:
   markup looks harmless either way and only the stylesheet knows the
   difference — which is why the element choice is pinned against the
   applied stylesheet rather than asserted on its own.
+* **The desktop/phone split is CSS, not markup** (owner ruling
+  2026-11-04): the corner bell is the phone surface, hidden from 1024px
+  up, where the sidebar's Notifications row carries the count on its own
+  bell instead. The server renders both at every width because it does
+  not know the viewport; the stylesheet picks.
 * **It costs exactly one query** on a rendered authenticated page, and
   zero where the guard stops it or where no template renders at all.
 
@@ -94,6 +98,13 @@ def _header_user(content):
     return content[start : content.index("</div>", start)]
 
 
+def _sidebar(content):
+    """The desktop menu's ``.site-nav`` landmark, as rendered."""
+    match = re.search(r'<nav class="site-nav".*?</nav>', content, re.S)
+    assert match, "no .site-nav menu rendered"
+    return match.group(0)
+
+
 # --- What the number says ----------------------------------------------------
 
 
@@ -170,6 +181,39 @@ def test_the_badge_shows_on_every_member_surface_not_just_one(member, alice, bob
     ]
     for path in paths:
         assert BADGE_MARKER in member.get(path).content.decode(), path
+
+
+# --- The desktop count: the sidebar's Notifications bell -----------------------
+# Owner ruling 2026-11-04 moved the desktop number off the header corner and
+# onto the sidebar row. The markup renders at every width (the stylesheet
+# hides the corner bell from 1024px up, pinned in the probe below), so these
+# read the sidebar landmark the same way the corner tests read the corner.
+
+
+def test_the_sidebar_bell_carries_the_unread_count(member, alice, bob):
+    notify(alice, bob, Notification.Kind.FOLLOW)
+    nav = _sidebar(member.get(MEMBER_PAGE).content.decode())
+    assert '<span class="nav-count" aria-hidden="true">1</span>' in nav
+    # The visible bubble is decoration; the clipped text names the row,
+    # the same split the corner bell uses.
+    assert '<span class="visually-hidden">1 unread</span>' in nav
+    # The count rides the Notifications row, not just the landmark.
+    row = re.search(r'<a href="/notifications/".*?</a>', nav, re.S)
+    assert row and "nav-count" in row.group(0)
+
+
+def test_the_sidebar_bell_says_nothing_at_zero(member):
+    nav = _sidebar(member.get(MEMBER_PAGE).content.decode())
+    assert "nav-count" not in nav
+    # Control: the row itself is there, so the count is what is absent.
+    assert ">Notifications<" in nav
+
+
+def test_marking_read_clears_the_sidebar_count(member, alice, bob, post):
+    notify(alice, bob, Notification.Kind.LIKE, post)
+    assert "nav-count" in _sidebar(member.get(MEMBER_PAGE).content.decode())
+    member.post("/notifications/read/")
+    assert "nav-count" not in _sidebar(member.get(MEMBER_PAGE).content.decode())
 
 
 # --- The element choice (R82 / R96) -----------------------------------------
@@ -332,12 +376,57 @@ def test_the_applied_stylesheet_lights_the_bare_control_in_three_blocks():
     assert "text-transform: uppercase" in lit
 
 
-def test_the_badge_wears_the_header_links_look_and_adds_no_style():
+def _media_block(css: str, query: str) -> str:
+    """The body of every @media block whose header contains ``query``."""
+    bodies = []
+    for match in re.finditer(r"@media\s*([^{]+)\{", css):
+        if query not in re.sub(r"\s+", "", match.group(1)):
+            continue
+        depth, i = 1, match.end()
+        while depth:
+            depth += css[i] == "{"
+            depth -= css[i] == "}"
+            i += 1
+        bodies.append(css[match.end() : i - 1])
+    assert bodies, f"no @media block matching {query!r}"
+    return "".join(bodies)
+
+
+def _flat_rules(css: str) -> str:
+    """CSS with layout whitespace collapsed, descendant spaces kept.
+
+    Stripping *all* whitespace (the habit elsewhere in this file) would
+    glue a descendant selector like ``.header-user .notifications-link``
+    into a compound one, so these assertions normalize around the
+    structural characters instead.
+    """
+    css = re.sub(r"\s+", " ", css)
+    return re.sub(r"\s*([{};:])\s*", r"\1", css)
+
+
+def test_the_stylesheet_makes_the_corner_bell_the_phone_surface():
+    # Owner ruling 2026-11-04 replaced R96's "no CSS was written for the
+    # badge" ban: the corner bell now has exactly one job in the sheet --
+    # hide from 1024px up, where the sidebar carries the count, and come
+    # back below the line, where the sidebar is gone.
     css = _stylesheet()
-    # No CSS was written for the badge — it invents no visual language, so
-    # the parked R73 pass owns the look and nothing here pre-empts it.
-    assert "notifications-link" not in css
-    # What it does inherit: the header link's own muted, ununderlined text.
+    flat = _flat_rules(css)
+    # The hide is two classes deep on purpose: a bare .notifications-link
+    # would lose the display fight to .header-user > a.
+    assert ".header-user .notifications-link{display:none;}" in flat
+    mobile = _flat_rules(_media_block(css, "max-width:1023px"))
+    assert ".header-user .notifications-link{display:inline-flex;}" in mobile
+    # And the sidebar count is styled where the sidebar itself exists.
+    desktop = _flat_rules(_media_block(css, "min-width:1024px"))
+    assert ".site-nav .nav-icon{position:relative;" in desktop
+    assert ".site-nav .nav-count{" in desktop
+    assert "var(--red)" in desktop
+
+
+def test_the_badge_still_wears_the_header_links_look():
+    css = _stylesheet()
+    # What it inherits on the phone: the header link's own muted,
+    # ununderlined text. No other CSS names the badge's look.
     header = [
         body for tokens, body in _selector_blocks(css) if tokens == [".header-user a"]
     ]

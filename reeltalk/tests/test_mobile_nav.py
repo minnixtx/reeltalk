@@ -12,10 +12,12 @@ the contract the new surfaces must hold:
 * the sheet's staff rows follow the moderation arc's D1/D2: Administration
   above Moderate, gated on ``is_staff`` and ``may_moderate`` -- the same
   rows and order the desktop menu carries;
-* the badge anchor now carries the bell parts the stylesheet swaps per
-  breakpoint (the ``notifications-link`` CSS ban in
-  ``test_notifications_badge.py`` stays green because the CSS names the
-  corner's parts, never that class);
+* the badge anchor carries the bell parts, and the stylesheet now makes it
+  the phone-only surface (owner ruling 2026-11-04): hidden from 1024px up,
+  where the sidebar's Notifications row carries the count on its own bell,
+  restored below the line. The hide/restore pair is pinned in
+  ``test_notifications_badge.py``; the corner markup below is width-blind
+  because the server does not know the viewport;
 * the search page carries its own field for phones, and the profile page
   is the settings hub (Import and Export; M1 moved Moderate out of it and
   into the menus) with the edit form untouched;
@@ -256,6 +258,8 @@ def test_the_sheet_counts_unread_on_the_notifications_row(alice, bob):
 
 @pytest.mark.django_db
 def test_the_corner_carries_the_bell_parts_and_no_moderate(alice, bob, wendy):
+    # The markup renders the bell at every width; the stylesheet is what
+    # makes it the phone surface (pinned in test_notifications_badge.py).
     notify(alice, bob, Notification.Kind.FOLLOW)
     corner = _header_user(_login("alice").get("/find/").content.decode())
     assert 'class="corner-icon"' in corner
