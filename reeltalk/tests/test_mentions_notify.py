@@ -428,7 +428,9 @@ def test_a_mention_is_not_rendered_as_a_follow(member, alice, bob, their_post):
     notify(alice, bob, Notification.Kind.FOLLOW)
     notify(alice, their_post.user, Notification.Kind.MENTION, their_post)
     content = member.get("/notifications/").content.decode()
-    assert content.count('<li class="review">') == 2
+    # The row-class prefix, not the seen spelling: an unread row wears a
+    # second class (M3, D6), and this pin counts rows, not read states.
+    assert content.count('<li class="review') == 2
     assert content.count("followed you") == 1
     assert content.count("mentioned you in") == 1
 
@@ -465,7 +467,8 @@ def test_an_unknown_kind_renders_no_verb_at_all(member, alice, bob, their_post):
         recipient=alice, actor=bob, kind="bogus", status=their_post
     )
     content = member.get("/notifications/").content.decode()
-    assert content.count('<li class="review">') == 1
+    # Row-class prefix: an unread row wears a second class (M3, D6).
+    assert content.count('<li class="review') == 1
     assert "followed you" not in content
     assert "mentioned you" not in content
     assert "liked" not in content

@@ -1248,6 +1248,38 @@ ul.errorlist {
   margin-left: auto;
 }
 
+/* The notifications ledger (M3, owner ruling D6). An unseen row is one newer
+   than the member's mark-read timestamp — the same comparison the bell counts
+   with, drawn here as an amber left rule and brighter text, so "new since you
+   last looked" reads without anyone having to count the badge.
+
+   The rule is on every row, transparent until lit: a border that appeared only
+   on an unseen row would shove that row's own text sideways, so the list would
+   stutter between seen and unseen rows. Amber is the accent the house already
+   uses for "this one is lit" (the active nav row, the focus ring), not the red
+   that names an action. */
+.notifications-feed .review {
+  border-left: 3px solid transparent;
+  padding-left: 0.75rem;
+}
+
+.notifications-feed .review--unseen {
+  border-left-color: var(--amber);
+}
+
+.notifications-feed .review--unseen .review-head {
+  color: var(--white);
+}
+
+/* The film a row is about (owner ruling D7). The row's sentence is cream and
+   its links are red; the film sits between the two — the white of post prose
+   at the weight the row's own author name uses — so it reads as the subject of
+   the line rather than a second door to the same post. */
+.notif-film {
+  color: var(--white);
+  font-weight: 600;
+}
+
 /* Applaud control (owner pass, 2026-10-05 — icon-only, replacing the pill).
 
    The resting icon reports THREE states, not two, because it is read as

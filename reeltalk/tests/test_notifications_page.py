@@ -20,16 +20,23 @@ one would be a bug:
 * **Mark-all-read is a POST with CSRF**, affects only the caller, and is
   one UPDATE on the user row — no write to the notification table, which
   is what R93 bought.
+
+M3 (owner rulings D6 and D7) adds two sections at the end: which rows render
+as unseen, and the copy that names the film each row is about.
 """
 
+import re
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.contrib.staticfiles import finders
 from django.db import connection
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from django.utils import timezone
 
 from reeltalk.core.models import Film, Status
 from reeltalk.notifications.models import (
@@ -37,7 +44,10 @@ from reeltalk.notifications.models import (
     mark_all_read,
     notify,
 )
-from reeltalk.notifications.views import NOTIFICATIONS_PAGE_SIZE
+from reeltalk.notifications.views import (
+    NOTIFICATION_EXCERPT_CHARS,
+    NOTIFICATIONS_PAGE_SIZE,
+)
 from reeltalk.tests.members import member as create_member
 
 User = get_user_model()
@@ -72,6 +82,12 @@ def post(db, alice, dune):
 def member(client, alice):
     client.force_login(alice)
     return client
+
+
+# A ledger row wears a second class when it is unseen (M3, D6), so a count of
+# "how many rows are on this page" matches the class prefix rather than the
+# seen spelling. Pins that mean the seen spelling specifically say so inline.
+ROW_OPEN = '<li class="review'
 
 
 def _spread(*notes, base=None):
@@ -111,7 +127,7 @@ def test_a_member_gets_their_own_ledger_newest_first(member, alice, bob, post):
     # renders the same verbs — so without this one the test would pass on an
     # unscoped ``Notification.objects.all()``. (Found by mutation: dropping
     # the filter left the original assertions all green.)
-    assert content.count('<li class="review">') == 2
+    assert content.count(ROW_OPEN) == 2
     assert "followed you" in content
     assert "applauded" in content
     assert content.index("followed you") > content.index("applauded")
@@ -190,7 +206,7 @@ def test_a_soft_deleted_post_loses_the_link_too(member, alice, bob, post):
     assert status_url not in content
     assert "applauded a post that is no longer here" in content
     # The row survives — the like happened whatever became of the post.
-    assert content.count('<li class="review">') == 1
+    assert content.count(ROW_OPEN) == 1
 
 
 def test_a_soft_deleted_reply_loses_its_link_too(member, alice, bob, dune, post):
@@ -393,3 +409,231 @@ def test_a_member_with_nothing_sees_the_empty_state(member):
 def test_the_page_url_resolves_by_name():
     assert reverse("notifications") == "/notifications/"
     assert reverse("notifications-mark-read") == "/notifications/read/"
+
+
+# --- Unseen display (M3, owner ruling D6) ------------------------------------
+
+
+def _set_marker(user, when):
+    """Move the member's mark-read marker without touching the ledger."""
+    User.objects.filter(pk=user.pk).update(notifications_last_read=when)
+    user.refresh_from_db()
+    return user
+
+
+def _move(note, when):
+    """Give one row an exact ``created`` (the marker boundary needs precision)."""
+    Notification.objects.filter(pk=note.pk).update(created=when)
+    return note
+
+
+def test_only_rows_after_the_mark_read_marker_render_unseen(member, alice, bob, post):
+    marker = timezone.now()
+    _set_marker(alice, marker)
+    _move(notify(alice, bob, Notification.Kind.FOLLOW), marker - timedelta(minutes=5))
+    _move(
+        notify(alice, bob, Notification.Kind.LIKE, post),
+        marker + timedelta(minutes=5),
+    )
+    content = member.get("/notifications/").content.decode()
+    assert content.count('class="review review--unseen"') == 1
+    # Control on the other half: the seen row keeps the plain class, so the
+    # flag cannot be a class the template wears on every row.
+    assert content.count('<li class="review">') == 1
+
+
+def test_a_row_exactly_at_the_marker_is_not_unseen(member, alice, bob, post):
+    # The boundary the bell already counts with: unread is ``created >``
+    # marker, not ``>=``. A page that lit the row the marker itself covers
+    # would disagree with the count beside the mark-all-read button.
+    marker = timezone.now()
+    _set_marker(alice, marker)
+    _move(notify(alice, bob, Notification.Kind.LIKE, post), marker)
+    content = member.get("/notifications/").content.decode()
+    assert "review--unseen" not in content
+    assert content.count('<li class="review">') == 1
+
+
+def test_mark_all_read_flips_the_unseen_rows(member, alice, bob, post):
+    notify(alice, bob, Notification.Kind.LIKE, post)
+    notify(alice, bob, Notification.Kind.REPLY, post)
+    assert (
+        member.get("/notifications/")
+        .content.decode()
+        .count('class="review review--unseen"')
+        == 2
+    )
+    member.post("/notifications/read/")
+    content = member.get("/notifications/").content.decode()
+    assert "review--unseen" not in content
+    # Read is a timestamp, not a delete: the rows are all still listed.
+    assert content.count('<li class="review">') == 2
+
+
+def test_the_unseen_rows_are_the_rows_the_badge_counts(member, alice, bob, post):
+    # One definition, three readers (R93): the amber rule and the bell must
+    # never disagree about what a member has not seen yet.
+    marker = timezone.now() - timedelta(hours=1)
+    _set_marker(alice, marker)
+    for hours in (-3, -1, 2, 5):
+        _move(
+            notify(alice, bob, Notification.Kind.LIKE, post),
+            marker + timedelta(hours=hours),
+        )
+    content = member.get("/notifications/").content.decode()
+    unread = Notification.unread_for(alice).count()
+    assert unread == 2
+    assert content.count('class="review review--unseen"') == unread
+
+
+def test_the_stylesheet_lit_the_unseen_row():
+    """The unseen treatment is in the applied sheet, not only in the markup.
+
+    The design itself is reviewed in a browser (D6); this pin only keeps the
+    three declarations from being read as dead CSS and tidied away. Whitespace
+    is normalised around the structural characters, never stripped whole — that
+    would glue a descendant selector into a compound one.
+    """
+    css = Path(finders.find("css/reeltalk.css")).read_text()
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    flat = re.sub(r"\s+", " ", css)
+    flat = re.sub(r"\s*([{};:])\s*", r"\1", flat)
+    # The rule is on every ledger row, transparent until lit, so an unseen row
+    # cannot shove its own text sideways.
+    assert ".notifications-feed .review{border-left:3px solid transparent;" in flat
+    assert (
+        ".notifications-feed .review--unseen{border-left-color:var(--amber);}" in flat
+    )
+    assert (
+        ".notifications-feed .review--unseen .review-head{color:var(--white);}" in flat
+    )
+
+
+# --- Copy that names the film (M3, owner ruling D7) --------------------------
+
+
+def test_a_like_names_the_film_the_post_is_about(member, alice, bob, post):
+    notify(alice, bob, Notification.Kind.LIKE, post)
+    content = member.get("/notifications/").content.decode()
+    assert 'about <span class="notif-film">Dune (2021)</span>' in content
+    # The link stays on the post: the film is context, not a second door to
+    # somewhere else.
+    assert f'applauded <a href="/status/{post.id}/">your post</a>' in content
+    assert f'href="/film/{post.film_id}/"' not in content
+
+
+def test_a_film_with_no_year_is_named_without_parentheses(member, alice, bob):
+    film = Film.objects.create(title="Nosferatu", year=None)
+    status = Status.objects.create(
+        user=alice, film=film, status_type=Status.Type.REVIEW, content="c"
+    )
+    notify(alice, bob, Notification.Kind.LIKE, status)
+    content = member.get("/notifications/").content.decode()
+    assert '<span class="notif-film">Nosferatu</span>' in content
+
+
+def test_a_film_less_post_keeps_the_film_free_wording(member, alice, bob):
+    # The fallback D7 keeps: a status with no film has nothing to name, so the
+    # row reads exactly as it did before the copy changed.
+    status = Status.objects.create(
+        user=alice, status_type=None, content="<p>A note</p>", raw_content="A note"
+    )
+    notify(alice, bob, Notification.Kind.LIKE, status)
+    content = member.get("/notifications/").content.decode()
+    assert "notif-film" not in content
+    assert f'applauded <a href="/status/{status.id}/">your post</a>' in content
+
+
+def test_a_deleted_status_loses_the_film_label_with_its_link(member, alice, bob, post):
+    notify(alice, bob, Notification.Kind.LIKE, post)
+    assert "notif-film" in member.get("/notifications/").content.decode()
+    post.delete()
+    content = member.get("/notifications/").content.decode()
+    assert "notif-film" not in content
+    assert "applauded a post that is no longer here" in content
+
+
+def test_a_reply_names_the_film_and_shows_what_arrived(member, alice, bob, dune, post):
+    reply = Status.objects.create(
+        user=bob,
+        film=dune,
+        status_type=Status.Type.COMMENT,
+        content="<p>The second act loses me.</p>",
+        raw_content="The second act loses me.",
+        reply_parent=post,
+    )
+    notify(alice, bob, Notification.Kind.REPLY, reply)
+    content = member.get("/notifications/").content.decode()
+    assert 'about <span class="notif-film">Dune (2021)</span>' in content
+    # The reply's own words are the link, and they still open the reply.
+    assert f'href="/status/{reply.id}/">The second act loses me.</a>' in content
+
+
+def test_a_reply_with_no_text_of_its_own_keeps_the_plain_label(
+    member, alice, bob, dune, post
+):
+    reply = Status.objects.create(
+        user=bob,
+        film=dune,
+        status_type=Status.Type.COMMENT,
+        content="",
+        raw_content="",
+        reply_parent=post,
+    )
+    notify(alice, bob, Notification.Kind.REPLY, reply)
+    content = member.get("/notifications/").content.decode()
+    assert f'href="/status/{reply.id}/">their reply</a>' in content
+
+
+def test_a_mention_names_the_film_and_shows_what_arrived(member, alice, bob, dune):
+    their_post = Status.objects.create(
+        user=bob,
+        film=dune,
+        status_type=Status.Type.COMMENT,
+        content="<p>You have to see this one.</p>",
+        raw_content="You have to see this one.",
+    )
+    notify(alice, bob, Notification.Kind.MENTION, their_post)
+    content = member.get("/notifications/").content.decode()
+    assert "mentioned you in their post" in content
+    assert 'about <span class="notif-film">Dune (2021)</span>' in content
+    assert f'href="/status/{their_post.id}/">You have to see this one.</a>' in content
+
+
+def test_the_excerpt_sits_on_one_line_whatever_the_source_wore(
+    member, alice, bob, dune, post
+):
+    reply = Status.objects.create(
+        user=bob,
+        film=dune,
+        status_type=Status.Type.COMMENT,
+        content="<p>Line one</p><p>Line two</p>",
+        raw_content="Line one\n\nLine two",
+        reply_parent=post,
+    )
+    notify(alice, bob, Notification.Kind.REPLY, reply)
+    content = member.get("/notifications/").content.decode()
+    assert f'href="/status/{reply.id}/">Line one Line two</a>' in content
+
+
+def test_the_excerpt_is_cut_at_the_cap_on_a_word_boundary(
+    member, alice, bob, dune, post
+):
+    words = [f"word{n:02d}" for n in range(40)]
+    reply = Status.objects.create(
+        user=bob,
+        film=dune,
+        status_type=Status.Type.COMMENT,
+        content="",
+        raw_content=" ".join(words),
+        reply_parent=post,
+    )
+    notify(alice, bob, Notification.Kind.REPLY, reply)
+    content = member.get("/notifications/").content.decode()
+    excerpt = re.search(r'href="/status/\d+/">([^<]+)</a>', content).group(1)
+    assert excerpt.endswith("...")
+    assert len(excerpt) <= NOTIFICATION_EXCERPT_CHARS + len("...")
+    # The cut lands between words: the last whole word inside the cap is in,
+    # the first one past it is out.
+    assert "word19" in excerpt
+    assert "word20" not in excerpt

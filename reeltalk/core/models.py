@@ -1944,19 +1944,24 @@ class TopReview:
     excerpt: str
 
 
-def _review_excerpt(raw_content: str) -> str:
-    """The opening words of a review, for the rail's third line.
+def review_excerpt(raw_content: str, limit: int = TOP_REVIEW_EXCERPT_CHARS) -> str:
+    """The opening words of a post, for a surface that shows one line of it.
 
     The rail has one line of text per row: whitespace is flattened (raw
     markdown carries newlines), the cut lands on a word boundary, and an
     ellipsis marks that the line was cut - the row promises more and the
     link delivers it. No markdown stripping beyond flattening: the excerpt
     is a whisper of the row, not a rendering.
+
+    ``limit`` is a parameter because the same rule serves two widths: the
+    rail's narrow column (the default) and the notifications ledger's full
+    column (M3's D7 excerpt, which passes a wider cap). One truncation with
+    two sizes, rather than a second truncation that drifts from the first.
     """
     text = " ".join(raw_content.split())
-    if len(text) <= TOP_REVIEW_EXCERPT_CHARS:
+    if len(text) <= limit:
         return text
-    cut = text[:TOP_REVIEW_EXCERPT_CHARS].rsplit(" ", 1)[0]
+    cut = text[:limit].rsplit(" ", 1)[0]
     return f"{cut}..."
 
 
@@ -2019,7 +2024,7 @@ def top_reviews(
         .select_related("user", "film")
     )
     return [
-        TopReview(status, status.score, _review_excerpt(status.raw_content))
+        TopReview(status, status.score, review_excerpt(status.raw_content))
         for status in rows
     ]
 

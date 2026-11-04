@@ -301,6 +301,21 @@ def test_mark_all_read_clears_report_rows_like_any_other(mod, witness, review):
     assert content.count(BADGE_MARKER) == 0
 
 
+def test_a_report_row_lights_as_unseen_and_keeps_its_own_copy(mod, witness, review):
+    """M3's row display reaches report rows without changing what they say.
+
+    D6's unseen flag is a property of the ledger, not of a kind, so a fresh
+    report row lights like a fresh like. D7's film copy deliberately does
+    **not** reach the report branch: a report is about a person, and the
+    queue is where the content is read.
+    """
+    file_against_status(witness, review)
+    content = logged_in(mod).get(NOTIFICATIONS_URL).content.decode()
+    assert content.count('class="review review--unseen"') == 1
+    assert "notif-film" not in content
+    assert f'href="{QUEUE_URL}"' in content
+
+
 def test_a_report_row_sits_in_the_ledger_alongside_the_ordinary_kinds(
     mod, witness, review
 ):

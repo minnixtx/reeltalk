@@ -26,44 +26,50 @@
 
   {% if notifications %}
   <ul class="review-list">
-    {% for note in notifications %}
-      <li class="review">
+    {% for row in notifications %}
+      {# D6: an unseen row is one newer than the member's mark-read marker, #}
+      {# decided in the view (see LedgerRow) and rendered here as a class. #}
+      <li class="review{% if row.unseen %} review--unseen{% endif %}">
         <div class="review-head">
-          {% if note.actor %}
-            {% if note.actor.avatar %}
-              <img class="avatar avatar-row" src="{{ note.actor.avatar.url }}" alt="">
+          {% if row.note.actor %}
+            {% if row.note.actor.avatar %}
+              <img class="avatar avatar-row" src="{{ row.note.actor.avatar.url }}" alt="">
             {% else %}
               <span class="avatar avatar-row avatar-placeholder" aria-hidden="true"></span>
             {% endif %}
-            <a class="review-author" href="{% url 'user-profile' note.actor.localname %}">{{ note.actor.localname }}</a>
+            <a class="review-author" href="{% url 'user-profile' row.note.actor.localname %}">{{ row.note.actor.localname }}</a>
           {% else %}
             {# SET_NULL actor: the account is gone, the event still happened. #}
             {# The row stays and the actor's deep link goes with the name. #}
             <span class="review-author">Someone</span>
           {% endif %}
-          {% if note.kind == "like" %}
-            {% if note.status and not note.status.deleted %}
-              applauded <a href="{% url 'status' note.status.id %}">your post</a>
+          {% if row.note.kind == "like" %}
+            {% if row.has_target %}
+              {# D7: the film is named whenever the post has one, and the link #}
+              {# stays on the post — the film is context, not a second door. #}
+              applauded <a href="{% url 'status' row.note.status.id %}">your post</a>{% if row.film_label %} about <span class="notif-film">{{ row.film_label }}</span>{% endif %}
             {% else %}
               applauded a post that is no longer here
             {% endif %}
-          {% elif note.kind == "reply" %}
-            {% if note.status and not note.status.deleted %}
+          {% elif row.note.kind == "reply" %}
+            {% if row.has_target %}
               {# The link is the reply itself, not the post it answered — the #}
               {# reply is what arrived, and /status/<id>/ renders it in full. #}
-              replied to your post — <a href="{% url 'status' note.status.id %}">their reply</a>
+              {# D7 puts the reply's own words in that link; a reply with no #}
+              {# text of its own keeps the plain label. #}
+              replied to your post{% if row.film_label %} about <span class="notif-film">{{ row.film_label }}</span>{% endif %} — <a href="{% url 'status' row.note.status.id %}">{{ row.excerpt|default:"their reply" }}</a>
             {% else %}
               replied to a post that is no longer here
             {% endif %}
-          {% elif note.kind == "mention" %}
-            {% if note.status and not note.status.deleted %}
+          {% elif row.note.kind == "mention" %}
+            {% if row.has_target %}
               {# The mention lives inside the other member's post, so the deep #}
               {# link is their post rather than a reply of ours. #}
-              mentioned you in <a href="{% url 'status' note.status.id %}">their post</a>
+              mentioned you in their post{% if row.film_label %} about <span class="notif-film">{{ row.film_label }}</span>{% endif %} — <a href="{% url 'status' row.note.status.id %}">{{ row.excerpt|default:"their post" }}</a>
             {% else %}
               mentioned you in a post that is no longer here
             {% endif %}
-          {% elif note.kind == "follow" %}
+          {% elif row.note.kind == "follow" %}
             {# Explicit, not a catch-all. Before increment 4 this was {% else %}, #}
             {# which meant a fourth kind with no branch of its own rendered every #}
             {# mention on the page as "followed you" — silently, and with no #}
@@ -72,7 +78,7 @@
             {# than confidently wrong. A follow's deep link is the actor's #}
             {# profile, already drawn above. #}
             followed you
-          {% elif note.kind == "report" %}
+          {% elif row.note.kind == "report" %}
             {% comment %}
             D5: the report line is a pointer, not a mirror. It names the
             reporter (drawn above as the actor), the target, the category,
@@ -83,10 +89,12 @@
             profile variant. A remote reporter needs no branch of its own:
             remote mirrors carry their home domain in the localname, so the
             actor link above already renders them the way every other page
-            surface renders them.
+            surface renders them. D7's film copy deliberately does not
+            reach this branch: a report is about a person, and the queue is
+            where the content is read.
             {% endcomment %}
-            {% if note.report %}
-              reported <a href="{% url 'user-profile' note.report.target_user.localname %}">@{{ note.report.target_user.localname }}</a> · {{ note.report.get_category_display }} · <a href="{% url 'moderation' %}">open the queue</a>
+            {% if row.note.report %}
+              reported <a href="{% url 'user-profile' row.note.report.target_user.localname %}">@{{ row.note.report.target_user.localname }}</a> · {{ row.note.report.get_category_display }} · <a href="{% url 'moderation' %}">open the queue</a>
             {% else %}
               {# SET_NULL report: the report row is gone (its reporter was #}
               {# deleted), the alert still happened. The queue link stays — #}
@@ -94,7 +102,7 @@
               filed a report that is no longer here · <a href="{% url 'moderation' %}">open the queue</a>
             {% endif %}
           {% endif %}
-          <span class="muted">{{ note.created|date:"Y-m-d" }}</span>
+          <span class="muted">{{ row.note.created|date:"Y-m-d" }}</span>
         </div>
       </li>
     {% endfor %}
