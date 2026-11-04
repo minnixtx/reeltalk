@@ -226,7 +226,10 @@ def test_a_non_home_page_keeps_the_wide_band():
     footers = _element_spans(body, "footer")
     assert len(footers) == 1
     assert footers[0]["attrs"].strip() == 'class="site-footer"'
-    # Not in a rail: only the home page renders an aside at all.
+    # Not in a rail: the wide band is this page's only footer placement.
+    # (Since M4 the Search page also renders an aside -- the .search-rail
+    # modules -- and it too keeps the wide-band footer; the rail-with-a-
+    # footer-inside arrangement remains home's alone.)
     assert not _element_spans(body, "aside")
 
 

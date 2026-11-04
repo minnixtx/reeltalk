@@ -440,6 +440,21 @@ a {
   margin: 14px 0;
 }
 
+/* The informative group (D8, M4) is secondary navigation: the four footer
+   links a member can no longer reach from a phone. It keeps the sheet's row
+   language at one step down -- 44px targets (the touch floor the close
+   control already honours) instead of 54 -- so the sheet still reaches Log
+   out without scrolling on a short phone even with the staff rows present. */
+.more-sheet a[data-group="info"] {
+  min-height: 44px;
+  font-size: 14px;
+}
+
+.more-sheet a[data-group="info"] svg {
+  width: 20px;
+  height: 20px;
+}
+
 /* The Profile / Settings hub: Import and Export live here now at every
    width, so the destinations outlive the desktop nav row's N4 retirement. */
 .settings-links {
@@ -2524,6 +2539,37 @@ a.genre-pill:hover {
   .rail {
     grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
   }
+}
+
+/* D8 (moderation/notifications arc M4): for a member the rail is a desktop
+   surface. Below 1280px the member's home hides it -- the modules moved to
+   the Search page and the rail footer's links moved to the More sheet, so
+   nothing strands. The anonymous rail keeps every width: a stranger has no
+   Search page (R80) and no More sheet (N1 decision 8), so the rail is their
+   only wayfinding. One cap, 1279px, so the hide covers both the 64rem stack
+   and the tablet band above it -- the same line the band block above ends at.
+   The hide is CSS because the server does not know the viewport; the markup
+   carries the class at every width and the browser decides. Proven in browser
+   QA at 375/768/1100/1440, not pinned here (plan M4's test note). */
+@media (max-width: 1279px) {
+  .rail--member {
+    display: none;
+  }
+}
+
+/* The Search page's rail (D8): the same modules partial the home rail
+   renders, in a grid of its own under the search box. It does not wear the
+   .rail class on purpose -- .rail is the home rail's column, with a member
+   hide and stack-point restacks that belong to that surface; this one wants
+   the same look the restacked rail gets: modules side by side when the
+   column has the width, one per row when it does not. align-items:start so a
+   short panel does not stretch to its taller neighbour's row. */
+.search-rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+  align-items: start;
+  margin-top: 2rem;
 }
 
 /* --- Typography roles (M6 artwork, R60) ------------------------------------

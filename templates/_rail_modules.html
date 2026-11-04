@@ -1,0 +1,88 @@
+{% load static film_tags %}
+{% comment %}
+The three discovery modules (Trending Films, Top Reviews, Popular Genres),
+extracted for M4 of the moderation/notifications arc (owner ruling D8) so the
+home rail and the Search page render one body and cannot drift: home includes
+this inside its rail, the Search page includes it under its search box. The
+container is the call site's — this partial speaks only the modules.
+
+Each card is titled by its owner-supplied ticket graphic above it, so the cards
+themselves stay plain (R64).
+
+The anonymous teaser treatment (R81: a showcase, not a doorway) rides inside
+the modules rather than at the call sites: titles and genres still render for
+a stranger, but the links do not, because a stranger cannot open what they
+point to. The Search page is login-gated (R80), so its render always takes the
+member branch; home's rail answers both.
+
+Context: trending (trending_films), top (top_reviews), genres
+(popular_genres) — all already ranked for this reader by the view.
+{% endcomment %}
+<img class="rail-banner" src="{% static 'images/movie-ticket.png' %}" alt="Trending Films">
+<section class="rail-panel" aria-labelledby="trending-title">
+  <h2 id="trending-title" class="visually-hidden">Trending Films</h2>
+  {% if trending %}
+    <ol class="trending-list">
+      {% for row in trending %}
+        <li>
+          <span class="trending-rank">{{ forloop.counter }}</span>
+          {% if user.is_authenticated %}
+            <a class="trending-film" href="{% url 'film' row.film.id %}">{{ row.film.title }}{% if row.film.year %} <span class="trending-year">({{ row.film.year }})</span>{% endif %}</a>
+          {% else %}
+            {# Teaser, not a doorway: the title shows, the link does not. #}
+            <span class="trending-film">{{ row.film.title }}{% if row.film.year %} <span class="trending-year">({{ row.film.year }})</span>{% endif %}</span>
+          {% endif %}
+          <span class="trending-count">{{ row.review_count }} review{{ row.review_count|pluralize }}</span>
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="muted">No reviews in the last 30 days.</p>
+  {% endif %}
+</section>
+
+{% comment %}
+The Top Reviews box (reviewer-discovery increment): the instance's
+best-received written reviews, ranked by reader response - likes plus
+replies - so a review that missed your feed keeps surfacing while people
+keep answering it. The view has already ranked only what this reader may
+read; when nothing qualifies the whole box is absent, because a box of
+zeros is noise and a stub graphic with nothing under it worse. Rows link
+to the review itself for every visitor, anonymous included: the profile
+and the public post are exactly what a stranger came for.
+{% endcomment %}
+{% if top %}
+<img class="rail-banner" src="{% static 'images/top-reviews.png' %}" alt="Top Reviews">
+<section class="rail-panel" aria-labelledby="top-reviews-title">
+  <h2 id="top-reviews-title" class="visually-hidden">Top Reviews</h2>
+  <ul class="top-reviews-list">
+    {% for row in top %}
+      <li>
+        <a class="top-review" href="{% url 'status' row.status.id %}">
+          <span class="top-review-who">{{ row.status.user.localname }}{% if row.status.rating %} <span class="top-review-stars" title="{{ row.status.rating|floatformat:'-1' }} / 5">{{ row.status.rating|stars }}</span>{% endif %}</span>
+          <span class="top-review-film"><span class="top-review-film-name">{{ row.status.film.title }}</span>{% if row.status.film.year %} ({{ row.status.film.year }}){% endif %}</span>
+          <span class="top-review-excerpt">{{ row.excerpt }}</span>
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<img class="rail-banner" src="{% static 'images/popular-genres.png' %}" alt="Popular Genres">
+<section class="rail-panel" aria-labelledby="genres-title">
+  <h2 id="genres-title" class="visually-hidden">Popular Genres</h2>
+  {% if genres %}
+    <ul class="genre-pills">
+      {% for genre in genres %}
+        {% if user.is_authenticated %}
+          <li><a class="genre-pill" href="{% url 'genre' genre.slug %}" title="{{ genre.review_count }} review{{ genre.review_count|pluralize }} in {{ genre.name }}">{{ genre.name }}</a></li>
+        {% else %}
+          <li><span class="genre-pill" title="{{ genre.review_count }} review{{ genre.review_count|pluralize }} in {{ genre.name }}">{{ genre.name }}</span></li>
+        {% endif %}
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">Genres appear once films start getting reviews.</p>
+  {% endif %}
+</section>

@@ -53,9 +53,12 @@ from .models import (
     live_reviews,
     mark_watched,
     may_read,
+    popular_genres,
     resolve_film_id,
     shelve_to_watchlist,
     toggle_like,
+    top_reviews,
+    trending_films,
     unshelve_from_watchlist,
 )
 from .tmdb import TmdbError, is_configured, search_films
@@ -842,6 +845,15 @@ def film_search(request):
 
     Login-gated (R80): every query spends the instance's shared paid TMDB
     quota, so the whole search surface is members-only.
+
+    M4 (owner ruling D8): the landing state — no query yet — carries the
+    three discovery modules the home rail shows, rendered from the same
+    partial. Members below 1280px no longer get the rail on home, so the
+    Search page is their rail; at desktop widths it is the same content the
+    rail already shows beside the feed. The page is login-gated, so the
+    viewer is always a member and the modules count what this reader may
+    read, exactly as home's rail does. Once a query is submitted the results
+    take the page and the modules step aside — they never push results down.
     """
     query = request.GET.get("q", "").strip()
     try:
@@ -851,6 +863,9 @@ def film_search(request):
 
     data = {"query": query, "rows": [], "source": None, "page": page, "total_pages": 0}
     if not query:
+        data["trending"] = trending_films(viewer=request.user)
+        data["top"] = top_reviews(request.user)
+        data["genres"] = popular_genres(viewer=request.user)
         return render(request, "core/search.html", data)
 
     if is_configured():

@@ -24,8 +24,15 @@
     <button type="button" class="more-sheet-close" aria-label="Close More">&times;</button>
   </div>
   {% for item in more_items %}
+  {# A rule opens each new group (NavItem.group): the sidebar's grouping #}
+  {# language moved into the sheet for M4's informative-links row group (D8) #}
+  {# -- and it is also what draws the rule above Log out now, so the divider #}
+  {# lives in the definition instead of in markup that drifts from the list. #}
+  {# ifchanged has to run on every row: it only records a value on the turns #}
+  {# that render it, so guarding the tag with forloop.first loses the opening #}
+  {# group and rules before the second row instead of the second group. #}
+  {% ifchanged item.group %}{% if not forloop.first %}<hr>{% endif %}{% endifchanged %}
   {% if item.kind == "form" %}
-  <hr>
   <form method="post" action="{{ item.url }}" class="inline">
     {% csrf_token %}
     <button type="submit">
@@ -34,7 +41,11 @@
     </button>
   </form>
   {% else %}
-  <a href="{{ item.url }}"{% if item.current %} class="active" aria-current="page"{% endif %}>
+  {# The one external row (Code) opens in a new tab with the footer's own #}
+  {# rel=noopener spelling; nothing else in the registry leaves the instance. #}
+  {# data-group carries the registry's grouping to the stylesheet: the #}
+  {# informative rows are a secondary group and wear a step-down treatment. #}
+  <a href="{{ item.url }}" data-group="{{ item.group }}"{% if item.current %} class="active" aria-current="page"{% endif %}{% if item.external %} target="_blank" rel="noopener"{% endif %}>
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{ item.icon }}"></path></svg>
     <span class="nav-label">{{ item.label }}</span>
     {% if item.key == "notifications" and unread_notifications %}

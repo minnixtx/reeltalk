@@ -119,77 +119,24 @@ from the footer partial's direction.
   {% endif %}
   <script src="{% static 'js/feed.js' %}" defer></script>
 
-  <aside class="rail" aria-label="On this instance">
-    {# Each card is titled by its owner-supplied ticket graphic above it, so the #}
-    {# cards themselves stay plain (R64). #}
-    <img class="rail-banner" src="{% static 'images/movie-ticket.png' %}" alt="Trending Films">
-    <section class="rail-panel" aria-labelledby="trending-title">
-      <h2 id="trending-title" class="visually-hidden">Trending Films</h2>
-      {% if trending %}
-        <ol class="trending-list">
-          {% for row in trending %}
-            <li>
-              <span class="trending-rank">{{ forloop.counter }}</span>
-              {% if user.is_authenticated %}
-                <a class="trending-film" href="{% url 'film' row.film.id %}">{{ row.film.title }}{% if row.film.year %} <span class="trending-year">({{ row.film.year }})</span>{% endif %}</a>
-              {% else %}
-                {# Teaser, not a doorway: the title shows, the link does not. #}
-                <span class="trending-film">{{ row.film.title }}{% if row.film.year %} <span class="trending-year">({{ row.film.year }})</span>{% endif %}</span>
-              {% endif %}
-              <span class="trending-count">{{ row.review_count }} review{{ row.review_count|pluralize }}</span>
-            </li>
-          {% endfor %}
-        </ol>
-      {% else %}
-        <p class="muted">No reviews in the last 30 days.</p>
-      {% endif %}
-    </section>
-
+  {% comment %}
+  D8 (moderation/notifications arc M4): for a member the rail is a desktop
+  surface. The rail--member class is the handle the stylesheet hides below
+  1280px with — the modules moved to the Search page for phones, and the
+  informative links the rail footer carried moved to the More sheet. An
+  anonymous visitor keeps the rail at every width: it is their only
+  wayfinding surface (their Search page does not exist, R80). The hide is
+  CSS because the server does not know the viewport; the markup renders at
+  every width for both kinds of visitor.
+  {% endcomment %}
+  <aside class="rail{% if user.is_authenticated %} rail--member{% endif %}" aria-label="On this instance">
     {% comment %}
-    The Top Reviews box (reviewer-discovery increment): the instance's
-    best-received written reviews, ranked by reader response - likes plus
-    replies - so a review that missed your feed keeps surfacing while people
-    keep answering it. The view has already ranked only what this reader may
-    read; when nothing qualifies the whole box is absent, because a box of
-    zeros is noise and a stub graphic with nothing under it worse. Rows link
-    to the review itself for every visitor, anonymous included: the profile
-    and the public post are exactly what a stranger came for.
+    The three modules live in a shared partial (M4) so the Search page can
+    render the same body. The footer below stays home's own: R131 parked it
+    inside the rail for the scroll story, and the Search page has its own
+    wide-band footer from base.html.
     {% endcomment %}
-    {% if top %}
-    <img class="rail-banner" src="{% static 'images/top-reviews.png' %}" alt="Top Reviews">
-    <section class="rail-panel" aria-labelledby="top-reviews-title">
-      <h2 id="top-reviews-title" class="visually-hidden">Top Reviews</h2>
-      <ul class="top-reviews-list">
-        {% for row in top %}
-          <li>
-            <a class="top-review" href="{% url 'status' row.status.id %}">
-              <span class="top-review-who">{{ row.status.user.localname }}{% if row.status.rating %} <span class="top-review-stars" title="{{ row.status.rating|floatformat:'-1' }} / 5">{{ row.status.rating|stars }}</span>{% endif %}</span>
-              <span class="top-review-film"><span class="top-review-film-name">{{ row.status.film.title }}</span>{% if row.status.film.year %} ({{ row.status.film.year }}){% endif %}</span>
-              <span class="top-review-excerpt">{{ row.excerpt }}</span>
-            </a>
-          </li>
-        {% endfor %}
-      </ul>
-    </section>
-    {% endif %}
-
-    <img class="rail-banner" src="{% static 'images/popular-genres.png' %}" alt="Popular Genres">
-    <section class="rail-panel" aria-labelledby="genres-title">
-      <h2 id="genres-title" class="visually-hidden">Popular Genres</h2>
-      {% if genres %}
-        <ul class="genre-pills">
-          {% for genre in genres %}
-            {% if user.is_authenticated %}
-              <li><a class="genre-pill" href="{% url 'genre' genre.slug %}" title="{{ genre.review_count }} review{{ genre.review_count|pluralize }} in {{ genre.name }}">{{ genre.name }}</a></li>
-            {% else %}
-              <li><span class="genre-pill" title="{{ genre.review_count }} review{{ genre.review_count|pluralize }} in {{ genre.name }}">{{ genre.name }}</span></li>
-            {% endif %}
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="muted">Genres appear once films start getting reviews.</p>
-      {% endif %}
-    </section>
+    {% include "_rail_modules.html" %}
 
     {% comment %}
     R131: the footer's second home — same partial as every other page, the

@@ -19,6 +19,19 @@
   {% if user.is_authenticated %}
     <p class="muted"><a href="{% url 'film-create' %}">Can’t find it? Add a film manually.</a></p>
   {% endif %}
+  {% comment %}
+  M4 (owner ruling D8): the landing state carries the rail's three discovery
+  modules - the same partial the home rail renders, so the two cannot drift.
+  Members below 1280px lost the rail on home, and this page is where the
+  modules live for them now; at desktop widths it repeats what the rail
+  shows beside the feed. The page is login_required (R80), so this always
+  renders the member branch of the partial. With a query the results take
+  the page instead (owner ruling at M4's review): the modules never sit
+  between the box and what the reader asked for.
+  {% endcomment %}
+  <aside class="search-rail" aria-label="On this instance">
+    {% include "_rail_modules.html" %}
+  </aside>
 {% elif rows %}
   {% if source == "tmdb" and total_pages > 1 %}
     <p class="muted">Page {{ page }} of {{ total_pages }}</p>

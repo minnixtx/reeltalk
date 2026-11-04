@@ -12,6 +12,13 @@ the contract the new surfaces must hold:
 * the sheet's staff rows follow the moderation arc's D1/D2: Administration
   above Moderate, gated on ``is_staff`` and ``may_moderate`` -- the same
   rows and order the desktop menu carries;
+* the sheet's trailing informative group follows D8 (M4): Getting Started,
+  Help, About This Site and Code ride above Log out, ruled off by the group
+  change, with Code the registry's one external row (``target=_blank
+  rel="noopener"``, the footer's spelling; the URL is pinned against the
+  footer's own so the two cannot drift);
+* the bottom bar keeps exactly its five slots (four destinations plus the
+  More control) -- D8 moved surfaces around the bar but never into it;
 * the badge anchor carries the bell parts, and the stylesheet now makes it
   the phone-only surface (owner ruling 2026-11-04): hidden from 1024px up,
   where the sidebar's Notifications row carries the count on its own bell,
@@ -34,7 +41,7 @@ from django.contrib.staticfiles import finders
 from django.test import Client, RequestFactory
 
 from reeltalk.notifications.models import Notification, notify
-from reeltalk.social.navigation import bottom_nav, more_nav
+from reeltalk.social.navigation import CODE_URL, bottom_nav, more_nav
 from reeltalk.tests.members import member, site_admin
 
 PASSWORD = "s3cretpass"
@@ -135,22 +142,34 @@ def test_the_bottom_bar_is_empty_signed_out():
 
 @pytest.mark.django_db
 def test_the_more_sheet_lists_its_destinations_with_log_out_last(alice):
+    """D8's informative group joins the sheet (M4): the four footer links ride
+    as a trailing group, Log out stays last, every row keeps its icon."""
     items = more_nav(_request("/find/", alice))
     assert [(i.key, i.label) for i in items] == [
         ("find", "Find People"),
         ("notifications", "Notifications"),
         ("settings", "Profile / Settings"),
+        ("welcome", "Getting Started"),
+        ("help", "Help"),
+        ("about", "About This Site"),
+        ("code", "Code"),
         ("logout", "Log out"),
     ]
     assert [i.url for i in items] == [
         "/find/",
         "/notifications/",
         "/preferences/profile/",
+        "/welcome/",
+        "/help/",
+        "/about/",
+        CODE_URL,
         "/logout/",
     ]
     assert [i.key for i in items if i.current] == ["find"]
     assert items[-1].kind == "form"
     assert all(i.icon for i in items)
+    # Code is the registry's one external row; nothing else leaves the site.
+    assert [i.key for i in items if i.external] == ["code"]
 
 
 @pytest.mark.django_db
@@ -169,6 +188,10 @@ def test_a_moderator_gains_moderate_alone_in_the_sheet(alice, wendy):
         "notifications",
         "settings",
         "moderate",
+        "welcome",
+        "help",
+        "about",
+        "code",
         "logout",
     ]
 
@@ -176,7 +199,8 @@ def test_a_moderator_gains_moderate_alone_in_the_sheet(alice, wendy):
 @pytest.mark.django_db
 def test_staff_and_admin_carry_administration_above_moderate_in_the_sheet(helper, root):
     """D1's order and D2's gates, on the account that holds one flag and the
-    account that holds all three alike."""
+    account that holds all three alike. The informative group (D8) trails the
+    staff rows and leads Log out on every account."""
     for user in (helper, root):
         assert [i.key for i in more_nav(_request("/find/", user))] == [
             "find",
@@ -184,6 +208,10 @@ def test_staff_and_admin_carry_administration_above_moderate_in_the_sheet(helper
             "settings",
             "admin",
             "moderate",
+            "welcome",
+            "help",
+            "about",
+            "code",
             "logout",
         ]
     by_key = {i.key: i for i in more_nav(_request("/find/", root))}
@@ -222,6 +250,18 @@ def test_the_bottom_bar_lights_only_the_current_destination(alice):
 
 
 @pytest.mark.django_db
+def test_the_bottom_bar_keeps_exactly_its_five_slots(alice):
+    """D8 moved surfaces around the bar, never into it: four destinations and
+    the More control, matching the bar's five-column grid (plan M4's pin)."""
+    bar = _bottom_nav(_login("alice").get("/find/").content.decode())
+    assert bar.count("<a href=") == 4
+    assert bar.count("<button") == 1
+    css = Path(finders.find("css/reeltalk.css")).read_text()
+    mobile = re.sub(r"\s+", "", _media_block(css, "max-width:1023px"))
+    assert "grid-template-columns:repeat(5,minmax(0,1fr));" in mobile
+
+
+@pytest.mark.django_db
 def test_the_sheet_renders_log_out_as_a_post_form_with_csrf(alice):
     body = _login("alice").get("/find/").content.decode()
     sheet = _more_sheet(body)
@@ -254,6 +294,52 @@ def test_the_sheet_counts_unread_on_the_notifications_row(alice, bob):
     # At zero the row says nothing -- same hide rule as the corner badge.
     plain = _more_sheet(_login("bob").get("/find/").content.decode())
     assert "<small>" not in plain
+
+
+@pytest.mark.django_db
+def test_the_sheet_lists_the_four_informative_links_for_a_member(alice):
+    """D8 (M4): the footer's links ride the sheet. A member's phone has no
+    footer to reach -- below 1280px the home rail, the footer's second home
+    (R131), is hidden -- so the sheet is the wayfinding surface now."""
+    sheet = _more_sheet(_login("alice").get("/find/").content.decode())
+    assert ">Getting Started<" in sheet
+    assert ">Help<" in sheet
+    assert ">About This Site<" in sheet
+    assert ">Code<" in sheet
+    assert 'href="/welcome/"' in sheet
+    assert 'href="/help/"' in sheet
+    assert 'href="/about/"' in sheet
+    assert f'href="{CODE_URL}"' in sheet
+
+
+@pytest.mark.django_db
+def test_the_informative_group_is_ruled_off_before_log_out(alice):
+    """The sheet's rules fall out of the registry's group changes (the
+    sidebar's language): one above the informative group, one above Log
+    out, and nothing else -- the divider is not markup that can drift."""
+    sheet = _more_sheet(_login("alice").get("/find/").content.decode())
+    assert sheet.count("<hr>") == 2
+    assert (
+        sheet.index(">Profile / Settings<")
+        < sheet.index("<hr>")
+        < sheet.index(">Getting Started<")
+        < sheet.index(">Code<")
+        < sheet.index("<hr>", sheet.index(">Getting Started<"))
+        < sheet.index('action="/logout/"')
+    )
+
+
+@pytest.mark.django_db
+def test_the_code_row_opens_off_instance_the_way_the_footer_does(alice):
+    """target=_blank rel=noopener (plan M4), and the URL is the footer's
+    own: two surfaces, one destination, drift-pinned against each other."""
+    sheet = _more_sheet(_login("alice").get("/find/").content.decode())
+    row = sheet[sheet.index(f'href="{CODE_URL}"') :]
+    row = row[: row.index("</a>")]
+    assert 'target="_blank"' in row
+    assert 'rel="noopener"' in row
+    footer = (settings.BASE_DIR / "templates" / "_footer.html").read_text()
+    assert f'href="{CODE_URL}" target="_blank" rel="noopener"' in footer
 
 
 @pytest.mark.django_db

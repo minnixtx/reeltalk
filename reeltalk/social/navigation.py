@@ -60,6 +60,7 @@ class NavItem:
     kind: str = "link"  # "link", or "form" for the POST-only Log out control
     icon: str = ""  # 24x24 single-path SVG data; the menu surfaces render it
     group: str = ""  # sidebar block name; the partial rules between groups
+    external: bool = False  # off-instance: the sheet adds target/rel for it
 
 
 # The approved N1 mockup's icon set (24x24, stroke-drawn, one path each). The
@@ -86,8 +87,25 @@ ICONS = {
     # so the rows align side by side by visible body -- which the raw ink
     # bbox of a path would not guarantee (known side-by-side alignment trap).
     "admin": "M12 8a4 4 0 1 1-8 0 4 4 0 0 1 8 0M11 11 20 20M16 16l3-3",
+    # The four informative links M4 added to the More sheet (D8). Same stroke
+    # language as the mockup set: outline shapes, round joins, no fills. The
+    # flag is Getting Started (the start line), the circled ? and i are Help
+    # and About, and the angle brackets with a slash are the source repo.
+    "start": "M6 21V4m0 1h11l-2.5 4L17 13H6",
+    "help": (
+        "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0"
+        "M9.6 9.4a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1.1 1-1.1 1.8v.3M12 17h.01"
+    ),
+    "about": "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M12 11v5M12 8h.01",
+    "code": "M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 6l-3 12",
     "logout": "M9 3H3v18h6M9 12h12M16 7l5 5-5 5",
 }
+
+# The More sheet's Code row leaves the instance for the source repository.
+# Same URL the footer's Code link carries (``_footer.html``); the two live in
+# their own surfaces because a template cannot read this module, and a test
+# pins the two spellings to each other so they cannot drift.
+CODE_URL = "https://github.com/minnixtx/reeltalk"
 
 
 def sidebar_nav(request):
@@ -217,10 +235,11 @@ def bottom_nav(request):
 def more_nav(request):
     """The More sheet's destinations, in the approved order, Log out last.
 
-    The divider above Log out is the template's: it is spacing between
-    groups, not a destination. The unread count rides the Notifications row
-    from the badge processor's own context value, so the sheet costs no
-    second ledger query (the badge's one-query budget stands).
+    The divider above Log out is the registry's now: it falls out of the
+    group change, the same way the sidebar draws its rules. The unread count
+    rides the Notifications row from the badge processor's own context value,
+    so the sheet costs no second ledger query (the badge's one-query budget
+    stands).
 
     The two staff rows mirror the sidebar (D1): Administration above Moderate,
     same order, same gates -- Administration for ``is_staff``, Moderate for
@@ -228,6 +247,15 @@ def more_nav(request):
     alone; once M1 retired the settings-page row, that flag-only rule would
     have left a staff-only account with no phone route to the queue at all.
     D2 settled both surfaces on the queue's own predicate.
+
+    The four informative links are D8 (M4): Getting Started, Help, About This
+    Site, and Code ride the sheet as a trailing group before Log out. They
+    are the footer's links, and they moved here because a member's phone has
+    no footer to reach: below 1280px the home rail -- the footer's second
+    home (R131) -- is hidden for members, and the sheet is the only surface
+    left that can carry the wayfinding. Code leaves the instance, so it is
+    the registry's one external item: the sheet renders it with
+    ``target="_blank" rel="noopener"``, the footer's own spelling.
     """
     user = request.user
     if not user.is_authenticated:
@@ -258,6 +286,35 @@ def more_nav(request):
         items.append(
             _item("moderate", "Moderate", "moderation", path, icon=ICONS["shield"])
         )
+    items.extend(
+        [
+            _item(
+                "welcome",
+                "Getting Started",
+                "welcome",
+                path,
+                icon=ICONS["start"],
+                group="info",
+            ),
+            _item("help", "Help", "help", path, icon=ICONS["help"], group="info"),
+            _item(
+                "about",
+                "About This Site",
+                "about",
+                path,
+                icon=ICONS["about"],
+                group="info",
+            ),
+            NavItem(
+                "code",
+                "Code",
+                CODE_URL,
+                icon=ICONS["code"],
+                group="info",
+                external=True,
+            ),
+        ]
+    )
     items.append(
         NavItem(
             "logout",
@@ -265,6 +322,7 @@ def more_nav(request):
             reverse("logout"),
             kind="form",
             icon=ICONS["logout"],
+            group="session",
         )
     )
     return items
