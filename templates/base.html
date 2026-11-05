@@ -13,7 +13,11 @@
 <header class="site-header">
   {# M6 artwork B (R61): marquee band — logo left, search centered, profile right. #}
   <div class="container header-top">
-    <a class="brand" href="{% url 'index' %}">ReelTalk</a>
+    {# Two copies of the word: the anchor's own text is a transparent ghost holding #}
+    {# the box, the name and the bloom; .brand-tube is the copy that is seen, drawn #}
+    {# at 3x and scaled back (see the wordmark rules in reeltalk.css). It is #}
+    {# aria-hidden so the link is named "ReelTalk" once, not twice. #}
+    <a class="brand" href="{% url 'index' %}">ReelTalk<span class="brand-tube" aria-hidden="true">ReelTalk</span></a>
     {# R80: search spends the shared paid TMDB quota, so anonymous visitors get #}
     {# no box at all. The grid loses its middle child — see .header-user's pin. #}
     {% if user.is_authenticated %}

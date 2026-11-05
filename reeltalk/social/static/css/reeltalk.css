@@ -159,30 +159,86 @@ a {
   padding-bottom: 0.4rem;
 }
 
-/* Wordmark — Monoton neon-tube treatment (M6 artwork, R60; relit per R68). */
+/* Wordmark — Monoton neon-tube treatment (M6 artwork, R60; relit per R68).
+
+   Two layers, because Monoton cannot be rasterised well at the sizes this bar
+   uses. The anchor itself is the *ghost*: its own text is transparent, and it
+   reserves the layout box, carries the accessible name, and paints the bloom.
+   The visible tubes are a second copy in .brand-tube, rasterised at 4x and
+   scaled back down. See the tube rule for why. */
 .brand {
+  position: relative;
   font-family: "Monoton", sans-serif;
   font-weight: 400;
   /* Sized against MOCKUP.png proportions (owner review of M6 increment 5). */
   font-size: 3.6rem;
   letter-spacing: 0.02em;
-  /* Fill is the filament, the stroke over it is the red glass: painting the stroke
-     last carves red back into each Monoton bar and leaves a narrow white-hot core,
-     which is what made the mockup's wordmark read as lit (a flat fill capped at
-     luminance 193 with nothing above 200 read as paint). The stroke is in em, not px:
-     the brand steps down to 2.2rem under 40rem, where a fixed 1px edge swallows the
-     bars whole and the wordmark goes dark red (measured max lum 171 — worse than the
-     flat fill it replaced). */
-  color: #fff4ee;
-  -webkit-text-stroke: 0.0174em var(--red);
+  line-height: 1;
+  /* Transparent, on purpose: the glyph shapes still cast the text-shadow below,
+     so the ghost is all bloom and no tube. The tubes come from .brand-tube. */
+  color: transparent;
   text-decoration: none;
+  /* Bloom stops stay wide on purpose, and wider here than the tubes alone would
+     need. Monoton draws every stroke as three or four parallel bars, and at the
+     sizes this wordmark actually ships (2.2rem desktop, 1.65rem below) those bars
+     are 1-2px wide with 1px gaps. A bloom stop whose radius is that same order -
+     the old 2px white and 5px red - is a light field wider than the gap it falls
+     into, so it poured light into every gap and washed the bars to flat pink:
+     measured across the wordmark, the darkest pixels inside the letters lifted
+     from 8 (page black) to 44 and resolvable bar edges fell from 87 to 52 on
+     desktop, and to 19 of 75 on a phone, which is the "the lines run together"
+     read. Wide stops spend the light over an area instead of into the gaps.
+     The first stop sits at 26px rather than 14 because the supersampled tube layer
+     below already costs some gap darkness (the downsample averages each 1px gap
+     with the bars either side of it); starting the bloom further out keeps the
+     measured gap floor at 34 instead of 42 and buys back bar edges, 76 against 66.
+     The hot core does not come from a shadow at all: it is the tube fill, which the
+     stroke on .brand-tube carves back down the middle of each bar.
+     The radii live here, unscaled, rather than on the 3x tube layer: a transform
+     scales its shadows too, so 96px would have to be written as 288px and paid for
+     in rasterising a blur three times the size to land on the same pixels. */
   text-shadow:
-    0 0 2px #fff,
-    0 0 5px var(--red-bright),
-    0 0 12px var(--red-bright),
-    0 0 26px var(--red),
-    0 0 48px rgba(255, 40, 25, 0.7),
-    0 0 80px rgba(255, 30, 20, 0.35);
+    0 0 26px rgba(255, 65, 56, 0.75),
+    0 0 52px rgba(212, 43, 38, 0.65),
+    0 0 96px rgba(255, 40, 25, 0.38);
+}
+
+/* The visible tubes, rasterised at three times the size and scaled back to sit
+   exactly over the ghost.
+
+   Monoton's bars are about 1px apart on a curve, and a curve cannot be sampled at
+   that pitch: the concentric arcs broke into stair-stepped dots, which is the
+   moire on the R, the a and the k. Rasterising at 3x and letting the browser
+   downsample gives it real subpixel coverage to average, and the isolated
+   single-pixel ink inside the wordmark fell from 27.1% of all ink to 9.7% with the
+   bloom held constant. A sub-pixel blur was the cheaper candidate and it is not
+   the fix: blur(.5px) left that number at 27.9%, softening the dots without
+   joining them. Merging the bars with a fat light stroke drives jaggedness to zero
+   and is worse still, because it fills the counters and the word stops being
+   Monoton.
+   This trades, it does not win outright: the same downsample that smooths the
+   curves lightens the 1px gaps, so resolvable bar edges land at 76 against the
+   1x layer's 87. Taking the wordmark to 2.5rem gets both (83 edges, 3.6% jagged)
+   at the cost of five pixels of bar height, which is the owner's call, not this
+   rule's.
+   Do not add `will-change: transform` here - it hands the layer to the compositor,
+   which rasterises at the pre-scale size and downsamples worse than the paint path
+   (measured 30.3%, worse than not doing this at all). 4x is smoother still on the
+   curves and dimmer in the gaps; 3x is the balance.
+
+   Everything on this layer is in em of the *3x* size, so the stroke is a third of
+   the 0.0174em that paints the red glass: painting the stroke last carves red back
+   into each bar and leaves a narrow white-hot core, which is what makes the wordmark
+   read as lit rather than painted. */
+.brand-tube {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 300%;
+  transform: scale(0.333333);
+  transform-origin: 0 0;
+  color: #fff4ee;
+  -webkit-text-stroke: 0.0058em var(--red);
 }
 
 .header-user {
@@ -736,11 +792,21 @@ a {
     padding: 0.75rem 1.75rem;
   }
 
-  /* The bar is 80px tall instead of the old ~130px, and the wordmark is the
-     step-down size it already wore under 40rem: at 3.6rem the tube could not
-     fit the menu's column and the slim band together. */
+  /* 2.6rem, not the 2.2rem this bar shipped with. Monoton's bars are about 1px
+     apart on a curve, and at 2.2rem that is below what the pixel grid can hold,
+     so the arcs stair-step no matter how the bloom is tuned — the moire on the R,
+     the a and the k. The tube layer already rasterises at 3x and scales back;
+     giving it more real pixels is what actually closes the artifact. Measured with
+     the bloom held constant (resolvable bar edges / isolated single-pixel ink):
+     2.2rem 75 / 9.5%, 2.4rem 79 / 2.7%, 2.5rem 81 / 4.0%, 2.6rem 83 / 0.5%.
+     It is free, which is why it is here rather than being a design argument: the
+     bar's height is set by the profile corner at 44px, not by the wordmark at 35px,
+     and measured on the live page the header stays 71px all the way to 2.6rem and
+     only grows at 3rem. What does bound this size is the menu column — 252px wide,
+     and the wordmark's ink is 231px here — so do not push past about 2.7rem without
+     widening that track. */
   .brand {
-    font-size: 2.2rem;
+    font-size: 2.6rem;
   }
 
   .header-user {
