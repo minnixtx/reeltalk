@@ -7,21 +7,27 @@
 {# /user/<localname>/lists/ — the same page the header's "My Lists" item #}
 {# and the profile's "Lists" tab both point at. #}
 {% comment %}
-New-chrome pass: the shared profile header and the Reviews / Films / Lists
-strip, so this page matches the other two surfaces instead of wearing the
-old bare header. The My Lists / Saved Lists row below is your own curation
-split and stays exactly as it was - self-only, and only on this page.
+New-chrome pass: the shared profile header, so this page matches the other
+surfaces instead of wearing the old bare header. On somebody else's page the
+shared Reviews / Films / Lists strip goes under the header too, because this
+page otherwise has no navigation of its own at all - the row below is
+self-only, so a visitor here could leave only with the browser's back button,
+and the sidebar can only ever offer the viewer's own pages. On your own page
+the strip is absent and the My Lists / Saved Lists row is the whole of it:
+that is the shape the owner asked for, and the menu is the way out of your own
+pages already.
 {% endcomment %}
 {% include "social/_profile_head.html" %}
+{% if not is_self %}
 {% include "social/_profile_tabs.html" with profile_tab="lists" %}
+{% endif %}
 
 {% comment %}
 Two tabs, and only on your own page (owner decision, 2026-10-06). The tab
 row is absent when you are looking at somebody else's lists rather than
 showing "My Lists" over theirs: the Saved half is one member's own curation
 and is not a public surface, so on another member's page there is exactly
-one thing to show and a one-item tab bar would be decoration. The films
-page keeps its own three tabs untouched.
+one thing to show and a one-item tab bar would be decoration.
 {% endcomment %}
 {% if is_self %}
 <nav class="tabs">

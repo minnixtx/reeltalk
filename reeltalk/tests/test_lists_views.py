@@ -119,11 +119,13 @@ def _tabs(body: str) -> str:
     Required rather than convenient twice over. The header nav carries a
     "My Lists" item on every authenticated page, so an unscoped
     ``">My Lists</a>" not in body`` check would fail on the header while
-    saying nothing about the tab row it means to test. And since the
-    new-chrome pass the page carries a second ``.tabs`` nav above this one
-    - the shared Reviews / Films / Lists strip - so "the first .tabs nav"
-    no longer names the row either; the Saved Lists link is what only the
-    self row has, and its absence is exactly what the negative tests pin.
+    saying nothing about the tab row it means to test. And the page used to
+    carry a second ``.tabs`` nav above this one - the shared Reviews / Films /
+    Lists strip - so "the first .tabs nav" named nothing in particular; the
+    Saved Lists link is what only the self row has, and its absence is exactly
+    what the negative tests pin. The shared strip is gone from this page now
+    (2026-11-06), but the scan stays: it is what makes a strip that crept back
+    fail these tests instead of passing them.
     """
     for match in re.finditer(r'<nav class="tabs">.*?</nav>', body, re.S):
         if "Saved Lists" in match.group(0):

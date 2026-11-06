@@ -1,26 +1,46 @@
 {% comment %}
-The tab strip shared by the three surfaces it spans (profile, films, lists):
-it sits above the body, like every tabbed surface the site has - the strip
-says where you are, the body below it is what you are looking at. The caller
-names the active tab: ``with profile_tab="reviews"`` (or "films", "lists").
-Reviews is the profile's own body (D1), so its tab points at the profile
-URL itself - there is no third URL to page. The strip is always shown, never
-hidden for being empty (D5); the empty state in the body is what an empty
-list looks like.
+The tab strip the profile and films pages share: it sits above the body, like
+every tabbed surface the site has - the strip says where you are, the body
+below it is what you are looking at. The caller names the active tab:
+``with profile_tab="reviews"`` (or "films"). Reviews is the profile's own body
+(D1), so its tab points at the profile URL itself - there is no second URL to
+page. The strip is always shown, never hidden for being empty (D5); the empty
+state in the body is what an empty list looks like.
 
-The Lists tab is hidden when the member has made no lists - R138 decision 3
-- rather than shown with an empty state, because a tab that leads nowhere is
-worse than one that appears when there is something behind it. ``list_count``
-is the whole decision and the view makes it via ``_profile_head_context``;
-the template never reaches for the database. The one exception is the lists
-page itself: a strip that hides the tab you are standing on would say you
-are nowhere, and on your own lists page the tab plainly leads somewhere -
-it just brought you there.
+Reviews and Films are the strip on every account. Lists is the strip on
+somebody ELSE's pages only, because that is the one place it is the only way
+there: the sidebar and the phone bar both carry a Lists row, and both always
+point at the viewer's own lists, so on your own page the tab is a duplicate of
+a row the menu already shows and on another member's page nothing else reaches
+their lists. Keying the row on the viewer rather than on the page is what keeps
+the strip identical between the pages it spans - a rule keyed on the page would
+let the row appear on one tab and vanish on the next click, which is what this
+used to do.
+
+Standing on the lists page forces the row even at zero lists: a strip that
+hides the tab you are standing on says you are nowhere, and the page is
+reachable by URL whatever its count. The lists page only includes this partial
+when it is not your own, so that clause can never light the row on your own
+pages, where the My Lists / Saved Lists row below is what says where you are.
+
+Where the row does apply it stays hidden when the member has made no lists -
+R138 decision 3 - rather than shown with an empty state, because a tab that
+leads nowhere is worse than one that appears when there is something behind
+it. ``list_count`` is the whole decision and the view makes it via
+``_profile_head_context``; the template never reaches for the database.
+``is_self`` comes from the same builder, and an anonymous visitor is not
+self - they get no menu at all, so for them the row is the only way too.
 {% endcomment %}
 <nav class="tabs">
   <a href="{% url 'user-profile' profile_user.localname %}"{% if profile_tab == "reviews" %} class="active"{% endif %}>Reviews</a>
   <a href="{% url 'user-films' profile_user.localname %}"{% if profile_tab == "films" %} class="active"{% endif %}>Films</a>
-  {% if list_count or profile_tab == "lists" %}
+  {% comment %}
+  ``or`` is written first because Django's ``if`` tag tokenises on whitespace
+  and will not take parentheses around a ``not`` clause; ``and`` binds tighter
+  than ``or`` here, so this reads exactly as it looks: standing on the lists
+  page, or somebody else's page with a list behind it.
+  {% endcomment %}
+  {% if profile_tab == "lists" or not is_self and list_count %}
   <a href="{% url 'user-lists' profile_user.localname %}"{% if profile_tab == "lists" %} class="active"{% endif %}>Lists</a>
   {% endif %}
 </nav>

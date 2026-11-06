@@ -825,18 +825,21 @@ USER_REVIEWS_PAGE_SIZE = 50
 def _profile_head_context(request, profile, is_self) -> dict:
     """The context the shared profile header and tab strip render from.
 
-    One builder for the three surfaces the Reviews / Films / Lists strip
-    spans (profile, films, lists), so the header cannot answer differently
-    per page - the same reason the pages share the banned/suspended answers.
-    Carries: the Lists-tab count, the follower tallies, and the visitor's
-    follow/block/report state.
+    One builder for the surfaces the shared header spans (profile, films,
+    lists), so the header cannot answer differently per page - the same
+    reason the pages share the banned/suspended answers. Carries: the
+    Lists-tab count, the follower tallies, and the visitor's follow/block/
+    report state.
 
     The "Lists" tab is hidden when the member has made none (R138 decision
     3): a tab that leads to nothing is worse than one that appears when
     there is something behind it. The count is the whole decision, so it is
     made here rather than in the template - and it counts the live lists
     only, because FilmList.delete() is soft and a deleted list is still a
-    row in the table.
+    row in the table. The strip also only offers the tab on somebody else's
+    profile (``is_self`` below answers that half), so the count is read on
+    both pages that share this builder; keeping it here costs one indexed
+    COUNT and buys the guarantee the builder exists for.
 
     Follower counts (reviewer-discovery increment): audience size is part
     of the follow decision the profile exists to serve. Counted as this
@@ -1281,7 +1284,7 @@ def user_films(request, localname):
     # query param, matching the tab nav).
     page_query = "?" if tab == "all" else f"?tab={tab}&"
     # The shared profile chrome (header with counts and follow controls, plus
-    # the Reviews / Films / Lists strip) - one builder, so the films page can
+    # the Reviews / Films strip) - one builder, so the films page can
     # never answer header state differently from the profile itself.
     is_self = request.user.is_authenticated and request.user.pk == profile.pk
     data = _profile_head_context(request, profile, is_self)

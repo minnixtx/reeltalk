@@ -5,10 +5,12 @@
 
 {% block content %}
 {% comment %}
-New-chrome pass: the shared profile header and the Reviews / Films / Lists
-strip, so this page is visibly one of the member's three surfaces instead
-of a different-looking page that happens to name the member. The shelf
-tabs below (All films / Watchlist / Watched) are this tab's own body
+New-chrome pass: the shared profile header and the Reviews / Films strip, so
+this page is visibly one of the member's two surfaces instead of a
+different-looking page that happens to name the member. The strip is the same
+one the profile page renders, for the same viewer - including whether the
+Lists row is there at all - so it cannot change between these two tabs. The
+shelf tabs below (All films / Watchlist / Watched) are this tab's own body
 controls, not navigation between people, so they stay a separate row.
 {% endcomment %}
 {% include "social/_profile_head.html" %}
