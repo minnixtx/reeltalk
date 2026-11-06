@@ -2650,8 +2650,6 @@ h2 {
 }
 
 .meta-list,
-.handle,
-.profile-counts,
 table.results th,
 .search-row .watchlist-btn,
 .pane-sub,
@@ -2659,6 +2657,19 @@ table.results th,
 .trending-count,
 .genre-pill {
   font-family: var(--ui);
+}
+
+/* The profile head names a person, not a fact, so its handle and counts wear the
+   body face at the nav-row weight instead of the metadata Oswald above. Owner
+   pass, 2026-11-05: the handle sat directly over the tab strip and read as a
+   different system from it. Face, weight and size move together for the same
+   reason the feed scope tabs did on 2026-11-03 - at 400 weight the body face
+   alone still read as a third voice. */
+.handle,
+.profile-counts {
+  font-family: var(--body);
+  font-weight: 600;
+  font-size: 0.88rem;
 }
 
 /* The lit red controls take the marquee face (owner pass, 2026-09-19): Bebas
