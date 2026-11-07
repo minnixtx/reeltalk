@@ -2157,6 +2157,63 @@ table.results th {
   color: var(--muted);
 }
 
+/* --- Help, the member FAQ (2026-11-06) --------------------------------------
+   The contents box is the only chrome this page needs: a member arrives holding
+   a question, so the groups are listed up front and each one carries the id the
+   listing points at. Two columns where there is room for two, one on a phone,
+   and nothing that needs JavaScript to work. */
+
+.help-contents {
+  margin: 1.5rem 0 2rem;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.help-contents h2 {
+  margin: 0 0 0.6rem;
+  font-family: var(--ui);
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.help-toc {
+  columns: 2;
+  column-gap: 2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A group stays whole rather than splitting across a column break. */
+.help-toc > li {
+  break-inside: avoid;
+  margin-bottom: 0.4rem;
+}
+
+@media (max-width: 40rem) {
+  .help-toc {
+    columns: 1;
+  }
+}
+
+.help-section {
+  margin-top: 2.2rem;
+}
+
+.help-section h3 {
+  margin: 1.6rem 0 0.4rem;
+  font-size: 1.05rem;
+}
+
+/* The first question under a group heading needs no gap above it; the heading
+   already carries its own. */
+.help-section h3:first-of-type {
+  margin-top: 0.8rem;
+}
+
 /* --- Texture pass (M6 artwork, R60; site-wide grunge 2026-09-16) -----------
    Owner-supplied worn paper now lives only at the desktop outer edges (see
    body pseudo-elements). Thin amber/brown trim and dark content surfaces

@@ -215,15 +215,27 @@ def test_the_view_post_link_is_dropped_for_a_tombstone(db, author, mod, posts):
 
 
 @pytest.mark.django_db
-def test_the_help_page_states_both_promises():
-    """Anonymous-readable, and it says the two things V4 promised to write down."""
+def test_the_help_page_states_the_audience_rule():
+    """Anonymous-readable, and it names all three audiences and the fixed rule.
+
+    **This test used to pin two sentences more** (2026-11-06): that "Private" does
+    not hide a post from the instance's own admin tools, which was D8's operator
+    half, and that a reported post is shown to moderators whatever audience it
+    was written for, which was decision 1 of this increment. The owner rewrote
+    ``/help/`` as a member FAQ and removed both, so neither is promised on the
+    page any more. Recorded here rather than deleted in silence, because this file
+    is where the V4 promises are kept.
+    """
     resp = Client().get("/help/")
     assert resp.status_code == 200
     page = resp.content.decode()
-    # D8's operator half.
-    assert "admin tools can read everything" in page
-    # The moderation half the owner kept as decision 1 of this increment.
-    assert "shown to moderators" in page
+    for label in (
+        "<strong>Public</strong>",
+        "<strong>Followers</strong>",
+        "<strong>Private</strong>",
+    ):
+        assert label in page
+    assert "fixed once the review is published" in page
 
 
 @pytest.mark.django_db

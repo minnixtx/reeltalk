@@ -4,36 +4,185 @@
 
 {% block content %}
 <h1>Help</h1>
-<p class="muted">Who can see what you post here, and what those choices do not promise.</p>
-
-<h2>Who can see a review</h2>
-<p>Every review carries the audience that was chosen for it when it was written:</p>
-<ul>
-  <li><strong>Public</strong> - anyone can read it, on this site and on the other servers this instance talks to.</li>
-  <li><strong>Followers</strong> - only the accounts that follow the author. They see it in their feed whether they live here or on another server.</li>
-  <li><strong>Private</strong> - only the author. It appears in their own feed and on their own pages; nothing about it is delivered to other members or to other servers.</li>
-</ul>
-<p>
-  {% if user.is_authenticated %}
-  Your <a href="{% url 'profile-edit' %}">Profile / Settings</a> page sets the audience new reviews start with.
-  {% else %}
-  Every member's Profile / Settings page sets the audience their new reviews start with.
-  {% endif %}
-  The audience is chosen when a review is written and does not change afterwards. A reply is seen by whoever can see the post it answers.
+<p class="muted">
+  Find films, keep track of what you watch, and join the conversation.
+  If you're new to ReelTalk, start with <a href="{% url 'welcome' %}">Getting Started</a>.
 </p>
 
-<h2>What "Private" does not mean</h2>
-<p>
-  Private means hidden from other members and from other servers. It does not mean hidden from the person
-  who runs this instance: the database sits on their machine, and the site's admin tools can read everything
-  stored here, private posts included.
-</p>
+<nav class="help-contents" aria-labelledby="help-contents-title">
+  <h2 id="help-contents-title">On this page</h2>
+  <ul class="help-toc">
+    <li><a href="#getting-around">Getting around</a></li>
+    <li><a href="#tracking">Finding and tracking films</a></li>
+    <li><a href="#writing">Reviews and replies</a></li>
+    <li><a href="#lists">Making and saving lists</a></li>
+    <li><a href="#people">Following people</a></li>
+    <li><a href="#account">Profile and sign-in</a></li>
+  </ul>
+</nav>
 
-<h2>If your post is reported</h2>
-<p>
-  A member can only report a post they can actually see - a post you keep to yourself cannot be reported by
-  someone who cannot read it. Once a post is reported, it is shown to moderators whatever audience it was
-  written for, so they can read what the report is about and decide what to do. The audience marker travels
-  with it, so a moderator can see the post was not public.
-</p>
+<section class="help-section" aria-labelledby="getting-around">
+  <h2 id="getting-around">Getting around</h2>
+
+  <h3 id="where-is-everything">Where do I find things?</h3>
+  <p>
+    Use the menu on the left on a computer or the bar at the bottom on your phone.
+    On your phone, tap <strong>More</strong> for the rest of the menu.
+    Select the ReelTalk logo at the top to return to your feed.
+  </p>
+
+  <h3 id="feed-scopes">What’s the difference between Following, Local, and All?</h3>
+  <ul>
+    <li><strong>Following</strong> shows posts from people you follow.</li>
+    <li><strong>Local</strong> shows posts from this ReelTalk site that you can see, including posts by people you haven’t followed yet.</li>
+    <li><strong>All</strong> also shows posts your site receives from other servers.</li>
+  </ul>
+  <p>
+    Scroll down or select <strong>Older</strong> to see more. For something new to
+    watch, try <strong>Trending Films</strong>, <strong>Top Reviews</strong>, or
+    <strong>Popular Genres</strong> beside the feed on wider screens.
+  </p>
+</section>
+
+<section class="help-section" aria-labelledby="tracking">
+  <h2 id="tracking">Finding and tracking films</h2>
+
+  <h3 id="find-a-film">How do I find a film and save it for later?</h3>
+  <p>
+    Search by title using the box at the top of the page. ReelTalk searches
+    The Movie Database (TMDB), so you can find films nobody here has reviewed yet.
+    Select <strong>Add to watchlist</strong> in the results or on the film’s page.
+  </p>
+
+  <h3 id="mark-watched">How do I log a film I’ve seen?</h3>
+  <p>
+    Open the film and select <strong>Mark as watched</strong>. Give it a star
+    rating and add a written review if you like. Once you mark a film as watched,
+    it moves from your Watchlist to Watched.
+  </p>
+
+  <h3 id="my-films">Where can I see my Watchlist and watched films?</h3>
+  <p>
+    {% if user.is_authenticated %}
+    Open <a href="{% url 'user-films' user.localname %}">My Films</a>
+    {% else %}
+    Open the Films tab on your profile
+    {% endif %}
+    and choose <strong>All films</strong>, <strong>Watchlist</strong>, or
+    <strong>Watched</strong>. Visitors to your profile can also browse your films.
+  </p>
+  <p>
+    You can also import a TMDB list or export your films as a CSV from
+    <strong>Profile / Settings</strong>.
+  </p>
+</section>
+
+<section class="help-section" aria-labelledby="writing">
+  <h2 id="writing">Reviews and replies</h2>
+
+  <h3 id="write-review">How do I post or edit a review?</h3>
+  <p>
+    Select <strong>Mark as watched</strong> on the film’s page, add your rating
+    and review, then choose who can see it before posting. To change the text or
+    rating later, select <strong>Edit review</strong> on the film’s page.
+    You can also select <strong>Delete</strong> on your review to remove it.
+  </p>
+
+  <h3 id="who-sees-what">Who can see my review?</h3>
+  <ul>
+    <li><strong>Public</strong> reviews are open to anyone and can reach other servers.</li>
+    <li><strong>Followers</strong> reviews are visible to accounts that follow you.</li>
+    <li><strong>Private</strong> reviews are visible only to you among ReelTalk members.</li>
+  </ul>
+  <p>
+    You can set a default audience for new reviews in <strong>Profile / Settings</strong>.
+    Check the audience before you post, since it’s fixed once the review is published.
+  </p>
+
+  <h3 id="applause-replies">How do I react or join the conversation?</h3>
+  <p>
+    Select the clapperboard to applaud a post. Select it again to take back your
+    applause. Use <strong>Reply</strong> to join the conversation. A reply is visible
+    to the same audience as the post it answers. To mention someone, type
+    <code>@username</code> or use <code>@username@domain</code> for someone on another server.
+  </p>
+
+  <h3 id="report-a-post">How do I report a post?</h3>
+  <p>Use the report option under the post, explain what happened, and submit the report.</p>
+</section>
+
+<section class="help-section" aria-labelledby="lists">
+  <h2 id="lists">Making and saving lists</h2>
+
+  <h3 id="make-a-list">How do I make a film list?</h3>
+  <p>
+    Your <strong>Watchlist</strong> is for films you want to watch. Use
+    <strong>Lists</strong> for collections you want to share, like favorite
+    midnight movies. Open
+    {% if user.is_authenticated %}
+    <a href="{% url 'user-lists' user.localname %}">Lists</a>
+    {% else %}
+    <strong>Lists</strong>
+    {% endif %}
+    and choose <strong>New list</strong>. Give it a name, add films by title, and
+    use the arrows to put them in order.
+  </p>
+
+  <h3 id="saved-lists">How do I save someone else’s list?</h3>
+  <p>
+    Select <strong>Save</strong> on the list to find it later under
+    <strong>Saved Lists</strong>. You’ll see the latest version as the creator makes changes.
+  </p>
+</section>
+
+<section class="help-section" aria-labelledby="people">
+  <h2 id="people">Following people</h2>
+
+  <h3 id="find-people">How do I find someone to follow?</h3>
+  <p>
+    Open <a href="{% url 'find-user' %}">Find People</a> and search by username.
+    If they’re on another server, use their full handle, such as
+    <code>username@example.org</code>. Open their profile and select <strong>Follow</strong>.
+    The <strong>Local</strong> feed is also a good place to find people whose reviews you enjoy.
+  </p>
+
+  <h3 id="block-person">How do I stop seeing someone’s posts?</h3>
+  <p>
+    Select <strong>Block</strong> on their profile. You can undo it from the same
+    page with <strong>Unblock</strong>.
+  </p>
+
+  <h3 id="what-notifies">Where do I see replies, mentions, and new followers?</h3>
+  <p>
+    Open <strong>Notifications</strong> (the bell) for replies, mentions, applause,
+    and new followers. Select <strong>Mark all read</strong> to clear the unread count.
+  </p>
+</section>
+
+<section class="help-section" aria-labelledby="account">
+  <h2 id="account">Profile and sign-in</h2>
+
+  <h3 id="settings">How do I edit my profile?</h3>
+  <p>
+    Open
+    {% if user.is_authenticated %}
+    <a href="{% url 'profile-edit' %}">Profile / Settings</a>
+    {% else %}
+    <strong>Profile / Settings</strong>
+    {% endif %}
+    to change your display name, bio, profile picture, or default review audience.
+  </p>
+
+  <h3 id="verification">What if I didn’t get my verification email?</h3>
+  <p>
+    Check your spam folder. If the email still hasn’t arrived,
+    <a href="{% url 'verify-resend' %}">request another verification code</a>.
+  </p>
+
+  <h3 id="forgot-password">How do I reset my password?</h3>
+  <p>
+    Use the <a href="{% url 'password-reset' %}">password reset page</a> to get
+    a reset link by email.
+  </p>
+</section>
 {% endblock %}
