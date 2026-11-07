@@ -14,8 +14,9 @@
 #
 # Upgrades: change REELTALK_VERSION in .env and run `up -d` again. Data lives
 # in the named volumes below, not in the image, so a version change recreates
-# containers and keeps everything. Pinning the tag this way (rather than
-# tracking `latest`) means an upgrade is a deliberate edit you can roll back.
+# containers and keeps everything. REELTALK_VERSION takes an exact release tag,
+# which is the shipped default and makes an upgrade a deliberate edit you can
+# roll back, or `latest`, which tracks the newest published release instead.
 #
 # The project name matches docker-compose.yml on purpose: switching between the
 # source-build and prebuilt paths reuses the same volumes and network instead

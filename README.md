@@ -236,11 +236,26 @@ either install path.
 
 ### 8. Upgrading
 
-**Prebuilt.** Pin the version in `.env` and re up:
+**Prebuilt.** `REELTALK_VERSION` in `.env` picks the tag the stack pulls, and it
+takes either of two forms:
 
 ```
 REELTALK_VERSION=0.2.0
 ```
+
+```
+REELTALK_VERSION=latest
+```
+
+A numbered tag pins that release: upgrading means editing the number, and
+rolling back means editing it back. `latest` names the newest published release
+instead, so an upgrade is just the pull below. It moves when a release is
+published from the `main` branch and never before, so work still in development
+cannot reach an instance that tracks it. If you track `latest` and want to go
+back, write the number of the release you were on. The About page names the
+version the running image reports.
+
+Then, for either form:
 
 ```bash
 docker compose -f docker-compose.prebuilt.yml pull
@@ -249,10 +264,7 @@ docker compose -f docker-compose.prebuilt.yml up -d
 
 Migrations run automatically when the web container starts. Read the release
 notes first: if a release adds a migration you want the instance quiet while
-it applies. Rolling back is changing the pin back and running `up -d` again.
-
-Avoid floating everything on `latest`. It can move underneath you mid
-incident and you lose the ability to say which version you are running.
+it applies.
 
 **From source.**
 
@@ -272,7 +284,7 @@ docker compose up -d
 | Mail rejected with "Sender is not same as SMTP authenticate username" | From address does not equal `EMAIL_HOST_USER`. Set `EMAIL_SENDER_NAME` and `EMAIL_SENDER_DOMAIN` to match. |
 | Verification link is https and nothing answers there | TLS not set up yet. Finish the proxy, or read the link from the worker log. |
 | A verification link you pasted says it did not work | You used a truncated token. The full token is in the mail body. |
-| `failed to resolve reference ... not found` | The pinned `REELTALK_VERSION` tag does not exist on Docker Hub. Tags carry no `v` prefix. |
+| `failed to resolve reference ... not found` | The `REELTALK_VERSION` tag does not exist on Docker Hub. Tags carry no `v` prefix. |
 | Everyone shares one throttle bucket | A CDN sits in front and its ranges are not in `TRUSTED_PROXIES`. `python manage.py check_client_ip` shows why. |
 
 ## License

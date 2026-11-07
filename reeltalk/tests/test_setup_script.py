@@ -418,7 +418,7 @@ def test_the_file_carries_what_compose_interpolation_needs(tmp_path):
         assert written.get(key), f"{key} is missing from the generated file"
 
 
-def _compose_probe(env_file, compose_file):
+def _compose_probe(env_file, compose_file, quiet=True):
     """`docker compose config -q` with the generated file as the project env.
 
     The subprocess gets PATH and HOME and nothing else, on purpose. Compose
@@ -427,6 +427,10 @@ def _compose_probe(env_file, compose_file):
     the shell and passes a file that cannot boot. That is not hypothetical: the
     shell this suite runs under exports six of them, and the check silently
     passed on a file with POSTGRES_PASSWORD stripped until they were scrubbed.
+
+    quiet=True asks for the exit code alone, which is the whole assertion for
+    the boot checks. quiet=False returns the rendered config, which is what a
+    caller reading back an interpolated value needs.
     """
     return subprocess.run(
         [
@@ -439,7 +443,7 @@ def _compose_probe(env_file, compose_file):
             "--env-file",
             str(env_file),
             "config",
-            "-q",
+            *(["-q"] if quiet else []),
         ],
         capture_output=True,
         text=True,
@@ -488,3 +492,44 @@ def test_the_compose_check_actually_bites(tmp_path):
     result = _compose_probe(env_path, REPO_ROOT / "docker-compose.yml")
     assert result.returncode != 0, "config -q accepted a file with no POSTGRES_PASSWORD"
     assert "POSTGRES_PASSWORD" in result.stderr + result.stdout
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="needs the compose CLI")
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("latest", "minnixtx/reeltalk:latest"),
+        ("1.2.3", "minnixtx/reeltalk:1.2.3"),
+    ],
+)
+def test_prebuilt_version_takes_latest_or_an_exact_release(tmp_path, value, expected):
+    """Both documented shapes of REELTALK_VERSION have to reach the image line.
+
+    Nothing parses this variable: it is compose interpolation, not an app
+    setting, so the tag is whatever the value says. That is the contract the
+    deployer docs now name, and it is worth a pin because either half breaks
+    silently on its own. The numbered case deliberately uses a tag that is not
+    the shipped default, so the assertion proves the value passes through
+    verbatim rather than resolving to the fallback.
+
+    ENV_FILE is aimed at this same file so the check never leans on the checkout
+    owning a .env: env_file resolves relative to the compose file, and a fresh
+    clone has none, the file being gitignored.
+    """
+    env = tmp_path / ".env"
+    env.write_text(
+        f"ENV_FILE={env}\n"
+        "POSTGRES_USER=reeltalk\n"
+        "POSTGRES_DB=reeltalk\n"
+        "POSTGRES_PASSWORD=x\n"
+        f"REELTALK_VERSION={value}\n"
+    )
+
+    result = _compose_probe(env, REPO_ROOT / "docker-compose.prebuilt.yml", quiet=False)
+    assert result.returncode == 0, result.stderr
+    pulled = {
+        line.split("image:", 1)[1].strip()
+        for line in result.stdout.splitlines()
+        if "minnixtx/reeltalk" in line
+    }
+    assert pulled == {expected}, result.stdout
