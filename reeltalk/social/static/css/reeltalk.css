@@ -1920,11 +1920,16 @@ ul.errorlist {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 0.7rem;
 }
 
+/* nowrap on the link, not the row: when the row runs out of room it breaks
+   between links instead of inside one, so "About This Site" never becomes
+   "About This" over "Site". */
 .footer-links a {
   font-size: 0.82rem;
+  white-space: nowrap;
 }
 
 .footer-sep {
@@ -1982,6 +1987,13 @@ ul.errorlist {
 
   .footer-signoff {
     justify-content: center;
+  }
+
+  /* Below this width the row cannot promise a pipe always lands between two
+     links — at 320px one strands at the end of the first line. The separators
+     are dropped here for the same reason they are dropped in the rail. */
+  .footer-sep {
+    display: none;
   }
 
   .footer-neon {
@@ -2382,6 +2394,24 @@ button:disabled {
 
 .site-footer--rail .footer-signoff {
   justify-content: center;
+}
+
+/* Four links and three pipes need roughly 340px; the rail gives the row about
+   290px, so the inline row broke each link's own text in half — "Getting" over
+   "Started", "About This" over "Site" — with the pipes left floating at
+   mid-height between the fragments. Two rows of two fixes it: the columns are
+   auto-sized to the wider label in each, so the pairs align, and the
+   separators go, because a pipe separates items on a line and says nothing
+   once they are stacked. */
+.site-footer--rail .footer-links {
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: center;
+  gap: 0.35rem 1.25rem;
+}
+
+.site-footer--rail .footer-sep {
+  display: none;
 }
 
 /* The brand block centres on the tagline, not on itself. The single auto column

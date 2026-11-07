@@ -164,6 +164,31 @@ def _media_block(max_width: str) -> str:
     return CSS[start : pos - 1]
 
 
+def _media_blocks(max_width: str) -> list[str]:
+    """Every ``@media (max-width: <max_width>) { … }`` block in the sheet.
+
+    A width is not unique: the stylesheet carries four separate 40rem blocks,
+    the footer's own well below the first, so a probe that stops at the first
+    match reads the wrong block and finds nothing in it.
+    """
+    marker = f"@media (max-width: {max_width}) {{"
+    blocks = []
+    for match in re.finditer(re.escape(marker), CSS):
+        start = match.end()
+        depth = 1
+        pos = start
+        while depth:
+            char = CSS[pos]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+            pos += 1
+        blocks.append(CSS[start : pos - 1])
+    assert blocks, f"no {marker!r} block in the shipped stylesheet"
+    return blocks
+
+
 # --- The two placements ---------------------------------------------------
 
 
@@ -318,6 +343,37 @@ def test_the_wide_footer_band_rule_is_untouched():
     decls = _decl_map(_rule_for(".site-footer .container"))
     assert decls["grid-template-columns"] == "1fr auto 1fr"
     assert decls["max-width"] == "72rem"
+
+
+@pytest.mark.django_db
+def test_the_rail_link_row_is_two_rows_of_two_without_pipes():
+    """The inline row does not fit a 20rem column: four links and three pipes
+    want roughly 340px against the ~290px the rail leaves, and a flex row with
+    no wrap spends the shortfall breaking each link's own text in half —
+    "Getting" over "Started", "About This" over "Site" — with the pipes left
+    floating between the fragments. So the rail drops the row to a two-column
+    grid and hides the separators, which separate items on a line and say
+    nothing once the items are stacked."""
+    links = _decl_map(_rule_for(".site-footer--rail .footer-links"))
+    assert links["display"] == "grid"
+    assert links["grid-template-columns"] == "auto auto"
+    assert links["justify-content"] == "center"
+    assert _decl_map(_rule_for(".site-footer--rail .footer-sep"))["display"] == "none"
+    # A link breaks between links, never inside one, wherever the row runs out
+    # of room. The wide band keeps its inline row and its pipes.
+    assert _decl_map(_rule_for(".footer-links"))["display"] == "flex"
+    assert _decl_map(_rule_for(".footer-links a"))["white-space"] == "nowrap"
+    assert "display" not in _decl_map(_rule_for(".footer-sep"))
+    # ...except under the phone breakpoint, where a wrapped row can strand a
+    # pipe at the end of a line, so the wide band drops the separators too.
+    seps = [
+        decls
+        for block in _media_blocks("40rem")
+        for selectors, decls in _rules_in(block)
+        if ".footer-sep" in selectors
+    ]
+    assert len(seps) == 1, "expected one .footer-sep rule in a 40rem block"
+    assert _decl_map(seps[0])["display"] == "none"
 
 
 @pytest.mark.django_db
