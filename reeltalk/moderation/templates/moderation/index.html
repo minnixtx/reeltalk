@@ -32,13 +32,15 @@
               <a href="{% url 'user-profile' card.target_user.localname %}">@{{ card.target_user.localname }}</a>
             {% endif %}
           </span>
-          {% if card.target_status and card.target_status.visibility != "public" %}
-          {# The audience tag (visibility V4). The queue shows reported #}
+          {% if card.target_status %}
+          {# The audience marker (visibility V4). The queue shows reported #}
           {# posts whatever their audience - a moderator decides from the #}
-          {# text - but they are entitled to know they are reading something #}
-          {# the author did not publish to the world. Same tag the feed row, #}
-          {# the film page and the post page draw. #}
-          <span class="audience">{{ card.target_status.get_visibility_display }}</span>
+          {# text - and every card now states its audience, the public ones #}
+          {# too since the 2026-11-07 pass; the sentence under the text is #}
+          {# what tells a moderator they are reading something the author #}
+          {# did not publish to the world. Same drawing the feed row, the #}
+          {# film page and the post page draw. #}
+          {% include "_audience_tag.html" with visibility=card.target_status.visibility label=card.target_status.get_visibility_display %}
           {% endif %}
           {% if card.can_view_post %}
             {# A link to the post itself, alongside the copy rendered below. #}

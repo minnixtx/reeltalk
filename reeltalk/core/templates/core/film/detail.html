@@ -70,10 +70,11 @@
             <a class="review-author" href="{% url 'user-profile' review.user.localname %}">{{ review.user.localname }}</a>
             {% if review.rating %}<span class="rating" title="{{ review.rating|floatformat:'-1' }} / 5">{{ review.rating|stars }}</span>{% endif %}
             <span class="post-date">{{ review.published_date|date:"Y-m-d" }}</span>
-            {# The audience tag (visibility V1): the list is already filtered to #}
-            {# what this reader may read, so a tag here is the author seeing their #}
-            {# own private review, and nobody else's. #}
-            {% if review.visibility != "public" %}<span class="audience">{{ review.get_visibility_display }}</span>{% endif %}
+            {# The audience marker (visibility V1): the list is already filtered to #}
+            {# what this reader may read, so a marker here is the author seeing their #}
+            {# own private review, and nobody else's. Public carries one too since #}
+            {# the 2026-11-07 pass. #}
+            {% include "_audience_tag.html" with visibility=review.visibility label=review.get_visibility_display %}
             {% if user.is_authenticated and review.user_id == user.id %}
               <form method="post" action="{% url 'status-delete' review.id %}" class="inline review-delete">
                 {% csrf_token %}

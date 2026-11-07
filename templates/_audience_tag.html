@@ -1,0 +1,45 @@
+{% comment %}
+The audience marker (visibility V1): one drawing per audience.
+
+One partial rather than three copies of the art, because the marker is drawn on
+four surfaces - the feed row, the post page, the review list on a film page and
+the moderator queue - and a drawing that lives in four places is four chances to
+draw the wrong padlock on one of them.
+
+It replaced the word tags on 2026-11-07 (owner pass): "Private" and "Followers"
+became drawings and Public gained one of its own, so a row now says who it went
+to whatever the answer is. The word did not go away - it is the tooltip and the
+accessible name - so the icon is a shorter way of saying the same thing rather
+than a shape a member has to learn first.
+
+Callers pass both halves: ``visibility`` picks the drawing, ``label`` carries the
+word, which comes off ``Visibility.label`` because that is the one place the
+marker's wording lives. A value that is none of the three draws nothing, exactly
+as the word tag did: a marker naming an audience we do not have would be worse
+than no marker.
+{% endcomment %}
+{% if visibility == "private" %}
+  <span class="audience" role="img" title="{{ label }}" aria-label="{{ label }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <path d="M6.5 10V7.5a5.5 5.5 0 0 1 11 0V10" />
+      <rect x="4.5" y="10" width="15" height="11" rx="2" />
+      <path d="M12 14.5v2.25" />
+    </svg>
+  </span>
+{% elif visibility == "followers" %}
+  <span class="audience" role="img" title="{{ label }}" aria-label="{{ label }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <circle cx="9" cy="8" r="3.25" />
+      <path d="M2.75 20v-1.25a6.25 4.75 0 0 1 12.5 0V20" />
+      <path d="M16.5 5.5a2.75 2.75 0 0 1 0 5.5m1 3a4.75 4.75 0 0 1 3.75 4.64V20" />
+    </svg>
+  </span>
+{% elif visibility == "public" %}
+  <span class="audience" role="img" title="{{ label }}" aria-label="{{ label }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="9" />
+      <ellipse cx="12" cy="12" rx="4" ry="9" />
+      <path d="M3 12h18" />
+    </svg>
+  </span>
+{% endif %}

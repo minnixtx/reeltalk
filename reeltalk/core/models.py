@@ -1079,18 +1079,21 @@ class FeedEntry:
 
     @property
     def audience_label(self) -> str:
-        """The marker a row draws for its audience, or "" for a public row.
+        """The audience word the row's marker is drawn with, "" for no marker.
 
         Read off the choices rather than a template string so the words a member
-        sees are one answer in one place (visibility V1). An unrecognised value
-        draws nothing: a marker naming an audience we do not have would be worse
-        than no marker.
+        sees are one answer in one place (visibility V1). Every row that carries
+        an audience carries a word now - public included, since the marker became
+        a drawing on 2026-11-07 - so the empty string is left to mean the one case
+        that genuinely has no audience to name. An unrecognised value draws
+        nothing: a marker naming an audience we do not have would be worse than no
+        marker.
         """
         try:
             audience = Visibility(self.visibility)
         except ValueError:
             return ""
-        return "" if audience == Visibility.PUBLIC else audience.label
+        return audience.label
 
     @property
     def kind_rank(self) -> int:

@@ -53,6 +53,17 @@ def logged_in(user) -> Client:
     return client
 
 
+def audience_marker(word: str) -> str:
+    """The open tag of the rendered audience marker for ``word``.
+
+    The tag, not the bare word: "Private" appears in the composer's radio label
+    too, so a substring test would pass on a card that drew no marker at all. The
+    marker is an icon since the owner's pass of 2026-11-07 and the word lives in
+    its tooltip and accessible name, which is what this pins.
+    """
+    return f'<span class="audience" role="img" title="{word}" aria-label="{word}">'
+
+
 def _review(user, film, marker, visibility) -> Status:
     return Status.objects.create(
         user=user,
@@ -136,7 +147,7 @@ def test_the_queue_marks_a_reported_followers_only_post_and_shows_its_text(
     report_as(logged_in(follower), posts["followers"])
     page = logged_in(mod).get(reverse("moderation")).content.decode()
     assert FOLLOWERS_MARK in page
-    assert '<span class="audience">Followers</span>' in page
+    assert audience_marker("Followers") in page
     assert "marked Followers" in page
     assert "report-target-link" not in page
 
@@ -175,7 +186,7 @@ def test_a_forwarded_remote_report_on_a_private_post_lands_marked(
     assert Report.objects.get(target_status=private).target_user_id == author.pk
     page = logged_in(mod).get(reverse("moderation")).content.decode()
     assert PRIVATE_MARK in page
-    assert '<span class="audience">Private</span>' in page
+    assert audience_marker("Private") in page
     assert "marked Private" in page
     assert "report-target-link" not in page
 
@@ -186,7 +197,13 @@ def test_the_view_post_link_is_offered_for_a_public_report(db, author, mod, post
     report_as(logged_in(mod), posts["public"])
     page = logged_in(mod).get(reverse("moderation")).content.decode()
     assert "report-target-link" in page
-    assert '<span class="audience">' not in page  # a public post carries no marker
+    # A public post carries its marker too since the 2026-11-07 pass — every
+    # card states its audience, and the globe is the honest answer here. What
+    # stays gated on a narrow audience is the written sentence under the text,
+    # which is the card telling the moderator they are reading something that
+    # was not published to the world.
+    assert audience_marker("Public") in page
+    assert "marked Public" not in page
 
 
 @pytest.mark.django_db

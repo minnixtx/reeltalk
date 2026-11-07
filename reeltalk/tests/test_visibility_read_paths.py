@@ -115,6 +115,17 @@ def _login(localname: str) -> Client:
     return client
 
 
+def audience_marker(word: str) -> str:
+    """The open tag of the rendered audience marker for ``word``.
+
+    The tag, not the bare word: "Private" is also the composer's radio label, so
+    a substring test would pass on a page that drew no marker at all. The marker
+    is an icon since the owner's pass of 2026-11-07 and the word lives in its
+    tooltip and accessible name, which is what this pins.
+    """
+    return f'<span class="audience" role="img" title="{word}" aria-label="{word}">'
+
+
 def _review(user, film, marker, visibility) -> Status:
     return Status.objects.create(
         user=user,
@@ -593,11 +604,11 @@ def test_the_marker_names_the_audience_only_to_those_entitled_to_see_it(
     composer's radio label, so a substring test would pass on a page that drew
     no marker at all.
     """
-    private_marker = '<span class="audience">Private</span>'
+    private_marker = audience_marker("Private")
     assert private_marker in _login("author").get("/").content.decode()
     assert private_marker not in _login("stranger").get("/").content.decode()
     follower.follows.add(author)
-    assert '<span class="audience">Followers</span>' in (
+    assert audience_marker("Followers") in (
         _login("follower").get("/").content.decode()
     )
 
@@ -788,8 +799,8 @@ def test_the_author_reads_their_whole_list_with_its_markers(db, author, posts):
     # The rendered tag, not the bare word - same trap as the home-feed marker
     # test above: "Private" appears in other markup, and a substring test
     # would pass on a page that drew no marker at all.
-    assert '<span class="audience">Private</span>' in body
-    assert '<span class="audience">Followers</span>' in body
+    assert audience_marker("Private") in body
+    assert audience_marker("Followers") in body
 
 
 @pytest.mark.django_db

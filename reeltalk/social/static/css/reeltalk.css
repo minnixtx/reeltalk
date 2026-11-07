@@ -1252,24 +1252,30 @@ ul.errorlist {
   color: var(--white);
 }
 
-/* The audience tag (visibility V1). A member has to be able to tell at a glance
-   which audience one of their own posts went to, and a tag is the cheapest way
-   to say it without a sentence. Only rows the reader is allowed to read ever
-   carry one - a private row is invisible to everyone but its author - so the tag
-   never advertises a post nobody may open. Metadata treatment, not chrome: the
-   UI face every other small label in the row already uses, the thin brown rule,
-   and the muted tone, so it reads as a fact about the row rather than something
-   to click. */
+/* The audience marker (visibility V1). A member has to be able to tell at a
+   glance which audience a post went to, and a drawing is the cheapest way to
+   say it without a sentence. Only rows the reader is allowed to read ever
+   carry one - a private row is invisible to everyone but its author - so the
+   marker never advertises a post nobody may open.
+
+   It was a word inside a bordered label until the owner's pass of 2026-11-07,
+   which took the rule off and left the bare drawing in the row's metadata
+   line, in the muted brown the date and every other small fact on the row
+   already uses. The word survives as the tooltip and the accessible name on the
+   wrapper, so the drawing never has to be memorised to be read. The three
+   drawings are inline in ``templates/_audience_tag.html`` and take this colour
+   through ``currentColor``, which is why nothing here sets a fill. */
 .audience {
-  border: 1px solid var(--line);
+  align-items: center;
   color: var(--muted);
-  font-family: var(--ui);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  line-height: 1.4;
-  padding: 0 0.4rem;
-  text-transform: uppercase;
-  white-space: nowrap;
+  display: inline-flex;
+  flex: none;
+}
+
+.audience svg {
+  display: block;
+  height: 1rem;
+  width: 1rem;
 }
 
 /* The audience choice in the finish modal (visibility V1). The modal's other
