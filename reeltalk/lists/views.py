@@ -36,7 +36,7 @@ from reeltalk.activitypub.broadcast import (
     broadcast_list_update,
 )
 from reeltalk.core.catalog import create_or_match_film, search_local
-from reeltalk.core.models import Film
+from reeltalk.core.models import Film, Visibility, audience_q, may_read
 from reeltalk.core.tmdb import TmdbError, is_configured, search_films
 from reeltalk.core.views import (
     SUGGEST_LIMIT,
@@ -68,9 +68,13 @@ from reeltalk.social.views import _profile_head_context, _resolve_profile_user
 def list_detail(request, list_id):
     """One list: its head, its ranked films, and the thread on its face (L9/L10).
 
-    Publicly readable, anonymously, exactly as the post page is (L4 makes a
-    list public, so there is no privacy rule to apply on this read path). The
-    hide rules are copied from ``status_detail`` rather than re-derived,
+    Readable by exactly the readers its audience names (W-arc D3 replaces L4's
+    "every list is public"): a public list reads anonymously, exactly as the
+    post page does; a followers-only one reads for the author's followers; a
+    private one reads for the author alone. The answer is the post page's own
+    ``may_read`` on the face, so the list page and the face's own status route
+    cannot disagree about who may open the same ``Status`` under two names. The
+    hide rules below are copied from ``status_detail`` rather than re-derived,
     because this page renders the same ``Status`` under another name and the
     two must not disagree about who can see it:
 
@@ -81,7 +85,10 @@ def list_detail(request, list_id):
       server-level answer, so the whole page goes, not just part of it;
     * a viewer who has **blocked** the author 404s rather than getting a
       lesser view, the same per-viewer rule the post page and the film page
-      apply.
+      apply;
+    * a viewer the **audience** excludes 404s — 404 rather than 403, because a
+      403 confirms the list exists, which is the V1 rule a private post's page
+      already keeps.
 
     The ranked rows are numbered by ``forloop.counter`` in the template, never
     by ``rank``: ``remove_film`` leaves the gap it makes, so ranks can read
@@ -103,6 +110,8 @@ def list_detail(request, list_id):
         raise Http404
 
     face = film_list.status
+    if not may_read(face, request.user):
+        raise Http404
     items = list(film_list.items.select_related("film").order_by("rank", "id"))
     # The same tally the post page computes for the same row, by the same
     # path — a raw count that names the suspension clause itself rather than
@@ -198,16 +207,40 @@ def user_lists(request, localname):
         #
         # ``select_related`` already pulls the whole ``FilmList`` row, so the
         # template's ``save.film_list.deleted`` costs nothing extra.
+        #
+        # The audience filter (W-arc §2 row 5) reads through the saved list's
+        # face. A list's audience cannot change, so a save made while readable
+        # outlives its readability only when the *reader's* entitlement moves -
+        # unfollowing the author ends the followers-row entitlement, and the
+        # card goes with it rather than sitting there pointing at a 404.
         saves = (
             ListSave.objects.filter(user=profile)
             .exclude(film_list__deleted=True, notice_dismissed_at__isnull=False)
-            .select_related("film_list", "film_list__user")
+            .filter(
+                audience_q(
+                    request.user,
+                    field="film_list__status__visibility",
+                    author="film_list__user_id",
+                )
+            )
+            .select_related("film_list", "film_list__user", "film_list__status")
             .annotate(item_count=Count("film_list__items"))
             .order_by("-created")
         )
     else:
+        # §2 row 4: the Made tab shows the lists this viewer may read, not
+        # every list the member made. Same ``audience_q`` as every other list
+        # surface, run through the face; the author sees their whole shelf
+        # because ``feed_member_ids`` includes self (D12).
         made = (
             FilmList.objects.filter(user=profile, deleted=False)
+            .filter(
+                audience_q(
+                    request.user,
+                    field="status__visibility",
+                    author="user_id",
+                )
+            )
             .annotate(item_count=Count("items"))
             .order_by("-created_date", "-id")
         )
@@ -413,7 +446,7 @@ def list_suggest(request, list_id):
 
 @login_required
 def list_create(request):
-    """Make a list: a name and a description, then straight into the editor.
+    """Make a list: a name, a description, an audience, then straight into the editor.
 
     The create page deliberately does not collect films. A ranked row needs a
     list to hang on, so the list is made first and the films come after, from
@@ -424,14 +457,22 @@ def list_create(request):
 
     ``create_list`` takes the **raw markdown** and renders it itself. Nothing
     here renders the description, and nothing here writes a ``FilmList``.
+
+    The audience is the create page's third answer (W-arc D2), pre-checked from
+    the member's account default exactly as the finish modal pre-checks from it
+    - one account default, two doors, no second preference to keep in step. A
+    value the form never offered is refused by the field rather than stored; a
+    hand-built post that names none gets public, the audience every list
+    already had (the composer's fallback rule, ``_posted_visibility``).
     """
     if request.method == "POST":
-        form = ListForm(request.POST)
+        form = ListForm(request.POST, with_visibility=True)
         if form.is_valid():
             film_list = create_list(
                 request.user,
                 title=form.cleaned_data["title"],
                 description=form.cleaned_data["description"],
+                visibility=form.cleaned_data["visibility"] or Visibility.PUBLIC,
             )
             # Broadcast after the service returns, never inside it: the
             # service layer is request-free on purpose and a broadcast has
@@ -442,7 +483,10 @@ def list_create(request):
             messages.success(request, "List created — now add some films.")
             return redirect("list-edit", list_id=film_list.pk)
     else:
-        form = ListForm()
+        form = ListForm(
+            with_visibility=True,
+            initial={"visibility": request.user.default_visibility},
+        )
     return render(request, "lists/create.html", {"form": form})
 
 
@@ -672,16 +716,16 @@ def _savable_list(request, list_id):
     """A list the requesting member may point their Saved tab at, or 404.
 
     Deliberately **not** ``_owned_list``. Saving is the one list write that is
-    not owner-scoped: L4 makes every list public and L12 makes every visible
-    list savable, so any member may save anybody's. Reaching for the owner
-    helper here would be the wrong guard and would quietly make the feature do
-    nothing at all.
+    not owner-scoped: any member may save anybody's list — L12 — but since the
+    W-arc only *readable* lists, because L4's "every list is public" premise is
+    gone (D4). Reaching for the owner helper here would be the wrong guard and
+    would quietly make the feature do nothing at all.
 
     Also deliberately unfiltered on ``local=True``. Increment 7 has to save a
     remote mirror through this exact route, so baking in an assumption that
     the list lives here would leave that path blocked from the inside out.
 
-    The three refusals are copied from ``list_detail``'s hide rules rather
+    The four refusals are copied from ``list_detail``'s hide rules rather
     than re-derived, because R85 says a route must refuse exactly what the
     page withholds:
 
@@ -694,10 +738,14 @@ def _savable_list(request, list_id):
       accepts writes accumulates interactions nobody can ever see the
       reason for;
     * **blocked author** — the page 404s rather than offering a lesser view,
-      so the save route must not offer one either.
+      so the save route must not offer one either;
+    * **audience** — the page 404s for a reader the face's audience excludes,
+      so the door runs the same ``may_read`` on the same face (D4: a reader
+      who cannot read a list cannot save it, and the control is never drawn
+      for them because the page that would carry it does not render).
     """
     film_list = get_object_or_404(
-        FilmList.objects.select_related("user"), pk=list_id, deleted=False
+        FilmList.objects.select_related("user", "status"), pk=list_id, deleted=False
     )
     if film_list.user.suspended_at is not None:
         raise Http404
@@ -707,6 +755,8 @@ def _savable_list(request, list_id):
         else set()
     )
     if film_list.user_id in blocked_ids:
+        raise Http404
+    if not may_read(film_list.status, request.user):
         raise Http404
     return film_list
 

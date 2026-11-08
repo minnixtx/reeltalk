@@ -26,6 +26,14 @@
       <span class="post-date">{{ film_list.created_date|date:"Y-m-d" }}</span>
       <span class="list-length muted">{{ items|length }} film{{ items|length|pluralize }}</span>
       {% comment %}
+      The audience marker (W-arc). The same partial every other surface draws -
+      the page only renders for a reader the audience admits, so the marker is
+      the author (or a follower) seeing which audience the list went to, never
+      a hint about something withheld. Public carries one too, same ruling as
+      the feed row's marker (owner pass, 2026-11-07).
+      {% endcomment %}
+      {% include "_audience_tag.html" with visibility=film_list.status.visibility label=film_list.status.get_visibility_display %}
+      {% comment %}
       The like control names the STATUS, not the list (L9/L10). What gets
       applauded is the list's post face, so the existing /status/<id>/like/
       endpoint serves a list unchanged — same toggle, same Like row, same

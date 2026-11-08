@@ -31,7 +31,7 @@ from collections.abc import Iterable
 from django.db import transaction
 from django.utils import timezone
 
-from reeltalk.core.models import Film, Status
+from reeltalk.core.models import Film, Status, Visibility
 from reeltalk.core.utils import render_markdown
 from reeltalk.lists.models import FilmList, ListItem, ListSave
 
@@ -48,6 +48,7 @@ def create_list(
     title: str,
     description: str = "",
     films: Iterable[Film] = (),
+    visibility: str = Visibility.PUBLIC,
 ) -> FilmList:
     """Make a list: its row, its post face, and optionally its first films.
 
@@ -55,6 +56,12 @@ def create_list(
     makes the face part of what a list is, not an accessory to it). It is a
     ``LIST`` status with no film, which is exactly what the narrowed anchoring
     rule in ``Status.save`` permits and nothing else does.
+
+    ``visibility`` is the list's audience, stamped on the face at creation
+    (W-arc D1: the face is the one answer, no second column on ``FilmList``).
+    **Nothing writes it afterwards** - the immutability of a list's audience is
+    the absence of a writer here, not a form field that hides one, and the edit
+    path grows no control and no writer to match.
 
     ``description`` is the markdown **source**. It is rendered here and both
     halves are written together, so no caller can store a description without
@@ -64,7 +71,9 @@ def create_list(
     The face gets no content: see ``FilmList`` for why the list's text lives in
     exactly one place.
     """
-    face = Status.objects.create(user=user, status_type=Status.Type.LIST)
+    face = Status.objects.create(
+        user=user, status_type=Status.Type.LIST, visibility=visibility
+    )
     film_list = FilmList.objects.create(
         user=user,
         title=title,

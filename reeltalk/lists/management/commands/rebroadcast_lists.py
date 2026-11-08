@@ -28,6 +28,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.test import RequestFactory
 
 from reeltalk.activitypub.broadcast import broadcast_list_update
+from reeltalk.core.models import sends_externally
 from reeltalk.lists.models import FilmList
 
 
@@ -76,6 +77,17 @@ class Command(BaseCommand):
 
         if options["dry_run"]:
             for film_list in lists:
+                if not sends_externally(film_list.status):
+                    # Say so rather than naming a fan-out that will not
+                    # happen: the audience keeps this list at home (W-arc D5),
+                    # and a dry run that promised followers here would be a
+                    # lie the real run then contradicts.
+                    self.stdout.write(
+                        f"[dry run] list {film_list.pk} "
+                        f"({film_list.user.localname}: {film_list.title}) "
+                        f"-> audience keeps it home, nothing would be sent"
+                    )
+                    continue
                 audience = film_list.user.followers.exclude(local=True).count()
                 self.stdout.write(
                     f"[dry run] list {film_list.pk} "
@@ -85,7 +97,16 @@ class Command(BaseCommand):
             return
 
         failures = []
+        withheld = 0
         for film_list in lists:
+            if not sends_externally(film_list.status):
+                # The gate itself lives in ``broadcast._announce``, which this
+                # call passes through whatever the answer here is. Counting
+                # the same rule here is reporting, not a second enforcement:
+                # without it the summary line would claim a re-send that the
+                # gate silently swallowed.
+                withheld += 1
+                continue
             for failure in broadcast_list_update(request, film_list) or []:
                 failures.append(failure)
                 self.stderr.write(
@@ -94,7 +115,8 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Re-sent {len(lists)} list(s) as Update; "
+                f"Re-sent {len(lists) - withheld} list(s) as Update; "
+                f"{withheld} withheld by audience; "
                 f"{len(failures)} delivery failure(s)."
             )
         )

@@ -42,8 +42,9 @@ from django.contrib.auth import get_user_model
 from django.test import Client, RequestFactory
 
 from reeltalk.activitypub import crypto, signatures
+from reeltalk.activitypub.identity import PUBLIC_COLLECTION
 from reeltalk.activitypub.objects import LIST_EXTENSION, note_document
-from reeltalk.core.models import Film, Status
+from reeltalk.core.models import Film, Status, Visibility
 from reeltalk.lists.models import FilmList, ListItem, ListSave
 from reeltalk.lists.services import create_list
 from reeltalk.notifications.models import Notification
@@ -1155,3 +1156,38 @@ def test_the_l6_silence_control_a_local_edit_on_a_list_does_deliver(carol, alice
     client.post(f"/list/{film_list.pk}/edit/", {"title": "Renamed", "description": ""})
     assert len(responses.calls) == 1
     assert json.loads(responses.calls[0].request.body)["type"] == "Update"
+
+
+# --- the audience the peer addressed (W1, plan §2 row 12) --------------------
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_a_private_list_note_files_its_face_private(carol, keypair, alice):
+    """The mirror files what the peer addressed (V1's rule, now proven for a
+    list face): empty ``to``/``cc`` arrays are the peer's claim of a private
+    post, and the read paths then hide the mirror exactly as they hide a local
+    private list. The public control below is what makes this mean the arrays
+    and not a writer that ignores them."""
+    private_pem, _public = keypair
+    ext = _extension([], url=f"{PEER}/list/91/", name="Quiet Shelf")
+    note = _note(ext, url=f"{PEER}/notes/91/", to=[], cc=[])
+    assert _deliver(private_pem, _activity("Create", note, 91)).status_code == 202
+    face = Status.objects.get(remote_url=f"{PEER}/notes/91/")
+    assert face.visibility == Visibility.PRIVATE
+    # And the mirror's own page refuses a member the peer's audience excludes.
+    mirror = FilmList.objects.get(remote_url=f"{PEER}/list/91/")
+    client = Client()
+    assert client.login(username="alice", password="s3cretpass")
+    assert client.get(f"/list/{mirror.pk}/").status_code == 404
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_a_public_list_note_files_its_face_public(carol, keypair):
+    private_pem, _public = keypair
+    ext = _extension([], url=f"{PEER}/list/92/", name="Loud Shelf")
+    note = _note(ext, url=f"{PEER}/notes/92/", to=[PUBLIC_COLLECTION])
+    assert _deliver(private_pem, _activity("Create", note, 92)).status_code == 202
+    face = Status.objects.get(remote_url=f"{PEER}/notes/92/")
+    assert face.visibility == Visibility.PUBLIC

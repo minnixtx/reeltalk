@@ -16,7 +16,41 @@
 
   <form class="list-text-form" method="post" action="{% url 'list-create' %}">
     {% csrf_token %}
-    {{ form.as_p }}
+    {% comment %}
+    The audience field is drawn by hand below rather than left to ``as_p``,
+    so the two audience controls on the site - this one and the finish modal's
+    - are the same fieldset with the same treatment rather than two that
+    drift. The form field still exists and still validates; only the drawing
+    moves here. The choice is fixed once the list is made (W-arc D2), and the
+    sentence saying so in the member's words is W3's copy pass.
+
+    The remaining fields are drawn with the loop body Django's own ``p.html``
+    uses per field, because **a BoundField has no ``as_p``** - that is a Form
+    method. A loop calling ``{{ field.as_p }}`` renders *nothing at all* for
+    every field it touches, silently, because ``BoundField`` sets
+    ``silent_variable_failure``; this page once shipped with no name or
+    description inputs for exactly that reason, and the owner's browser pass
+    caught what the render tests had not been told to look for.
+    {% endcomment %}
+    {% for field in form %}
+      {% if field.name != "visibility" %}
+        {{ field.errors }}
+        <p{% with classes=field.css_classes %}{% if classes %} class="{{ classes }}"{% endif %}{% endwith %}>
+          {% if field.label %}{{ field.label_tag }}{% endif %}
+          {{ field }}
+          {% if field.help_text %}
+            <span class="helptext"{% if field.auto_id %} id="{{ field.auto_id }}_helptext"{% endif %}>{{ field.help_text|safe }}</span>
+          {% endif %}
+        </p>
+      {% endif %}
+    {% endfor %}
+    <fieldset class="audience-choice">
+      <legend>Who can see this</legend>
+      <label><input type="radio" name="visibility" value="public" {% if form.visibility.value == "public" %}checked{% endif %}> Public</label>
+      <label><input type="radio" name="visibility" value="followers" {% if form.visibility.value == "followers" %}checked{% endif %}> Followers</label>
+      <label><input type="radio" name="visibility" value="private" {% if form.visibility.value == "private" %}checked{% endif %}> Private</label>
+      {{ form.visibility.errors }}
+    </fieldset>
     <button type="submit" class="btn cinema-button cinema-button--primary">Create list</button>
     <a class="list-cancel" href="{% url 'user-lists' user.localname %}">Cancel</a>
   </form>

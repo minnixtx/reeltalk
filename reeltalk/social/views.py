@@ -836,8 +836,13 @@ def _profile_head_context(request, profile, is_self) -> dict:
     there is something behind it. The count is the whole decision, so it is
     made here rather than in the template - and it counts the live lists
     only, because FilmList.delete() is soft and a deleted list is still a
-    row in the table. The strip also only offers the tab on somebody else's
-    profile (``is_self`` below answers that half), so the count is read on
+    row in the table. Since the W-arc it also counts only the lists **this
+    viewer may read**: a count that lights a tab pointing at lists the
+    reader cannot open is the leak the plan's §7 names first, so the count
+    runs through the same ``audience_q`` as every other list surface and
+    the tab lights exactly when the page behind it would show something.
+    The strip also only offers the tab on somebody else's profile
+    (``is_self`` below answers that half), so the count is read on
     both pages that share this builder; keeping it here costs one indexed
     COUNT and buys the guarantee the builder exists for.
 
@@ -849,7 +854,11 @@ def _profile_head_context(request, profile, is_self) -> dict:
     per-viewer state, which keeps one profile one page for every reader.
     """
     data = {"profile_user": profile, "is_self": is_self}
-    data["list_count"] = FilmList.objects.filter(user=profile, deleted=False).count()
+    data["list_count"] = (
+        FilmList.objects.filter(user=profile, deleted=False)
+        .filter(audience_q(request.user, field="status__visibility", author="user_id"))
+        .count()
+    )
     visible = {"suspended_at__isnull": True, "banned_at__isnull": True}
     data["follower_count"] = profile.followers.filter(**visible).count()
     data["following_count"] = profile.follows.filter(**visible).count()

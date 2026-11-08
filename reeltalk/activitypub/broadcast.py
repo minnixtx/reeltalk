@@ -242,7 +242,7 @@ def broadcast_shelf_event(request, user, film, identifier: str, *, added: bool) 
     return _deliver_to_followers(request, user, activity)
 
 
-# --- lists (§2K increment 6, L1 / L11 / L13) --------------------------------
+# --- lists (§2K increment 6, L1 / L11 / L13; audience gate W-arc D5) ---------
 #
 # A list travels as its own post face's ``Note``, so all three activities are
 # the status ones with the face substituted -- ``objects.note_document`` is
@@ -255,8 +255,17 @@ def broadcast_shelf_event(request, user, film, identifier: str, *, added: bool) 
 # alone, so a remote user *named* in a post never received that post's
 # tombstone and kept a copy of something the network had been told was gone).
 #
-# For a list the two sets are equal **today** -- ``create_list`` renders the
-# description with ``mentions=False``, so a list face carries no mention
+# **And all three share the outbound gate**, because they go through
+# ``_announce`` like every status broadcast (W-arc D5). They used to call
+# ``_deliver_signed`` directly, which bypassed the ``sends_externally`` check
+# every status passes -- a hole where a private list made here was still
+# delivered to every remote follower. A private list now sends nothing at any
+# of the three doors, and a followers-only list is addressed to the followers
+# collection by ``objects.status_audience``, with the mention set dropped the
+# same way a followers-only status drops it.
+#
+# For a list the two target sets are equal **today** -- ``create_list`` renders
+# the description with ``mentions=False``, so a list face carries no mention
 # rows and ``_status_targets`` reduces to the follower set. It is still the
 # right call, for a reason that is about the next change rather than this one:
 # one audience definition across create, update and delete means that if a
@@ -275,10 +284,13 @@ def broadcast_list_create(request, film_list) -> list[DeliveryFailure]:
     films it was made with, which for the create form is none -- the member
     adds films from the editor afterwards, and each of those is an
     ``Update``.
+
+    A private list never leaves the instance and is refused by
+    :func:`_announce` whatever the caller does.
     """
     face = film_list.status
     activity = create_activity(face, film_list.user, request)
-    return _deliver_signed(request, film_list.user, activity, _status_targets(face))
+    return _announce(request, face, activity)
 
 
 def broadcast_list_update(request, film_list) -> list[DeliveryFailure]:
@@ -298,10 +310,13 @@ def broadcast_list_update(request, film_list) -> list[DeliveryFailure]:
     opposite of ``mark_watched_view``, which broadcasts on ``existing_review``
     being truthy with no change detection at all. Saving the same review text
     twice there fans out a second ``Update``; a list must not inherit that.
+
+    The audience gate rides inside ``_announce``, so the repair command
+    (``rebroadcast-lists``) passes it without knowing the gate exists.
     """
     face = film_list.status
     activity = update_activity(face, film_list.user, request)
-    return _deliver_signed(request, film_list.user, activity, _status_targets(face))
+    return _announce(request, face, activity)
 
 
 def broadcast_list_delete(request, film_list) -> list[DeliveryFailure]:
@@ -314,10 +329,15 @@ def broadcast_list_delete(request, film_list) -> list[DeliveryFailure]:
     which list it is deleting. The activity id is the stable
     ``#delete-<local_id>``, so a re-send dedups on the peer rather than
     stacking tombstones.
+
+    The Delete carries the Note inline, which is exactly why it needs the
+    gate: a private list was never delivered, so there is nobody to tell, and
+    the tombstone must not carry its content to the world (the same shape as
+    ``broadcast_status_delete``'s rule).
     """
     face = film_list.status
     activity = delete_activity(face, film_list.user, request)
-    return _deliver_signed(request, film_list.user, activity, _status_targets(face))
+    return _announce(request, face, activity)
 
 
 def broadcast_actor_update(request, user) -> list[DeliveryFailure]:
