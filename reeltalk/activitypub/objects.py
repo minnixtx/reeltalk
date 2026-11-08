@@ -662,7 +662,37 @@ def like_activity(liker, target, request, *, undo: bool) -> dict:
     }
 
 
-def shelf_event_document(user, film, identifier: str, request) -> dict:
+def shelf_event_audience(user, visibility) -> tuple[list[str], list[str]]:
+    """The ``to``/``cc`` pair for a ShelfEvent (W-arc W2).
+
+    The same three shapes :func:`status_audience` puts on a Note, for the same
+    reason: a peer files what it receives from these arrays and from nothing
+    else, and an activity carrying neither falls through to **direct** on the
+    peer's parser - which is the R143 bug one object type later, a shelf event
+    counted on the account and returned by nothing.
+
+    One difference from a Note, and it is a fact about the object rather than a
+    shortcut: a ShelfEvent mentions nobody, so the public pair is the public
+    collection in ``to`` and the followers collection in ``cc`` with nothing
+    after it, and the followers pair has an empty ``cc`` outright. The private
+    pair is spelled out even though ``audience_sends_externally`` refuses that
+    audience upstream, for the reason given in :func:`status_audience` - an
+    address-less activity is the worst shape to have sent, and the empty arrays
+    are the narrowest thing the wire can say.
+
+    ``visibility`` is the audience of the shelf row the event is about, which the
+    caller holds because the row is often already deleted by the time a removal
+    is announced.
+    """
+    followers = absolute_uri(followers_path(user.localname))
+    if visibility == Visibility.FOLLOWERS:
+        return [followers], []
+    if visibility == Visibility.PRIVATE:
+        return [], []
+    return [PUBLIC_COLLECTION], [followers]
+
+
+def shelf_event_document(user, film, identifier: str, request, visibility) -> dict:
     """A **ShelfEvent** object — a user putting a film on one of the D1 shelves.
 
     The custom type follows D15's precedent (ReelTalk's own wire types). The
@@ -670,7 +700,13 @@ def shelf_event_document(user, film, identifier: str, request) -> dict:
     reuses the same identity, so applying the event stays idempotent by origin
     id. ``film`` carries the referenced film's canonical wire id (the same
     custom field as Note); ``shelf`` is the D1 identifier.
+
+    The ``to``/``cc`` pair rides on the object as well as on the activity that
+    wraps it, exactly as :func:`note_document` does it: that is where a peer
+    puts it, and a receiver that reads the object rather than the envelope still
+    has to be able to tell which audience the add went to.
     """
+    to, cc = shelf_event_audience(user, visibility)
     return {
         "@context": _CONTEXT,
         "id": f"{absolute_uri(actor_path(user.localname))}"
@@ -678,21 +714,34 @@ def shelf_event_document(user, film, identifier: str, request) -> dict:
         "type": "ShelfEvent",
         "film": film_url(request, film),
         "shelf": identifier,
+        "to": to,
+        "cc": cc,
     }
 
 
-def shelf_event_activity(user, film, identifier: str, request, *, added: bool) -> dict:
+def shelf_event_activity(
+    user, film, identifier: str, request, *, added: bool, visibility
+) -> dict:
     """A ``Create``/``Delete`` activity wrapping a ShelfEvent (M4 increment 6).
 
     The activity id is unique per event (uuid fragment): an unshelve followed
     by a re-shelve must not collide on it, or the re-shelve would dedup as a
     redelivery of the original. The object id stays stable (see
     ``shelf_event_document``).
+
+    ``visibility`` is required rather than defaulted: the audience of a shelf
+    event is the audience of the row it is about, and on a removal that row is
+    already gone by the time this runs, so the caller has to name the value it
+    read while the row was still there. A default would be a silent guess about
+    who is allowed to hear that a film left somebody's Watchlist.
     """
+    to, cc = shelf_event_audience(user, visibility)
     return {
         "id": f"{absolute_uri(outbox_path(user.localname))}"
         f"#shelve-{identifier}-{film_local_id(film)}-{uuid.uuid4().hex}",
         "type": "Create" if added else "Delete",
         "actor": absolute_uri(actor_path(user.localname)),
-        "object": shelf_event_document(user, film, identifier, request),
+        "to": to,
+        "cc": cc,
+        "object": shelf_event_document(user, film, identifier, request, visibility),
     }

@@ -31,7 +31,12 @@ own data is not a social act).
 
 import requests
 
-from reeltalk.core.models import Status, Visibility, sends_externally
+from reeltalk.core.models import (
+    Status,
+    Visibility,
+    audience_sends_externally,
+    sends_externally,
+)
 
 from .delivery import DeliveryFailure, deliver_activity, inbox_for
 from .identity import (
@@ -230,15 +235,32 @@ def broadcast_status_delete(request, status) -> None:
     return _announce(request, status, activity)
 
 
-def broadcast_shelf_event(request, user, film, identifier: str, *, added: bool) -> None:
+def broadcast_shelf_event(
+    request, user, film, identifier: str, *, added: bool, visibility
+) -> list[DeliveryFailure]:
     """Broadcast a Watchlist add/remove to the user's remote followers.
 
     ``identifier`` is the D1 shelf identifier (``to-read`` in v0.1 — the
     Watched side rides on the review broadcast instead). The ShelfEvent object
     id is stable per (user, film, shelf); the activity id is unique per event,
     so an unshelve-then-re-shelve is not deduped away on the receiving side.
+
+    **The audience is the caller's to name and this function's to honour**
+    (W-arc W2). ``visibility`` is the audience of the shelf row the event is
+    about, and it is required because the row is usually already deleted by the
+    time a removal is announced - the gate cannot look it up, and guessing
+    public would be the leak. :func:`~reeltalk.core.models.audience_sends_externally`
+    is the rule, the same one every status broadcast passes through
+    :func:`_announce`: a private add sends nothing, and neither does taking it
+    back off, because the removal names the same film to the same people. A
+    followers-only add keeps its current recipients - the followers - and the
+    envelope now says so, so a peer files it as the narrow event it was.
     """
-    activity = shelf_event_activity(user, film, identifier, request, added=added)
+    if not audience_sends_externally(visibility):
+        return []
+    activity = shelf_event_activity(
+        user, film, identifier, request, added=added, visibility=visibility
+    )
     return _deliver_to_followers(request, user, activity)
 
 

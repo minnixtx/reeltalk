@@ -213,6 +213,20 @@ class User(AbstractBaseUser, PermissionsMixin):
     default_visibility = models.CharField(
         max_length=10, choices=Visibility.choices, default=Visibility.PUBLIC
     )
+    # The audience a Watchlist add is filed under (W-arc W2). Unlike the review
+    # default above this one is **enforced and retroactive**: it is the audience
+    # written on the shelf row at the moment of the add - the row is the record,
+    # not this column - and saving a new value re-files the member's existing
+    # Watchlist rows in both directions (D7), because a setting that only
+    # governed the next add would not mean what its label says the moment it is
+    # saved. It governs the Watchlist shelf only: a film that got there through a
+    # finish keeps the audience chosen at the finish (D6), and a reply, a review,
+    # and a list face each answer to their own rule. Default public, and
+    # back-filled public on purpose - every Watchlist that already exists is
+    # public, and the private-log mode is opt-in.
+    watchlist_visibility = models.CharField(
+        max_length=10, choices=Visibility.choices, default=Visibility.PUBLIC
+    )
     # Local users are full accounts; remote users (M4) are lightweight mirrors
     # populated from federation.
     local = models.BooleanField(default=True)

@@ -298,15 +298,24 @@ class ProfileForm(forms.Form):
     # optional: the widget is a select that always carries a value, so a POST
     # without the field did not come from this form, and silently reading the
     # missing value as "public" would post a public review on an account that
-    # says Private. The form boundary is where a human gets told.
+    # says Private. The form boundary is where a human gets told. No help text:
+    # owner ruling 2026-11-08, same as the field below -- the wording for what
+    # these two controls promise arrives in one pass, not one control at a time.
     default_visibility = forms.ChoiceField(
         choices=Visibility.choices,
         label="Default audience for new reviews",
-        help_text=(
-            "Sets the audience preselected when you write a review. You can "
-            "still change it on each review. This does not change reviews you "
-            "already posted."
-        ),
+    )
+    # The Watchlist shelf's audience (W-arc W2). Required for the same reason
+    # the field above is: the select always carries a value, so a POST without
+    # it did not come from this form, and reading a missing value as "public"
+    # would quietly re-file a member's whole Watchlist as public on a form post
+    # that meant something narrower. No help text yet - the written promises for
+    # this control (its scope, its retroactivity, and that nothing already sent
+    # to another instance is taken back) are the copy increment's, and the owner
+    # asked that the wording all arrive in one pass rather than half here.
+    watchlist_visibility = forms.ChoiceField(
+        choices=Visibility.choices,
+        label="Watchlist visibility",
     )
 
 

@@ -38,11 +38,6 @@ from reeltalk.tests.members import member, site_admin
 
 PASSWORD = "s3cretpass"
 
-SETTINGS_HELPER = (
-    "Sets the audience preselected when you write a review. You can still "
-    "change it on each review. This does not change reviews you already posted."
-)
-
 
 @pytest.fixture(autouse=True)
 def admin(db):
@@ -88,10 +83,13 @@ def test_a_new_member_defaults_to_public():
 
 @pytest.mark.django_db
 def test_settings_page_offers_the_select_with_the_current_value():
+    """The control ships without help text (owner ruling, 2026-11-08): the
+    promises it would have made are the copy increment's and arrive with the
+    Watchlist field's wording in one pass. What is load-bearing here is that the
+    select is offered at all and that it opens on the member's own value."""
     user = member(localname="alice", password=PASSWORD, default_visibility="private")
     body = _login("alice").get("/preferences/profile/").content.decode()
     assert "Default audience for new reviews" in body
-    assert SETTINGS_HELPER in body
     # The member's own value is the selected option, not the first one.
     assert '<option value="private" selected>' in body
     assert user.default_visibility == "private"
@@ -103,7 +101,12 @@ def test_settings_save_changes_the_default():
     client = _login("alice")
     response = client.post(
         "/preferences/profile/",
-        {"display_name": "", "summary": "", "default_visibility": "private"},
+        {
+            "display_name": "",
+            "summary": "",
+            "default_visibility": "private",
+            "watchlist_visibility": "public",
+        },
     )
     assert response.status_code == 302
     user = User.objects.get(localname="alice")
@@ -118,7 +121,12 @@ def test_settings_refuse_an_audience_the_select_does_not_offer():
     client = _login("alice")
     response = client.post(
         "/preferences/profile/",
-        {"display_name": "", "summary": "", "default_visibility": "direct"},
+        {
+            "display_name": "",
+            "summary": "",
+            "default_visibility": "direct",
+            "watchlist_visibility": "public",
+        },
     )
     assert response.status_code == 200  # re-rendered with the field error
     user = User.objects.get(localname="alice")
@@ -156,7 +164,12 @@ def test_the_default_lands_the_review_private_end_to_end(db, film):
     client = _login("log")
     client.post(
         "/preferences/profile/",
-        {"display_name": "", "summary": "", "default_visibility": "private"},
+        {
+            "display_name": "",
+            "summary": "",
+            "default_visibility": "private",
+            "watchlist_visibility": "public",
+        },
     )
     body = client.get(f"/film/{film.id}/").content.decode()
     assert _checked_audience(body) == "private"
@@ -199,7 +212,12 @@ def test_changing_the_default_leaves_existing_reviews_alone(db, film):
 
     client.post(
         "/preferences/profile/",
-        {"display_name": "", "summary": "", "default_visibility": "private"},
+        {
+            "display_name": "",
+            "summary": "",
+            "default_visibility": "private",
+            "watchlist_visibility": "public",
+        },
     )
     status.refresh_from_db()
     assert status.visibility == Visibility.PUBLIC

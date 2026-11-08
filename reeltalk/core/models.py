@@ -1368,6 +1368,19 @@ def readable_statuses(viewer):
     return Status.objects.filter(audience_q(viewer))
 
 
+def audience_sends_externally(visibility) -> bool:
+    """Whether an event carrying this audience may go to another instance (W2).
+
+    The value twin of :func:`sends_externally`, for the broadcasts that have an
+    audience but no ``Status`` to read it off - a Watchlist add lives on a shelf
+    row, and by the time its removal is announced that row is deleted, so the
+    caller hands over the value it read while the row was still there. Same
+    answer, one definition: two of the three audiences go out and differ in
+    address, the narrowest goes nowhere.
+    """
+    return visibility in (Visibility.PUBLIC, Visibility.FOLLOWERS)
+
+
 def sends_externally(status) -> bool:
     """Whether a status may be announced to another instance at all (V2).
 
@@ -1384,7 +1397,7 @@ def sends_externally(status) -> bool:
     so on each row. A private post goes nowhere - it was never delivered, so a
     follower has nothing to be told is gone, and nothing to be shown.
     """
-    return status.visibility in (Visibility.PUBLIC, Visibility.FOLLOWERS)
+    return audience_sends_externally(status.visibility)
 
 
 def public_status_scope(viewer=None, *, local_only: bool = False):
@@ -1825,6 +1838,13 @@ def shelve_to_watchlist(user, film: Film) -> str:
     watched or not — so a film already on the user's Watched shelf is refused
     (unwatching is out of v0.1 scope). Outcomes: ``"added"`` (new row),
     ``"already"`` (idempotent no-op), or ``"watched"`` (refused).
+
+    The audience on the new row is the member's Watchlist setting **at the
+    moment of the add** (W-arc W2), stamped here rather than at each caller so
+    every door onto the shelf - the film page, the search one-click, the file
+    import - files the same way. An ``"already"`` writes nothing: a row's
+    audience belongs to the act that created it, and a second add is not that
+    act.
     """
     watchlist = Shelf.objects.get(user=user, identifier=Shelf.TO_READ)
     watched = Shelf.objects.get(user=user, identifier=Shelf.READ)
@@ -1832,7 +1852,9 @@ def shelve_to_watchlist(user, film: Film) -> str:
         return "watched"
     # get_or_create is race-safe against the unique (film, shelf) constraint.
     _, created = ShelfFilm.objects.get_or_create(
-        shelf=watchlist, film=film, defaults={"user": user}
+        shelf=watchlist,
+        film=film,
+        defaults={"user": user, "visibility": user.watchlist_visibility},
     )
     return "added" if created else "already"
 
@@ -1845,6 +1867,43 @@ def unshelve_from_watchlist(user, film: Film) -> bool:
         return False
     row.delete()
     return True
+
+
+def watchlist_row_visibility(user, film: Film) -> str | None:
+    """The audience of ``user``'s Watchlist row for ``film``, or ``None``.
+
+    Read **before** the row is deleted, which is the whole reason this is a
+    function a caller calls rather than something the broadcast looks up
+    itself: by the time a removal is announced the row is gone, and the event
+    has to carry the audience of the add it undoes. A removal of a private add
+    that announced itself would leak the one fact the add was filed privately to
+    keep - that the film was on the shelf at all.
+    """
+    row = ShelfFilm.objects.filter(
+        shelf__user=user, shelf__identifier=Shelf.TO_READ, film=film
+    ).first()
+    return row.visibility if row is not None else None
+
+
+def restamp_watchlist_audience(user, visibility: str) -> int:
+    """Re-file every ``to-read`` row of ``user`` under ``visibility``; rows
+    changed.
+
+    D7: saving the Watchlist setting means what it says the moment it is saved,
+    in both directions - a member who moves it to Private expects last month's
+    adds to disappear for everybody else, and one who moves it back expects to
+    re-expose those same rows rather than start again from now.
+
+    ``to-read`` rows and nothing else (D6). A Watched row carries the audience of
+    the finish that put it there, and a setting about the Watchlist has no claim
+    on a review someone wrote months ago; the same column on that row is the
+    finish's own record. The caller runs this in the same transaction as the
+    ``User`` save, so a member never gets a settings page describing one
+    audience and rows holding another.
+    """
+    return ShelfFilm.objects.filter(
+        shelf__user=user, shelf__identifier=Shelf.TO_READ
+    ).update(visibility=visibility)
 
 
 # --- Home rail (M6 artwork sub-increment C, R61) -----------------------------

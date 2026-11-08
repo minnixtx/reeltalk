@@ -60,6 +60,7 @@ from .models import (
     top_reviews,
     trending_films,
     unshelve_from_watchlist,
+    watchlist_row_visibility,
 )
 from .tmdb import TmdbError, is_configured, search_films
 from .utils import render_markdown
@@ -610,11 +611,24 @@ def mark_watched_view(request, film_id):
     # names the film to whoever receives it, so a non-public finish sends no
     # ``ShelfEvent`` and peers keep a stale "on their Watchlist" row for that
     # film until the next full sync of that actor. That is the cost the owner
-    # accepted rather than announce a film's name just to announce its removal,
-    # and it now applies to a followers-only finish for the same reason: the
-    # shelf has no audience shape of its own on the wire.
+    # accepted rather than announce a film's name just to announce its removal.
+    #
+    # W2 gave the shelf event an audience shape of its own on the wire, and the
+    # owner's ruling the same day was to leave this call site alone: it is the
+    # finish's announcement, not the Watchlist setting's, and the setting
+    # governs adds and removals made from the Watchlist itself. The explicit
+    # ``visibility`` is therefore always the public one here - the condition
+    # above is what makes that true, and the gate in the broadcast is a no-op on
+    # this path rather than a second opinion about the finish.
     if was_on_watchlist and status.visibility == Visibility.PUBLIC:
-        broadcast_shelf_event(request, user, film, Shelf.TO_READ, added=False)
+        broadcast_shelf_event(
+            request,
+            user,
+            film,
+            Shelf.TO_READ,
+            added=False,
+            visibility=Visibility.PUBLIC,
+        )
     messages.success(request, "Marked as watched.")
     return redirect("film", film_id=film.id)
 
@@ -668,8 +682,18 @@ def shelve(request, film_id):
     outcome = shelve_to_watchlist(request.user, film)
     if outcome == "added":
         # Federation broadcast (M4 increment 6): the shelf event to remote
-        # followers ("already" and "watched" change nothing on the wire).
-        broadcast_shelf_event(request, request.user, film, Shelf.TO_READ, added=True)
+        # followers ("already" and "watched" change nothing on the wire). The
+        # audience is the row's own, which ``shelve_to_watchlist`` just stamped
+        # from the member's Watchlist setting (W2) - read off the row rather
+        # than off the setting so the row stays the record of what was sent.
+        broadcast_shelf_event(
+            request,
+            request.user,
+            film,
+            Shelf.TO_READ,
+            added=True,
+            visibility=watchlist_row_visibility(request.user, film),
+        )
     notices = {
         "added": ("success", "Added to your watchlist."),
         "already": ("info", "Already on your watchlist."),
@@ -685,10 +709,20 @@ def shelve(request, film_id):
 def unshelve(request, film_id):
     """Remove a film from the user's Watchlist."""
     film = get_object_or_404(Film, id=resolve_film_id(film_id))
+    # Read before the delete: the removal is announced under the audience the add
+    # carried, and once the row is gone nothing on this instance knows it (W2).
+    audience = watchlist_row_visibility(request.user, film)
     if unshelve_from_watchlist(request.user, film):
         # Federation broadcast (M4 increment 6): the removal to remote
-        # followers.
-        broadcast_shelf_event(request, request.user, film, Shelf.TO_READ, added=False)
+        # followers, whatever audience the add had.
+        broadcast_shelf_event(
+            request,
+            request.user,
+            film,
+            Shelf.TO_READ,
+            added=False,
+            visibility=audience,
+        )
         messages.success(request, "Removed from your watchlist.")
     else:
         messages.info(request, "Not on your watchlist.")
@@ -924,8 +958,16 @@ def search_watchlist(request, tmdb_id):
         return JsonResponse({"status": outcome}, status=409)
     if outcome == "added":
         # Federation broadcast (M4 increment 6): same shelf event as the
-        # film-page control — this is a second entry point onto the Watchlist.
-        broadcast_shelf_event(request, request.user, film, Shelf.TO_READ, added=True)
+        # film-page control — this is a second entry point onto the Watchlist,
+        # and it files the row under the same audience for the same reason.
+        broadcast_shelf_event(
+            request,
+            request.user,
+            film,
+            Shelf.TO_READ,
+            added=True,
+            visibility=watchlist_row_visibility(request.user, film),
+        )
     return JsonResponse({"status": outcome})
 
 

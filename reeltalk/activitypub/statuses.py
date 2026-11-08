@@ -364,7 +364,9 @@ def _ensure_shelf_row(
     )
 
 
-def _apply_shelf_event(sender, event: dict, request, *, added: bool) -> None:
+def _apply_shelf_event(
+    sender, event: dict, request, *, added: bool, activity=None
+) -> None:
     """Mirror a remote user's shelf membership change (idempotent).
 
     The effect is keyed by (verified sender, film, shelf identifier) — the
@@ -372,6 +374,15 @@ def _apply_shelf_event(sender, event: dict, request, *, added: bool) -> None:
     deliveries converge on the same ``ShelfFilm`` row. An unknown shelf
     identifier (not one of the D1 pair) or a missing film reference is
     ignored gracefully.
+
+    **The audience is the peer's, not ours** (W-arc W2, D9). We hold a copy of
+    the event either way, so filing it public because that is what our own
+    default would have made it would publish another instance's narrow add on
+    our film pages and feeds. The reading is the same
+    :func:`visibility_from_audience` applies to a Note, and it is read off the
+    object when the object carries the arrays and off the envelope otherwise -
+    the two places a peer legitimately puts them. A removal needs no audience:
+    it deletes the row rather than filing one.
     """
     identifier = event.get("shelf")
     if identifier not in _DEFAULT_SHELF_NAMES:
@@ -382,8 +393,14 @@ def _apply_shelf_event(sender, event: dict, request, *, added: bool) -> None:
     film = _film_for_reference(film_ref, request)
     shelf = _ensure_default_shelf(sender, identifier)
     if added:
+        source = event if ("to" in event or "cc" in event) else (activity or {})
         ShelfFilm.objects.get_or_create(
-            shelf=shelf, film=film, defaults={"user": sender}
+            shelf=shelf,
+            film=film,
+            defaults={
+                "user": sender,
+                "visibility": visibility_from_audience(source),
+            },
         )
     else:
         ShelfFilm.objects.filter(shelf=shelf, film=film).delete()
@@ -960,7 +977,7 @@ def _object_of(activity: dict):
     return obj if isinstance(obj, dict) else None
 
 
-def _mirror_object(sender, obj: dict, request) -> None:
+def _mirror_object(sender, obj: dict, request, activity=None) -> None:
     """Mirror one created/updated object by type; unknown types ignored (§3.6)."""
     obj_type = obj.get("type")
     if obj_type == "Note":
@@ -968,7 +985,7 @@ def _mirror_object(sender, obj: dict, request) -> None:
     elif obj_type == "Film":
         _mirror_film(obj)
     elif obj_type == "ShelfEvent":
-        _apply_shelf_event(sender, obj, request, added=True)
+        _apply_shelf_event(sender, obj, request, added=True, activity=activity)
 
 
 def handle_create(activity, sender, request):
@@ -981,7 +998,7 @@ def handle_create(activity, sender, request):
     obj = _object_of(activity)
     if obj is None:
         return
-    _mirror_object(sender, obj, request)
+    _mirror_object(sender, obj, request, activity=activity)
 
 
 def handle_update(activity, sender, request):

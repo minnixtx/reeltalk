@@ -61,6 +61,7 @@ from reeltalk.core.models import (
     feed_entries,
     popular_genres,
     public_feed,
+    restamp_watchlist_audience,
     status_feed_entries,
     top_reviews,
     trending_films,
@@ -1220,7 +1221,19 @@ def profile_edit(request):
             # The V3 account default. It preselects the finish modal only;
             # nothing here touches a review that already exists (D6).
             user.default_visibility = data["default_visibility"]
-            user.save()
+            # The Watchlist setting (W-arc W2). Unlike the one above this is
+            # retroactive: saving it re-files the member's existing Watchlist
+            # rows, in both directions (D7), and it stops at that shelf - a
+            # Watched row keeps the audience chosen at its finish (D6). Both
+            # halves are one transaction, so a member cannot be left with a
+            # settings page describing one audience and rows holding another.
+            new_watchlist = data["watchlist_visibility"]
+            restamp = new_watchlist != user.watchlist_visibility
+            user.watchlist_visibility = new_watchlist
+            with transaction.atomic():
+                user.save()
+                if restamp:
+                    restamp_watchlist_audience(user, new_watchlist)
             messages.success(request, "Profile updated.")
             return redirect("user-profile", localname=user.localname)
     else:
@@ -1229,6 +1242,7 @@ def profile_edit(request):
                 "display_name": user.display_name,
                 "summary": user.raw_summary,
                 "default_visibility": user.default_visibility,
+                "watchlist_visibility": user.watchlist_visibility,
             }
         )
     return render(

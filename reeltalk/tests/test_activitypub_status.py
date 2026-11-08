@@ -30,7 +30,7 @@ from reeltalk.activitypub.broadcast import (
 from reeltalk.activitypub.inbox import process_inbound_activity
 from reeltalk.activitypub.models import DeliveredActivity
 from reeltalk.activitypub.statuses import RemoteObjectError
-from reeltalk.core.models import Film, Shelf, ShelfFilm, Status
+from reeltalk.core.models import Film, Shelf, ShelfFilm, Status, Visibility
 from reeltalk.mentions.models import sync_status_mentions
 from reeltalk.social.models import User
 from reeltalk.tests.members import member
@@ -908,11 +908,20 @@ def test_broadcast_shelf_event_shapes():
     film = Film.objects.create(title="Arrival", year=2016)
     request = _request_with_host()
     responses.add(responses.POST, REMOTE_INBOX)
-    broadcast_shelf_event(request, alice, film, Shelf.TO_READ, added=True)
+    # The audience is a required argument since W2: the event carries the
+    # audience of the shelf row it is about, and on a removal that row is
+    # already gone, so the caller names it rather than the builder guessing.
+    broadcast_shelf_event(
+        request, alice, film, Shelf.TO_READ, added=True, visibility=Visibility.PUBLIC
+    )
     first = json.loads(responses.calls[0].request.body)
-    broadcast_shelf_event(request, alice, film, Shelf.TO_READ, added=False)
+    broadcast_shelf_event(
+        request, alice, film, Shelf.TO_READ, added=False, visibility=Visibility.PUBLIC
+    )
     second = json.loads(responses.calls[1].request.body)
-    broadcast_shelf_event(request, alice, film, Shelf.TO_READ, added=True)
+    broadcast_shelf_event(
+        request, alice, film, Shelf.TO_READ, added=True, visibility=Visibility.PUBLIC
+    )
     third = json.loads(responses.calls[2].request.body)
 
     assert first["type"] == "Create" and second["type"] == "Delete"
