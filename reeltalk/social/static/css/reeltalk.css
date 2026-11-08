@@ -114,6 +114,19 @@
   box-sizing: border-box;
 }
 
+html {
+  /* Reserve the scrollbar's width on every page, scrolling or not. Without it
+     the scrollbar took its space only when a page overflowed, so a page that
+     fitted sat 7px right of one that scrolled -- measured at 1440 as the menu's
+     left edge at 84 against 77, and the same 7px on the header's own width. The
+     chrome then stepped sideways on the click that crossed the threshold, the
+     horizontal twin of the row-inflation jump below. Owner ruling, 2026-11-08.
+     On a platform with overlay scrollbars there is no gutter to reserve and this
+     is a no-op. The band it reserves paints in the page's own colour because
+     `body`'s background propagates to the canvas. */
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
   font-family: var(--body);
@@ -707,15 +720,34 @@ a {
    the 1023px block already hides this menu, so nothing here can reach them. */
 @media (min-width: 1024px) {
   body {
-    /* The header's own height, measured at 82px and stable across the desktop
-       range (1024 to 1869). One variable because the menu has to stick exactly
-       below it: two literals drift the moment the header changes. */
-    --header-h: 82px;
+    /* The header's own height, re-measured at 75px on 2026-11-08 and stable from
+       1024 to 2560. One variable because the menu has to stick exactly below it,
+       and one literal because two drift: this one still said 82 after the relit
+       wordmark brought the bar back at 75, so the menu hung 7px low on every
+       page. Re-measure it after any change to the bar. It is the *member* bar --
+       a signed-out visitor has no search box and measures 71px -- which is fine,
+       because both consumers here are the menu, and they get no menu at all. */
+    --header-h: 75px;
     display: grid;
     /* One track by default. A signed-out visitor gets no menu at all (N1
        decision 8), and a standing 280px first track would leave them an empty
        gutter down the left of the landing page. */
     grid-template-columns: minmax(0, 1fr);
+    /* Header, page, footer -- and the middle row is the one that eats the
+       leftover viewport height. With the rows left implicit they are all auto,
+       and `align-content: normal` stretches *every* auto track with the
+       leftover, so a page shorter than the viewport spent its free space
+       inflating the header row: measured at 1440x900 the bar stayed 75px inside
+       a row that grew to 127px, which pushed the menu, the avatar and the tab
+       strip down by the difference -- and by a different difference on each
+       page, because each page has different content. Clicking between a profile
+       and its films tabs moved the whole chrome (owner report, 2026-11-08). The
+       1fr row takes the slack instead, so the header row is exactly the header
+       on every page and the footer still lands flush at the bottom of a short
+       one. Its minimum stays `auto` rather than 0: on a page taller than the
+       viewport the row has to keep its content height or the footer gets pulled
+       up over the text. */
+    grid-template-rows: auto 1fr auto;
     align-items: start;
   }
 

@@ -17,6 +17,12 @@ These are source guards, like the other CSS pins in this suite. What the rules
 actually render -- gutters visible at 1440 and 1869, no horizontal scroll at
 320/375/768/1024/1440 -- was measured in a real browser on the deployed stack;
 the numbers are in the plan's N8 entry.
+
+Two more guards pin the vertical measure rather than a width. They are the same
+desktop grid and the same habit of pinning the declaration that a later edit can
+quietly undo, and what they protect is where the chrome lands: the body's row
+template decides whether it sits in the same place on a page of any length, and
+the reserved scrollbar gutter decides whether it is the same width.
 """
 
 import re
@@ -134,6 +140,27 @@ def test_the_header_content_is_capped_to_the_band():
         "calc(280px + 62rem)"
     )
     assert _desktop_decl(".site-header .container", "margin") == "0 auto"
+
+
+def test_the_page_row_not_the_header_row_takes_the_leftover_height():
+    """The chrome jumped between pages of different lengths (owner report,
+    2026-11-08). Left implicit, the body's three rows are all ``auto``, and
+    ``align-content: normal`` stretches every auto track with the viewport's
+    leftover height -- so a short page spent its free space inflating the
+    *header* row: measured at 1440x900, a 127px row around a 75px bar on the
+    profile, a 75px row on the films page, and the menu, avatar and tab strip
+    moving by the difference each time. Pinning the three rows puts the slack in
+    the page row, where it is invisible."""
+    assert _desktop_decl("body", "grid-template-rows") == "auto 1fr auto"
+
+
+def test_the_scrollbar_gutter_is_reserved_on_every_page():
+    """The horizontal twin of the row jump: the scrollbar took its width only
+    when a page overflowed, so a page that fitted sat 7px right of one that
+    scrolled -- at 1440, the menu's left edge measured 84 against 77 and the
+    header was 1440 wide against 1425. Reserving the gutter once means the
+    chrome is the same width whatever the page length."""
+    assert _decl("html", "scrollbar-gutter") == "stable"
 
 
 def test_the_band_exists_in_one_place_only():

@@ -417,6 +417,10 @@ def test_the_header_stays_pinned_while_the_page_scrolls():
     without it the feed scrolls visibly through the wordmark. Measured after the
     change: header top 0 and height 82px at 1024, 1280, 1440 and 1869 with the
     document scrolled 1500px.
+
+    Re-measured 2026-11-08 and the top still holds; the height does not. The bar
+    came back at 75px from the relit wordmark pass, which is what the next test's
+    variable has to carry now.
     """
     decls = _desktop_decls(".site-header")
     assert decls["position"] == "sticky"
@@ -430,7 +434,12 @@ def test_the_header_stays_pinned_while_the_page_scrolls():
 def test_the_menu_sticks_below_the_header_not_under_it():
     """The menu already stuck, at ``top: 0`` -- which once the header stuck meant
     the header painted over the Feed row. Both offsets come from one variable so
-    they cannot drift when the header's height changes."""
+    they cannot drift when the header's height changes.
+
+    One variable is not the whole invariant: the literal inside it has to be the
+    header's *measured* height. It said 82px after the bar came back at 75, and
+    the menu hung 7px under the header on every page until it was re-measured
+    (2026-11-08). Re-measure it after any change to the bar's own height."""
     nav = _desktop_decls(".site-nav")
     body = _desktop_decls("body")
     assert nav["top"] == "var(--header-h)"
