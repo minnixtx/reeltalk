@@ -2274,6 +2274,94 @@ table.results th {
   margin-top: 0.8rem;
 }
 
+/* --- Not found (W4, F-W4-1) -------------------------------------------------
+   The page a reader lands on when a URL answers nothing. The audience rules made
+   this a common page rather than a rare one: a list whose audience excludes the
+   reader is refused here on purpose.
+
+   The numeral wears the header wordmark's neon-tube treatment (R60, relit R68)
+   and for the same measured reason. Monoton draws every stroke as three or four
+   parallel bars, so the h1 is a transparent ghost carrying only the bloom and a
+   second copy rasterised at 3x and scaled back is the copy that is seen. The "0"
+   is one whole curve, which is exactly where the concentric bars stair-step into
+   dots without the supersample - the moire the wordmark rule documents.
+
+   The bloom radii are in em, not px. The wordmark's are px because its size is
+   fixed by the bar; this one steps down on a phone, and keeping the *ratio* of
+   bloom to glyph is the part that keeps the 1px gaps dark. The ratio here is the
+   wordmark's own measured one (26/52/96px against a 2.2rem mark), so the numeral
+   lights the same way the header does instead of approximating it. */
+.neon-404 {
+  position: relative;
+  font-family: "Monoton", sans-serif;
+  font-weight: 400;
+  font-size: 7rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  margin: 1rem 0 2.4rem;
+  color: transparent;
+  text-shadow:
+    0 0 0.74em rgba(255, 65, 56, 0.75),
+    0 0 1.49em rgba(212, 43, 38, 0.65),
+    0 0 2.74em rgba(255, 40, 25, 0.38);
+}
+
+.neon-404-tube {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 300%;
+  transform: scale(0.333333);
+  transform-origin: 0 0;
+  color: #fff4ee;
+  -webkit-text-stroke: 0.0058em var(--red);
+}
+
+@media (max-width: 40rem) {
+  .neon-404 {
+    font-size: 4.4rem;
+  }
+}
+
+/* The page is two lines, and left alone they are glued under the header with the
+   whole of a viewport's slack pooling empty underneath them. Centring the pair
+   puts the numeral roughly where the eye already is, and makes the button read
+   as the numeral's caption rather than a stray control to its left.
+
+   Both halves need a hand, and each width needs a different one.
+
+   Horizontal is the same everywhere: a column flexbox with the items centred.
+
+   Vertical needs the box to *have* height to distribute, which it does not have
+   on either width by default. On desktop, body's rows are `auto 1fr auto` with
+   `align-items: start`, so main shrink-wraps; `align-self: stretch` hands it the
+   1fr row, which is the leftover viewport height by design. Below the menu
+   breakpoint body is plain block flow with nothing to stretch, so the box gets a
+   floor instead. 45vh is measured, not guessed: it is the largest that still
+   leaves the whole site footer above the fixed bottom bar at 390x844 (footer
+   ending at 665 of 844), where 58vh pushed it flush against the bar and started
+   a scroll. */
+.notfound-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+@media (max-width: 1023px) {
+  .notfound-page {
+    min-height: 45vh;
+    justify-content: center;
+  }
+}
+
+@media (min-width: 1024px) {
+  body:has(.site-nav) .notfound-page {
+    align-self: stretch;
+    justify-content: center;
+  }
+}
+
 /* --- Texture pass (M6 artwork, R60; site-wide grunge 2026-09-16) -----------
    Owner-supplied worn paper now lives only at the desktop outer edges (see
    body pseudo-elements). Thin amber/brown trim and dark content surfaces

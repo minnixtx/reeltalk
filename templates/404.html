@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% comment %}
+What a reader lands on when a URL answers nothing.
+
+Before this there was no 404.html and no handler404 anywhere, so Django's stock
+page answered: no viewport meta (which lays it out at Chrome's 980px fallback on
+a phone, clipping its own sentence mid-word), no wordmark, and no way back into
+the site. That was tolerable while a 404 meant a typo. It is not now: an audience
+that excludes the reader answers 404 by design, on the list page, on the AP arm
+of a list face, and on the Save door - so this is a common page, not a rare one.
+
+It says nothing but the number, and that is deliberate rather than spare. Both
+"it is gone" and "you may not see it" land here, and naming either would hand
+back the very fact the 404 was chosen over a 403 to withhold. The numeral wears
+the wordmark's tube treatment (see the .neon-404 rules) so the page is
+recognisably the site's before a word of it is read.
+{% endcomment %}
+
+{% block title %}404{% endblock %}
+
+{% block main_class %} notfound-page{% endblock %}
+
+{% block content %}
+<h1 class="neon-404">404<span class="neon-404-tube" aria-hidden="true">404</span></h1>
+<p>
+  <a class="btn cinema-button cinema-button--primary" href="{% url 'index' %}">Back to the feed</a>
+</p>
+{% endblock %}
