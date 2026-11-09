@@ -31,6 +31,22 @@ AUDIENCE_LABELS = (
     "<strong>Private</strong>",
 )
 
+# The rest of what the audience section promises (W3, 2026-11-08): that a list
+# keeps the audience it was created with, that the Watchlist carries one audience
+# for the whole shelf and re-files when the setting moves, that a finished film
+# keeps the audience of its finish, and that nothing already delivered is taken
+# back. The owner cut these sentences to shape, so they are quoted rather than
+# paraphrased - and matched on collapsed whitespace, because the template wraps
+# them and a line break in the source is not a different sentence.
+AUDIENCE_PROMISES = (
+    "Every review, list, and Watchlist add carries one of three audiences:",
+    "A list takes its audience when you create it and keeps it.",
+    "changing it re-files the films already on the shelf",
+    "films you’ve marked watched keep the audience from when you finished them",
+    "Narrowing an audience changes what this site shows from then on.",
+    "It does not take back anything another server already received.",
+)
+
 # Staff surfaces and staff vocabulary. The page may say "moderators" in the one
 # sentence about what happens to a report a member filed, and it may mention the
 # site's admin tools in the sentence about what "Private" does not promise; it
@@ -87,6 +103,17 @@ def _internal(path: str) -> bool:
     return not path.startswith(("http://", "https://", "mailto:", "//"))
 
 
+def _prose(page: str) -> str:
+    """The page with every run of whitespace folded to one space.
+
+    Quoted against the raw bytes, a sentence from a wrapped paragraph pins the
+    wrapping too - the newline and the eight spaces of indentation in the middle
+    of it - and rewrapping a line is not rewording it. Collapsing to single spaces
+    keeps the words and drops the layout.
+    """
+    return " ".join(page.split())
+
+
 @pytest.mark.django_db
 def test_the_page_reads_for_a_visitor_and_for_a_member(db):
     """Both renders, because several answers branch on who is asking.
@@ -121,6 +148,22 @@ def test_all_three_audiences_are_named(db):
     page = Client().get(HELP_URL).content.decode()
     for label in AUDIENCE_LABELS:
         assert label in page
+
+
+@pytest.mark.django_db
+def test_the_audience_promises_are_on_the_page(db):
+    """The half of the section that is a promise rather than a list of options.
+
+    ``test_all_three_audiences_are_named`` stops a member being told half the
+    audiences; this stops them being told the audiences and nothing about what
+    choosing one costs. The pinned sentences cover a list's fixed audience, the
+    Watchlist shelf's one audience and its re-filing, the finished film that
+    keeps its own, and the rule that narrowing an audience retracts nothing
+    another server already holds.
+    """
+    page = _prose(Client().get(HELP_URL).content.decode())
+    for sentence in AUDIENCE_PROMISES:
+        assert sentence in page, f"the help page no longer says: {sentence!r}"
 
 
 @pytest.mark.django_db

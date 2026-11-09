@@ -298,9 +298,13 @@ class ProfileForm(forms.Form):
     # optional: the widget is a select that always carries a value, so a POST
     # without the field did not come from this form, and silently reading the
     # missing value as "public" would post a public review on an account that
-    # says Private. The form boundary is where a human gets told. No help text:
-    # owner ruling 2026-11-08, same as the field below -- the wording for what
-    # these two controls promise arrives in one pass, not one control at a time.
+    # says Private. The form boundary is where a human gets told.
+    #
+    # No help text on either field below - owner ruling 2026-11-09, taken from
+    # the rendered page. The written promises these two controls make are the
+    # help page's audience section, which says all of it once for every surface;
+    # a paragraph under each select was ruled out twice now, once as "not until
+    # the copy pass" and once after seeing the copy pass.
     default_visibility = forms.ChoiceField(
         choices=Visibility.choices,
         label="Default audience for new reviews",
@@ -309,10 +313,9 @@ class ProfileForm(forms.Form):
     # the field above is: the select always carries a value, so a POST without
     # it did not come from this form, and reading a missing value as "public"
     # would quietly re-file a member's whole Watchlist as public on a form post
-    # that meant something narrower. No help text yet - the written promises for
-    # this control (its scope, its retroactivity, and that nothing already sent
-    # to another instance is taken back) are the copy increment's, and the owner
-    # asked that the wording all arrive in one pass rather than half here.
+    # that meant something narrower. Its scope, its retroactivity (D7), the
+    # Watched-shelf boundary (D6) and the no-retraction rule (D8) are all stated
+    # on /help/ rather than here.
     watchlist_visibility = forms.ChoiceField(
         choices=Visibility.choices,
         label="Watchlist visibility",

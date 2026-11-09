@@ -1337,6 +1337,16 @@ ul.errorlist {
   margin: 0.15rem 1.25rem 0 0;
 }
 
+/* The one line the New list page puts under its radios (W-arc W3): there the
+   audience is fixed at creation and the edit page offers no control, so the
+   fieldset has to carry the caveat itself. Small and muted because it is a
+   caveat and not a fourth option, and it sits inside the box's own padding
+   rather than on a paragraph's default margins. */
+.audience-choice .audience-note {
+  font-size: 0.82rem;
+  margin: 0.45rem 0 0.1rem;
+}
+
 /* The report box's free-text field (_report_form.html, on the post page and
    the profile). It has never had a rule of its own, so it opens as a
    browser-default white plate with black text in the middle of a page built

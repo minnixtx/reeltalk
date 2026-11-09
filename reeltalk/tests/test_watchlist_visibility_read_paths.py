@@ -317,6 +317,8 @@ def test_the_settings_page_offers_the_watchlist_select_with_the_current_value(db
     member(localname="quiet", password=PASSWORD, watchlist_visibility="private")
     body = _login("quiet").get(SETTINGS_URL).content.decode()
     assert "Watchlist visibility" in body
+    # No help text under the select - owner ruling 2026-11-09; the promises the
+    # setting makes are stated once on /help/.
     # The member's own value is the selected option, not the first one.
     assert '<option value="private" selected>' in body
     # And every control that was already on this page still renders. W1's

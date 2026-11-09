@@ -21,8 +21,9 @@
     so the two audience controls on the site - this one and the finish modal's
     - are the same fieldset with the same treatment rather than two that
     drift. The form field still exists and still validates; only the drawing
-    moves here. The choice is fixed once the list is made (W-arc D2), and the
-    sentence saying so in the member's words is W3's copy pass.
+    moves here. The choice is fixed once the list is made (W-arc D2) and the
+    edit page carries no control to change it, so the fieldset says so: a
+    member who picks wrong here makes a different list, not an edited one.
 
     The remaining fields are drawn with the loop body Django's own ``p.html``
     uses per field, because **a BoundField has no ``as_p``** - that is a Form
@@ -49,6 +50,10 @@
       <label><input type="radio" name="visibility" value="public" {% if form.visibility.value == "public" %}checked{% endif %}> Public</label>
       <label><input type="radio" name="visibility" value="followers" {% if form.visibility.value == "followers" %}checked{% endif %}> Followers</label>
       <label><input type="radio" name="visibility" value="private" {% if form.visibility.value == "private" %}checked{% endif %}> Private</label>
+      <p class="audience-note muted">
+        A list keeps this audience once it’s made. To change it, delete the
+        list and make a new one.
+      </p>
       {{ form.visibility.errors }}
     </fieldset>
     <button type="submit" class="btn cinema-button cinema-button--primary">Create list</button>

@@ -83,9 +83,10 @@ def test_a_new_member_defaults_to_public():
 
 @pytest.mark.django_db
 def test_settings_page_offers_the_select_with_the_current_value():
-    """The control ships without help text (owner ruling, 2026-11-08): the
-    promises it would have made are the copy increment's and arrive with the
-    Watchlist field's wording in one pass. What is load-bearing here is that the
+    """The control ships without help text (owner ruling twice over: first that
+    the wording waits for one copy pass, then, on seeing that pass rendered on
+    2026-11-09, that the paragraph does not belong under a select at all - the
+    help page says the whole thing once). What is load-bearing here is that the
     select is offered at all and that it opens on the member's own value."""
     user = member(localname="alice", password=PASSWORD, default_visibility="private")
     body = _login("alice").get("/preferences/profile/").content.decode()

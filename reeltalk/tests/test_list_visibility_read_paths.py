@@ -366,6 +366,10 @@ def test_the_create_form_offers_the_three_audiences(db, author):
     page = _login("author").get(reverse("list-create")).content.decode()
     for value in ("public", "followers", "private"):
         assert f'name="visibility" value="{value}"' in page, value
+    # The page also has to say the choice is fixed, because nothing downstream
+    # can change it: the edit page carries no audience control (D2), so a member
+    # who picks wrong here makes a different list rather than an edited one.
+    assert "A list keeps this audience once it’s made." in page
     # And the two fields that were already there still render. This is the
     # owner's browser find of 2026-11-08: the first version of this page drew
     # the remaining fields with ``{{ field.as_p }}`` inside a loop, and a
