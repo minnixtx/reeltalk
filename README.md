@@ -240,7 +240,7 @@ either install path.
 takes either of two forms:
 
 ```
-REELTALK_VERSION=0.2.0
+REELTALK_VERSION=0.3.0
 ```
 
 ```
