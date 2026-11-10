@@ -7,6 +7,8 @@ assert nothing was written - a refusal that saved a truncated row would be
 the silent cut the owner ruled against (D2).
 """
 
+from pathlib import Path
+
 import pytest
 from django.test import Client
 
@@ -18,7 +20,7 @@ from reeltalk.core.models import (
     add_reply,
     mark_watched,
 )
-from reeltalk.tests.members import member
+from reeltalk.tests.members import member, site_admin
 
 REVIEW_MSG = f"{REVIEW_MAX_LENGTH:,}"
 REPLY_MSG = f"{REPLY_MAX_LENGTH:,}"
@@ -50,6 +52,12 @@ def film(db):
         directors=["Denis Villeneuve"],
         description="<p>A desert epic.</p>",
     )
+
+
+@pytest.fixture
+def admin(db):
+    # R12: / redirects to /setup/ until a superuser exists.
+    return site_admin(localname="admin", password="s3cretpass")
 
 
 def review(user, film, rating="4.5", content="<p>Great.</p>"):
@@ -175,3 +183,71 @@ def test_reply_composer_carries_maxlength(login, user, film):
     # feed row's reply icon links with (?reply=1).
     body = login.get(f"/status/{parent.pk}/?reply=1").content.decode()
     assert f'maxlength="{REPLY_MAX_LENGTH}"' in body
+
+
+# --- feed clamp (RL3): five lines on the scroll surfaces, whole elsewhere ---
+
+# Read the stylesheet verbatim. A whitespace-collapsing probe glues descendant
+# selectors together and lets a wrong rule pass vacuously - a trap this
+# project's CSS probes have been bitten by before.
+_CSS = (
+    Path(__file__).resolve().parents[1] / "social" / "static" / "css" / "reeltalk.css"
+).read_text()
+
+_CLAMP_SELECTOR = ".feed .review-body,\n.profile-review-list .review-body {"
+
+
+def _clamp_block() -> str:
+    start = _CSS.index(_CLAMP_SELECTOR)
+    return _CSS[start : _CSS.index("}", start)]
+
+
+def long_review(user, film):
+    return Status.objects.create(
+        user=user,
+        film=film,
+        status_type=Status.Type.REVIEW,
+        rating="4",
+        content="<p>" + "spice " * 400 + "ENDMARK</p>",
+        raw_content="raw",
+    )
+
+
+def test_the_clamp_rule_exists_and_targets_only_the_two_scroll_lists():
+    # ``index`` raises if the selector is absent or reworded, which is the
+    # point: the clamp must live under exactly these two selectors. The film
+    # page list, the post page, and the moderation queue are deliberately
+    # outside it - reading surfaces keep every line.
+    block = _clamp_block()
+    assert "-webkit-line-clamp: 5" in block
+    assert "overflow: hidden" in block
+
+
+@pytest.mark.django_db
+def test_profile_review_list_carries_the_scoping_class(login, user, film):
+    long_review(user, film)
+    body = login.get(f"/user/{user.localname}/").content.decode()
+    assert "profile-review-list" in body
+
+
+@pytest.mark.django_db
+def test_film_page_review_list_is_not_clamped(login, user, film):
+    long_review(user, film)
+    body = login.get(f"/film/{film.id}/").content.decode()
+    assert "profile-review-list" not in body
+
+
+@pytest.mark.django_db
+def test_feed_row_ships_the_whole_review_text(login, user, film, admin):
+    # R12: / redirects to /setup/ until a superuser exists, so the feed read
+    # needs an admin in the fixture or it would assert on an empty redirect.
+    long_review(user, film)
+    body = login.get("/?scope=local").content.decode()
+    assert "ENDMARK" in body
+
+
+@pytest.mark.django_db
+def test_post_page_ships_the_whole_review_text(login, user, film):
+    entry = long_review(user, film)
+    body = login.get(f"/status/{entry.pk}/").content.decode()
+    assert "ENDMARK" in body

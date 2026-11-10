@@ -22,7 +22,8 @@ view has already filtered the list to what this reader may read; a row they
 cannot see is simply absent, no placeholder, no teaser.
 {% endcomment %}
 {% if reviews %}
-<ul class="review-list">
+{# The scoping class carries the feed's five-line clamp to this list only: the film page shares this markup and must stay unclamped. #}
+<ul class="review-list profile-review-list">
   {% for entry in reviews %}{% include "_feed_row.html" %}{% endfor %}
 </ul>
 {% if page_obj.paginator.num_pages > 1 %}
