@@ -237,4 +237,4 @@ def test_the_welcome_page_hands_over_to_the_faq(db):
     its own.
     """
     page = Client().get("/welcome/").content.decode()
-    assert 'The <a href="/help/">Help page</a> answers' in page
+    assert 'See the <a href="/help/">Help</a> page for more details.' in page

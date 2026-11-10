@@ -399,9 +399,9 @@ def test_an_empty_page_number_404s(alice, bob, post):
 # --- Empty state -------------------------------------------------------------
 
 
-def test_a_member_with_nothing_sees_the_empty_state(member):
+def test_a_member_with_nothing_sees_no_empty_state_copy(member):
     content = member.get("/notifications/").content.decode()
-    assert "No notifications yet" in content
+    assert "No notifications yet" not in content
     assert "Mark all read" not in content
     assert '<ul class="review-list">' not in content
 

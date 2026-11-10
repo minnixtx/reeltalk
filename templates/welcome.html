@@ -4,7 +4,7 @@
 
 {% block content %}
 <h1>Getting started</h1>
-<p class="muted">ReelTalk is a home for tracking and reviewing films. The core loop takes four steps.</p>
+<p class="muted">ReelTalk is a home for tracking and reviewing films.</p>
 
 {% if user.is_authenticated %}
   <p>You're signed in as <strong>{{ user.localname }}</strong> — here's how it works.</p>
@@ -55,9 +55,5 @@
 {# four gets answered. (owner ruling 2026-11-06, D5 of the help FAQ brief: #}
 {# the footer and the More sheet already carry Help, this is the third door, #}
 {# and the sidebar stays at seven rows.) #}
-<p>
-  That is the whole loop. The <a href="{% url 'help' %}">Help page</a> answers
-  the rest: what the feed tabs mean, lists, notifications, your settings, and
-  how this site talks to the others.
-</p>
+<p>See the <a href="{% url 'help' %}">Help</a> page for more details.</p>
 {% endblock %}
