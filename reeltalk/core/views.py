@@ -41,6 +41,8 @@ from .import_export import (
     parse_tmdb_csv,
 )
 from .models import (
+    REPLY_MAX_LENGTH,
+    REVIEW_MAX_LENGTH,
     Film,
     Shelf,
     ShelfFilm,
@@ -107,7 +109,13 @@ def film_detail(request, film_id):
         blocked_ids = set(request.user.blocks.values_list("id", flat=True))
         if blocked_ids:
             reviews = reviews.exclude(user_id__in=blocked_ids)
-    data = {"film": film, "reviews": reviews}
+    data = {
+        "film": film,
+        "reviews": reviews,
+        # The composer's maxlength comes from the same constant the server
+        # refuses with, so the widget and the wall cannot drift.
+        "review_max_length": REVIEW_MAX_LENGTH,
+    }
     if request.user.is_authenticated:
         # D1 binary state drives the shelve controls on the page.
         shelf_ids = set(
@@ -299,6 +307,9 @@ def status_detail(request, status_id):
         {
             "status": status,
             "replies": replies,
+            # The reply composer's maxlength comes from the same constant
+            # ``add_reply`` refuses with.
+            "reply_max_length": REPLY_MAX_LENGTH,
             # A reply whose parent is a tombstone says so out loud. The
             # deleted post itself 404s, so this page is the only place the
             # orphaned reply can be read — and a reply that reads as
@@ -404,13 +415,16 @@ def reply_to_status(request, status_id):
             raw_content=raw_content,
         )
     except ValueError as exc:
-        # A boundary guard, not an expected path. Since L13 made the reply's
-        # type follow the film, ``Status.save``'s anchoring rule can no
-        # longer fire from here -- a film-less reply is written untyped rather
-        # than refused. This stays because the content arrives from an
-        # untrusted client and ``Status.save`` is allowed to raise for reasons
-        # this view cannot enumerate; a 400 with the reason beats a stack
-        # trace on an AJAX route either way.
+        # Two kinds of refusal ride this path. The expected one is the length
+        # cap: an over-limit reply raises from ``add_reply`` and the client
+        # shows the message. The other is a boundary guard, not an expected
+        # path. Since L13 made the reply's type follow the film,
+        # ``Status.save``'s anchoring rule can no longer fire from here -- a
+        # film-less reply is written untyped rather than refused. That stays
+        # because the content arrives from an untrusted client and
+        # ``Status.save`` is allowed to raise for reasons this view cannot
+        # enumerate; a 400 with the reason beats a stack trace on an AJAX
+        # route either way.
         return JsonResponse({"error": str(exc)}, status=400)
     # The mention rows behind the outbound tag array and the reply's wider
     # delivery audience (mentions increment 3). Parsed from the raw markdown

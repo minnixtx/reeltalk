@@ -796,6 +796,8 @@ def add_reply(user, parent: Status, *, content: str, raw_content: str) -> Status
     ``Status.save`` does it — so increment 5's threaded ``Create(Note)``
     has an identity to be built from (R41/R42).
     """
+    if len(raw_content) > REPLY_MAX_LENGTH:
+        raise ValueError(f"Replies are limited to {REPLY_MAX_LENGTH:,} characters.")
     return Status.objects.create(
         user=user,
         film_id=parent.film_id,
@@ -1729,6 +1731,14 @@ def feed_entries(
     return page, next_cursor
 
 
+# Length caps on member-written prose (REVIEW_LIMITS_PLAN RL1). Enforced at
+# the model-layer writers rather than the views: the ``maxlength`` attribute
+# on a textarea is browser courtesy and a direct POST never sees it. The
+# remote ingest reuses the same two numbers (RL2).
+REVIEW_MAX_LENGTH = 5000
+REPLY_MAX_LENGTH = 2000
+
+
 def validate_star_rating(rating) -> Decimal:
     """D3/§3.3: a film cannot be marked watched without a star rating.
 
@@ -1778,6 +1788,8 @@ def mark_watched(
     review text hides: the row is not this act's to retract.
     """
     star_rating = validate_star_rating(rating)
+    if len(raw_content) > REVIEW_MAX_LENGTH:
+        raise ValueError(f"Reviews are limited to {REVIEW_MAX_LENGTH:,} characters.")
     watched_shelf = Shelf.objects.get(user=user, identifier=Shelf.READ)
     watchlist_shelf = Shelf.objects.get(user=user, identifier=Shelf.TO_READ)
 
