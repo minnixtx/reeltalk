@@ -58,6 +58,7 @@ decision, increment 7). Malformed-but-harmless shapes
 ignored gracefully — §3.6: unsupported shapes create nothing and never raise.
 """
 
+import html
 import logging
 import re
 from datetime import datetime
@@ -67,9 +68,12 @@ from urllib.parse import urlparse
 import requests
 from django.core.files.base import ContentFile
 from django.utils import timezone
+from django.utils.html import strip_tags
 
 from reeltalk import __version__, public_http
 from reeltalk.core.models import (
+    REPLY_MAX_LENGTH,
+    REVIEW_MAX_LENGTH,
     Film,
     Shelf,
     ShelfFilm,
@@ -575,6 +579,31 @@ def _mirror_status(sender, note: dict, request):
     # be typed off the bytes it is about to store, not off the raw wire.
     content = _remote_html(note.get("content"))
     list_ext = note.get(LIST_EXTENSION)
+    # Length refusal (owner ruling D4 on REVIEW_LIMITS_PROPOSAL.md): a remote
+    # review over REVIEW_MAX_LENGTH, or any other remote prose over
+    # REPLY_MAX_LENGTH, creates nothing here. The measure is the visible text
+    # of the sanitized prose, so a peer's markup cannot eat the budget the way
+    # a raw-source count would. The list face is exempt: its content is
+    # generated boilerplate rather than typed prose, and a list is neither a
+    # review nor a reply. This is a drop, not a raise - raising would roll back
+    # the dedup row and keep the sender retrying an activity this instance has
+    # already decided against. It sits ahead of the film resolution below on
+    # purpose: a refused review costs no outbound fetch either, and an
+    # over-cap Update leaves the existing mirror exactly as its author left
+    # it, because the refusal runs before anything is written.
+    if list_ext is None:
+        budget = (
+            REVIEW_MAX_LENGTH if note.get("rating") is not None else REPLY_MAX_LENGTH
+        )
+        visible = len(html.unescape(strip_tags(content)))
+        if visible > budget:
+            logger.info(
+                "Ignoring %s: %d visible characters over the %d limit",
+                home_url,
+                visible,
+                budget,
+            )
+            return None
     if list_ext is not None:
         # L11: this Note is a list's post face. The extension is
         # authoritative about that, **ahead of** the shape mapping below —
