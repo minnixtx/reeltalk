@@ -105,7 +105,7 @@
         <input type="hidden" name="rating" value="">
       </div>
       <label for="id_review_content">Review <span class="muted">(optional)</span></label>
-      <textarea name="content" id="id_review_content" rows="4" placeholder="What did you think?">{% if user_review %}{{ user_review.raw_content }}{% endif %}</textarea>
+      <textarea name="content" id="id_review_content" rows="4" maxlength="{{ review_max_length }}" placeholder="What did you think?">{% if user_review %}{{ user_review.raw_content }}{% endif %}</textarea>
       {% if not user_review %}
         {# The audience control (visibility V1, all three since V2). Offered #}
         {# only when writing: an audience is fixed at writing, so an edit shows #}

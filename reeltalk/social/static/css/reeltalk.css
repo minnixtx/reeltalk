@@ -3562,6 +3562,23 @@ summary:focus-visible {
   margin: 8px 0;
 }
 
+/* Feed truncation (REVIEW_LIMITS_PLAN RL3, owner ruling D5-D6): a review row
+   shows five lines and the ellipsis, never a wall of text. The row already
+   opens the post on click, so the cut is a preview, not a loss - the whole
+   review is one tap away on its own page. The clamp paints the ellipsis only
+   when the text actually overflows, and it counts visual lines at the
+   reader's own width, which a server-side cut could not know. Scoped to the
+   home feed and the profile's review list on purpose: the post page, the
+   film page's review list, and the moderation queue keep every line, because
+   a moderator has to read a reported post whole. */
+.feed .review-body,
+.profile-review-list .review-body {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .feed .list-strip {
   margin: 4px 0 0;
 }

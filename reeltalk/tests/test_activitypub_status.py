@@ -30,7 +30,15 @@ from reeltalk.activitypub.broadcast import (
 from reeltalk.activitypub.inbox import process_inbound_activity
 from reeltalk.activitypub.models import DeliveredActivity
 from reeltalk.activitypub.statuses import RemoteObjectError
-from reeltalk.core.models import Film, Shelf, ShelfFilm, Status, Visibility
+from reeltalk.core.models import (
+    REPLY_MAX_LENGTH,
+    REVIEW_MAX_LENGTH,
+    Film,
+    Shelf,
+    ShelfFilm,
+    Status,
+    Visibility,
+)
 from reeltalk.mentions.models import sync_status_mentions
 from reeltalk.social.models import User
 from reeltalk.tests.members import member
@@ -387,6 +395,131 @@ def test_inbound_update_before_create_creates_mirror():
     )
     process_inbound_activity(update, carol, request)
     assert Status.objects.filter(local=False).count() == 1
+
+
+# --- Inbound length refusal (REVIEW_LIMITS_PLAN RL2, owner ruling D4) --------
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_inbound_review_over_the_length_cap_is_dropped():
+    # A remote review longer than REVIEW_MAX_LENGTH creates nothing. No film
+    # document is registered in ``responses`` on purpose: the refusal runs
+    # before the film reference is resolved, so a refused review costs this
+    # instance no outbound fetch either.
+    carol = _carol()
+    carol.save()
+    request = _request_with_host()
+    activity = _activity(
+        "https://remote.example/activity/over-long-review",
+        "Create",
+        _note(
+            "https://remote.example/status/over-long/",
+            content="x" * (REVIEW_MAX_LENGTH + 1),
+            rating=4.5,
+            film=REMOTE_FILM,
+        ),
+    )
+    assert process_inbound_activity(activity, carol, request) == "handled"
+    assert Status.objects.filter(local=False).count() == 0
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_inbound_review_at_the_length_cap_is_mirrored():
+    carol = _carol()
+    carol.save()
+    film = Film.objects.create(title="Arrival", year=2016)
+    request = _request_with_host()
+    activity = _activity(
+        "https://remote.example/activity/at-cap-review",
+        "Create",
+        _note(
+            "https://remote.example/status/at-cap/",
+            content="x" * REVIEW_MAX_LENGTH,
+            rating=4.5,
+            film=f"http://testserver/film/{film.pk}/",
+        ),
+    )
+    assert process_inbound_activity(activity, carol, request) == "handled"
+    assert Status.objects.filter(local=False).count() == 1
+
+
+@pytest.mark.django_db
+def test_inbound_note_over_the_reply_cap_is_dropped():
+    # A note with no rating — a reply or a standalone note — gets the reply
+    # budget, the same split the local writers apply.
+    carol = _carol()
+    carol.save()
+    request = _request_with_host()
+    activity = _activity(
+        "https://remote.example/activity/over-long-note",
+        "Create",
+        _note(
+            "https://remote.example/status/over-long-note/",
+            content="y" * (REPLY_MAX_LENGTH + 1),
+        ),
+    )
+    assert process_inbound_activity(activity, carol, request) == "handled"
+    assert Status.objects.filter(local=False).count() == 0
+
+
+@pytest.mark.django_db
+def test_inbound_markup_heavy_note_is_measured_on_visible_text():
+    # The budget is on the text a reader sees, not the HTML source: five
+    # hundred bolded characters sit well inside the reply budget even though
+    # the wire string is four times its length.
+    carol = _carol()
+    carol.save()
+    request = _request_with_host()
+    activity = _activity(
+        "https://remote.example/activity/markup-heavy",
+        "Create",
+        _note(
+            "https://remote.example/status/markup-heavy/",
+            content="<b>a</b>" * 500,
+        ),
+    )
+    assert process_inbound_activity(activity, carol, request) == "handled"
+    assert Status.objects.filter(local=False).count() == 1
+
+
+@pytest.mark.django_db
+def test_inbound_update_over_the_length_cap_leaves_the_mirror_as_written():
+    # A remote edit that pushes the prose over the cap is refused whole: the
+    # mirror keeps exactly what its author last wrote, rather than half of
+    # this activity and half of the last one.
+    carol = _carol()
+    carol.save()
+    film = Film.objects.create(title="Arrival", year=2016)
+    request = _request_with_host()
+    film_ref = f"http://testserver/film/{film.pk}/"
+    create = _activity(
+        "https://remote.example/activity/length-update-a",
+        "Create",
+        _note(
+            "https://remote.example/status/length-update/",
+            content="Short and true.",
+            rating=4.0,
+            film=film_ref,
+        ),
+    )
+    process_inbound_activity(create, carol, request)
+
+    update = _activity(
+        "https://remote.example/activity/length-update-b",
+        "Update",
+        _note(
+            "https://remote.example/status/length-update/",
+            content="x" * (REVIEW_MAX_LENGTH + 1),
+            rating=4.0,
+            film=film_ref,
+        ),
+    )
+    process_inbound_activity(update, carol, request)
+
+    status = Status.objects.get(local=False)
+    assert status.content == "Short and true."
 
 
 @pytest.mark.django_db
