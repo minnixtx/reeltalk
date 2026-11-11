@@ -1,0 +1,110 @@
+name: ci
+
+# The full gate, moved off this machine and onto the pull request. Four steps,
+# in the order the local gate script runs them: ruff check, ruff format --check,
+# a migration-drift check, then the whole test suite.
+#
+# Triggers on pull requests into dev only, not on every push: the verdict that
+# matters is the one on the PR. `pull_request` is also stronger than it looks,
+# because Actions runs it against the merge commit GitHub computes for the PR,
+# so the tree under test is the post-merge result and not just the branch head.
+# The trade-off is that the merge commit left on dev carries no check of its
+# own; the release ritual runs the local gate on the exact release commit
+# anyway, so that gap is deliberate (CI_GITHUB_ACTIONS_PROPOSAL.md D2).
+#
+# Cost is not a constraint. The repo is public, so Actions on standard Linux
+# runners is free on the free account; the 2,000 min/month cap binds only if
+# this repo ever goes private, and the concurrency group below is the insurance
+# for that day.
+#
+# Why the suite runs inside the built image instead of natively on the runner:
+# the local gate's strength is that it tests the shipped artifact. A native
+# `uv sync` would be quicker and would quietly stop proving that.
+
+on:
+  pull_request:
+    branches: [dev]
+
+# One run per PR, and a new push cancels the run it supersedes instead of
+# queueing a second long job behind it. A cancelled run is not a failure; it
+# means a newer commit is already being tested.
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# Reads the repo and nothing else. No secrets, on purpose: the test database
+# credentials are committed in docker-compose.test.yml because there is no
+# secret in them, so this workflow also works unchanged from a fork.
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    # This name is the status-check context. Branch protection on dev matches
+    # on it, so renaming this job means editing the protection rule in the same
+    # change or every merge blocks on a check that never reports.
+    name: gate
+    runs-on: ubuntu-latest
+    # The suite is ~47 min on the local box. Ninety minutes means a hang fails
+    # in ninety rather than sitting in the six-hour default.
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # docker-compose.yml needs an interpolation layer (its db service reads
+      # ${POSTGRES_USER:?required}) and web's env_file has to point at a file
+      # that exists. A real install gets both from the .env that setup.sh
+      # writes; CI writes the throwaway equivalent. Nothing here is a secret,
+      # and docker-compose.test.yml replaces the four POSTGRES keys the app
+      # actually connects with regardless.
+      - name: Write a throwaway instance env
+        run: |
+          cat > .env <<'EOF'
+          DOMAIN=localhost
+          SECRET_KEY=ci-throwaway-not-a-secret
+          POSTGRES_USER=reeltalk
+          POSTGRES_DB=reeltalk
+          POSTGRES_PASSWORD=reeltalk-test-only
+          POSTGRES_APP_USER=
+          POSTGRES_APP_PASSWORD=
+          EOF
+
+      # Built once from this commit, then every step below runs inside it: the
+      # same Python, the same locked dependencies, the same entrypoint as the
+      # shipped container. Building fresh is also what retires the local gate's
+      # baked-image staleness trap - there is no stale image on a runner.
+      - name: Build the image
+        run: docker compose build web
+
+      # --no-deps because lint and the migration check need no database, so the
+      # throwaway Postgres stays down until the suite asks for it. Linting the
+      # baked tree is linting the checkout here, which is why the local gate's
+      # host bind-mount trick does not come across: that exists only because a
+      # local image can be older than the source next to it.
+      - name: ruff check
+        run: docker compose run --rm --no-deps web ruff check .
+
+      - name: ruff format --check
+        run: docker compose run --rm --no-deps web ruff format --check .
+
+      # Red if a model changed without its migration. Needs a SECRET_KEY
+      # (settings refuse a blank one while DEBUG is off) and no database, which
+      # is what the --no-deps on this step is asserting.
+      - name: No missing migrations
+        run: docker compose run --rm --no-deps web python manage.py makemigrations --check --dry-run
+
+      # The whole suite, in the built image, against the throwaway Postgres
+      # server from docker-compose.test.yml. That second server is not
+      # convenience: the application role holds no CREATEDB (db/role-split.sql)
+      # and pytest-django creates and drops test_reeltalk on every run. The
+      # override gates the run on that server's healthcheck, so there is no
+      # connection race to flake on.
+      #
+      # One honest difference from the local script: run-gate.sh logs all four
+      # verdicts even when an early one is red. CI stops at the first red step,
+      # because a lint failure should cost seconds, not 45 minutes.
+      - name: Test suite
+        run: >-
+          docker compose -f docker-compose.yml -f docker-compose.test.yml
+          run --rm web pytest -p no:cacheprovider
