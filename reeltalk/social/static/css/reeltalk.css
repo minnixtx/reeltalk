@@ -1202,11 +1202,14 @@ ul.errorlist {
 }
 
 /* Everything interactive inside the row paints above that overlay, or the
-   overlay swallows its clicks. Scoped to the three containers a row is made
-   of rather than listed control by control, so a control added to a row
-   later is covered by the rule instead of silently losing its click. */
+   overlay swallows its clicks. Scoped to the containers a row is made of rather
+   than listed control by control, so a control added to a row later is covered
+   by the rule instead of silently losing its click. The action row is the fourth
+   container since the controls left the head on 2026-11-13. */
 .review-head a,
 .review-head button,
+.row-actions a,
+.row-actions button,
 .feed-item a,
 .review-body a {
   position: relative;
@@ -1274,6 +1277,26 @@ ul.errorlist {
   align-items: center;
   margin-bottom: 0.25rem;
   font-size: 0.95rem;
+}
+
+/* The row's head is two lines: the author's name owns the first, the post's
+   metadata — stars, date, audience marker — owns the second (owner pass,
+   2026-11-13). Before this the head was one wrapping flex line, so
+   a long remote handle like phil@files.shownotes.ooguy.com pushed the stars and
+   the date down while a short local name kept them inline: the same post read
+   two different ways depending on who wrote it, and worst on a phone.
+   The break is a full-width flex basis on the wrapper, not a <br>, so the
+   metadata still wraps on its own when it runs long at narrow widths. The gap
+   is inherited rather than repeated: the head already carries the spacing this
+   line wants, at every breakpoint, and a second copy of those rules is a second
+   thing to forget. The one exception is the feed's row gap, where the head's is
+   zero and this line keeps its own (see .feed .review-meta). */
+.review-meta {
+  align-items: center;
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: inherit;
 }
 
 /* A post's date is plain text, never a link (owner pass, 2026-10-04). On the
@@ -3509,10 +3532,6 @@ summary:focus-visible {
   height: 44px;
 }
 
-.feed .review-head .applaud {
-  margin-left: auto;
-}
-
 .feed .feed-item {
   background: transparent;
   border-radius: 0;
@@ -3531,6 +3550,35 @@ summary:focus-visible {
 
 .feed .review:has(> .feed-item) > .review-head {
   grid-column: 1 / -1;
+  /* The poster sits as close under the metadata line as the name sits above it
+     (owner pass, 2026-11-13). Measured in the browser: with the head's original
+     8px bottom margin the poster's ink was 13.3px under the stars while the
+     stars were already only 5.7px under the name. Taking the margin to zero
+     brings both ink gaps to 9px once the head's row-gap goes with it. Scoped to
+     rows that actually carry a poster, so prose rows and list rows keep the
+     head's original 8px. */
+  margin-bottom: 0;
+}
+
+@media (min-width: 1024px) {
+  .feed .review:has(> .feed-item) > .review-head {
+    /* The zero above is right everywhere except here. Measured at 3x on the
+       deployed page, every window up to 1023px puts the name's ink 8.33px above
+       the stars and the poster 7.67px below them, which reads even. From 1024px
+       the same two ink gaps come back 9.33 and 7.00, so the poster sits a visible
+       2.33px too high. Nothing in the sheet changes at that breakpoint for this
+       row: computed at 900 and 1440 the head is the same 48.13px tall, the name
+       the same 15.2px on a 23.56px line, the stars the same 20px on a 1px line,
+       and the metadata span the same 24.56px. What moves is where the star glyph
+       snaps on the pixel grid once the page becomes the desktop grid, and it
+       slides a pixel down inside its own box -- taking 1px off the gap below it
+       and handing it to the gap above. Two pixels puts the desktop pair at 9.00
+       against 9.33; three overshoots to 10.00 against 9.33, so two is the closer
+       of the two whole values. Re-measure after anything that moves the row's
+       vertical origin -- the header height, the tab strip -- because a snap is a
+       property of where the line lands, not of these declarations. */
+    margin-bottom: 2px;
+  }
 }
 
 .feed .review > .feed-item {
@@ -3544,6 +3592,17 @@ summary:focus-visible {
   width: 64px;
   height: 96px;
   border-radius: 2px;
+  /* The poster's top edge sits level with the first line of the title beside it
+     (owner ruling, 2026-11-14: move the POSTER down, not the type up). The two
+     boxes already shared a top - the poster and the title are grid items of the
+     row, since .feed-item above is display: contents - and what separated them
+     was the leading a 16px line on a 23.2px line-height carries above the
+     capitals: measured 5.0px at 1440, 5.0 at 360 and 5.33 at a phone's 3x. That
+     number agrees between machines because the title is a loaded webfont, while
+     the star glyph is whatever the device substitutes and lands a pixel or two
+     out on its own. So the poster is what moves, and the gap above it from the
+     metadata line grows with it - that widening is the ask, not a side effect. */
+  margin-top: 5px;
 }
 
 .feed .feed-item .feed-film {
@@ -3577,6 +3636,15 @@ summary:focus-visible {
   -webkit-line-clamp: 5;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* The profile's review list draws the same row partial as the feed, so its head
+   splits into the same two lines and takes the same tightened gap between them —
+   two thirds of the 12px it carried, matching the feed's cut from 8px. The
+   scoping class is what keeps the post page's own head, which shares the
+   .review-head class but not the split, untouched. */
+.profile-review-list .review-head {
+  row-gap: 8px;
 }
 
 .feed .list-strip {
@@ -3614,10 +3682,6 @@ summary:focus-visible {
     gap: 6px 10px;
   }
 
-  .feed .review-head .applaud {
-    margin-left: 0;
-  }
-
 }
 /* Home-feed identity and metadata hierarchy. */
 .feed .review-author {
@@ -3639,11 +3703,30 @@ summary:focus-visible {
   text-underline-offset: 3px;
 }
 
+/* The space between the head's two lines — the name and the metadata (see
+   .review-meta). The owner asked for two thirds of the old 8px on 2026-11-13,
+   then measured the result and asked for the rest: the name's ink sat 14px above
+   the stars while the poster sits 9px below them, so the row still read as two
+   stacked rows. Zero is the floor of the clean mechanism — a flex gap cannot go
+   negative — and it is enough: the star drawing carries its own slack inside its
+   line box, so the ink gap lands at 9px against the poster's 9px. Measured in
+   the browser at 1:1, not eyeballed. */
 .feed .review-head {
   column-gap: 14px;
-  row-gap: 8px;
+  row-gap: 0;
   font-family: var(--body);
   font-size: 0.95rem;
+}
+
+/* The metadata line's own wrap, which is a different fact from the break above
+   and so keeps its own value. Since the counters left the head this line is three
+   items and measured 216px in a 254px phone column, so it holds one line at every
+   width we support; the gap is for the column that goes narrower still, where the
+   wrapper wraps internally and inheriting the head's zero would weld those two
+   lines together. Scoped to the feed because the profile review list carries its
+   own head gap and inherits that instead. */
+.feed .review-meta {
+  row-gap: 5px;
 }
 
 .feed .review-head .feed-verb {
@@ -3660,6 +3743,19 @@ summary:focus-visible {
   color: var(--white);
 }
 
+/* The row's action row (owner pass, 2026-11-13): the applaud and reply controls
+   close the card on the right instead of riding the end of the metadata line,
+   where five items could not fit a phone column. It has to span the row's grid
+   explicitly - left to itself it shrink-wraps into the poster column and sits
+   flush left, which is the opposite of the ask. */
+.feed .row-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: 20px;
+  padding-top: 6px;
+}
+
 .feed .feed-film {
   font-weight: 400;
   line-height: 1.45;
@@ -3672,7 +3768,7 @@ summary:focus-visible {
 @media (max-width: 600px) {
   .feed .review-head {
     column-gap: 10px;
-    row-gap: 8px;
+    row-gap: 0;
   }
 }
 /* Home feed section heading: compact display type and a restrained red rule. */

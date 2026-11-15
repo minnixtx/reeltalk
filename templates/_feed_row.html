@@ -44,6 +44,13 @@ a second channel to say so.
     {# predicate. Not the shelf-event verb machinery — a list is not a shelf #}
     {# event, and that block is behind the film check anyway. #}
     {% if entry.is_list_face %}<span class="feed-verb">created a new list</span>{% endif %}
+    {# The metadata line (owner pass, 2026-11-13). Everything that describes the #}
+    {# post rather than the person sits in this wrapper, which the stylesheet #}
+    {# forces onto its own flex line: a long remote handle used to push the stars #}
+    {# and the date down onto a second line of their own, so the same post read #}
+    {# two different ways depending on who wrote it. The list verb stays above #}
+    {# with the name because "minnix created a new list" is one sentence. #}
+    <div class="review-meta">
     {% if entry.rating %}<span title="{{ entry.rating|floatformat:'-1' }} / 5">{{ entry.rating|stars }}</span>{% endif %}
     {# Plain text, never a link: the .review-open overlay above already opens this #}
     {# post (owner pass, 2026-10-04). #}
@@ -55,65 +62,7 @@ a second channel to say so.
     {# one since the 2026-11-07 pass, public included: the drawing sits in the #}
     {# row's metadata line and reads as part of it, not as an exception. #}
     {% include "_audience_tag.html" with visibility=entry.visibility label=entry.audience_label %}
-    {# The control takes the *narrower* flag (R84): "may I put a control here", never "may I open this". Since increment 5 that set includes mirrors — an Applaud now reaches their home instance. #}
-    {# Icon-only, no text: the accessible name and the tooltip both come from #}
-    {# the label below. data-state carries WHO has applauded, which is two #}
-    {# facts, not one — liked_by_viewer picks mine-vs-not, like_count picks #}
-    {# others-vs-nobody. The count stays a SIBLING of the button: clicking #}
-    {# a number must not toggle anything. #}
-    {% comment %}
-    N6 adds the second clause: the row is now rendered to signed-out visitors
-    too (the Local scope), and both endpoints behind these controls are
-    ``login_required``. A button whose POST bounces to a login page is the
-    offer-without-the-route that R85 is written against, so the page withholds
-    what the route refuses — same shape as R81 taking the link out of the rail
-    for strangers while leaving the fact on the page. The count rides with the
-    control rather than standing alone: a bare number beside where a button
-    would be invites the click that is not there.
-    {% endcomment %}
-    {% if entry.interactive and user.is_authenticated %}
-      <span class="applaud">
-        <button type="button" class="applaud-btn" data-url="{% url 'status-like' entry.status_id %}" data-state="{% if entry.liked_by_viewer %}mine{% elif entry.like_count %}others{% else %}idle{% endif %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}" title="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
-        <span class="applaud-count" aria-live="polite">{{ entry.like_count }}</span>
-      </span>
-    {% endif %}
-    {% comment %}
-    The reply control (owner pass, 2026-10-05), immediately after the
-    applaud control. It replaces the plain "N replies" text, and it is the
-    ONLY way to start a reply now: clicking the row itself opens the post
-    page to read, and the reply icon opens it to answer.
-
-    The gate names which parents are replyable, and it asks the model rather
-    than inferring, because "has no film" is NOT the same fact as "is a
-    list". ``reply_to_status`` accepts exactly two parents — a post with a
-    film, and a list's face (L13) — and refuses every other film-less
-    status. The live feed holds mirrored ``Note``s with no film whose reply
-    route answers 400, so widening this on "no film" would put a
-    working-looking reply icon on rows that cannot take one: R85's
-    offer-with-no-route bug, reopened by a template guess. ``entry.replyable``
-    states the route's rule once, in Python, off ``is_list_face`` — which is
-    set from ``status_type`` in ``feed_entries``, where the status is
-    actually in hand. (It is a property rather than an inline expression also
-    because Django's ``{% if %}`` tokenizer will not split an unspaced
-    parenthesis; a gate that has to be written awkwardly gets "simplified"
-    into the wrong thing.)
-
-    The icon is an <a> carrying ?reply=1, not a JS toggle: the same URL
-    renders the composer open server-side, so the control works with
-    JavaScript disabled and keeps middle-click and open-in-new-tab.
-
-    The count always renders, zero included, matching the applaud count.
-
-    And it is gated on the same second clause as the applaud control above:
-    an anonymous reader gets neither button, because the reply route is
-    ``login_required`` too.
-    {% endcomment %}
-    {% if entry.replyable and user.is_authenticated %}
-      <span class="reply">
-        <a class="reply-btn" href="{% url 'status' entry.status_id %}?reply=1" data-state="{% if entry.reply_count %}others{% else %}idle{% endif %}" title="{% if entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply to this post{% else %}Reply to this post{% endif %}"></a>
-        <span class="reply-count" aria-live="polite">{{ entry.reply_count }}</span>
-      </span>
-    {% endif %}
+    </div>
   </div>
   {% if entry.film %}
     <div class="feed-item">
@@ -156,4 +105,77 @@ a second channel to say so.
     </div>
   {% endif %}
   {% if entry.content %}<div class="review-body">{{ entry.content|safe }}</div>{% endif %}
+  {# The action row (owner pass, 2026-11-13). The two controls used to ride at #}
+  {# the end of the metadata line, which made the line five items wide: on a #}
+  {# phone column they overflowed and the reply counter dropped onto a line of #}
+  {# its own, so the row read differently at every width. They are controls, not #}
+  {# facts, so they now close the card on the right instead - the same split #}
+  {# Mastodon draws between a post's facts and its actions. The wrapper is one #}
+  {# element at every width on purpose: a control cannot live in two places, and #}
+  {# a second copy would be a second click target to keep honest. #}
+  {% if user.is_authenticated %}
+    {% if entry.interactive or entry.replyable %}
+    <div class="row-actions">
+      {# The control takes the *narrower* flag (R84): "may I put a control here", never "may I open this". Since increment 5 that set includes mirrors — an Applaud now reaches their home instance. #}
+      {# Icon-only, no text: the accessible name and the tooltip both come from #}
+      {# the label below. data-state carries WHO has applauded, which is two #}
+      {# facts, not one — liked_by_viewer picks mine-vs-not, like_count picks #}
+      {# others-vs-nobody. The count stays a SIBLING of the button: clicking #}
+      {# a number must not toggle anything. #}
+      {% comment %}
+      N6 adds the second clause: the row is now rendered to signed-out visitors
+      too (the Local scope), and both endpoints behind these controls are
+      ``login_required``. A button whose POST bounces to a login page is the
+      offer-without-the-route that R85 is written against, so the page withholds
+      what the route refuses — same shape as R81 taking the link out of the rail
+      for strangers while leaving the fact on the page. The count rides with the
+      control rather than standing alone: a bare number beside where a button
+      would be invites the click that is not there.
+      {% endcomment %}
+      {% if entry.interactive %}
+        <span class="applaud">
+          <button type="button" class="applaud-btn" data-url="{% url 'status-like' entry.status_id %}" data-state="{% if entry.liked_by_viewer %}mine{% elif entry.like_count %}others{% else %}idle{% endif %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}" title="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
+          <span class="applaud-count" aria-live="polite">{{ entry.like_count }}</span>
+        </span>
+      {% endif %}
+      {% comment %}
+      The reply control (owner pass, 2026-10-05), immediately after the
+      applaud control. It replaces the plain "N replies" text, and it is the
+      ONLY way to start a reply now: clicking the row itself opens the post
+      page to read, and the reply icon opens it to answer.
+
+      The gate names which parents are replyable, and it asks the model rather
+      than inferring, because "has no film" is NOT the same fact as "is a
+      list". ``reply_to_status`` accepts exactly two parents — a post with a
+      film, and a list's face (L13) — and refuses every other film-less
+      status. The live feed holds mirrored ``Note``s with no film whose reply
+      route answers 400, so widening this on "no film" would put a
+      working-looking reply icon on rows that cannot take one: R85's
+      offer-with-no-route bug, reopened by a template guess. ``entry.replyable``
+      states the route's rule once, in Python, off ``is_list_face`` — which is
+      set from ``status_type`` in ``feed_entries``, where the status is
+      actually in hand. (It is a property rather than an inline expression also
+      because Django's ``{% if %}`` tokenizer will not split an unspaced
+      parenthesis; a gate that has to be written awkwardly gets "simplified"
+      into the wrong thing.)
+
+      The icon is an <a> carrying ?reply=1, not a JS toggle: the same URL
+      renders the composer open server-side, so the control works with
+      JavaScript disabled and keeps middle-click and open-in-new-tab.
+
+      The count always renders, zero included, matching the applaud count.
+
+      And it is gated on the same second clause as the applaud control above:
+      an anonymous reader gets neither button, because the reply route is
+      ``login_required`` too.
+      {% endcomment %}
+      {% if entry.replyable %}
+        <span class="reply">
+          <a class="reply-btn" href="{% url 'status' entry.status_id %}?reply=1" data-state="{% if entry.reply_count %}others{% else %}idle{% endif %}" title="{% if entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply to this post{% else %}Reply to this post{% endif %}"></a>
+          <span class="reply-count" aria-live="polite">{{ entry.reply_count }}</span>
+        </span>
+      {% endif %}
+    </div>
+    {% endif %}
+  {% endif %}
 </li>
