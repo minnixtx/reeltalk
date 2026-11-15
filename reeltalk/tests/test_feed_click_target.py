@@ -383,12 +383,17 @@ def test_the_overlay_stretches_over_the_whole_row():
 
 @pytest.mark.django_db
 def test_every_interactive_part_of_a_row_is_raised_above_the_overlay():
-    # One rule, four selectors. If any of the four goes missing, whatever it
-    # covered stops receiving its own clicks and the row navigates instead —
-    # the failure mode the owner's whole ask turns on.
+    # One rule, six selectors. If any of them goes missing, whatever it covered
+    # stops receiving its own clicks and the row navigates instead — the failure
+    # mode the owner's whole ask turns on. The action row's two joined on
+    # 2026-11-13, when the applaud and reply controls left the head and became
+    # their own container; a rule scoped per container only covers a container
+    # someone added to it.
     raise_selectors = [
         ".review-head a",
         ".review-head button",
+        ".row-actions a",
+        ".row-actions button",
         ".feed-item a",
         ".review-body a",
     ]
