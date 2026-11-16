@@ -333,6 +333,14 @@ def status_detail(request, status_id):
             "like_count": status.likes.filter(user__suspended_at__isnull=True).count(),
             "liked_by_viewer": request.user.is_authenticated
             and status.likes.filter(user=request.user).exists(),
+            # The reply control's own state (owner pass, 2026-11-15). The icon
+            # answers "did I answer this", which the tally beside it cannot:
+            # a thread of nine that the reader never joined looks exactly like
+            # one they started. Same raw single-row lookup as the like state
+            # above, for the same reason — ``replied_ids()`` batches and a
+            # one-object page has nothing to batch.
+            "replied_by_viewer": request.user.is_authenticated
+            and status.replies.filter(user=request.user, deleted=False).exists(),
             # The report control (moderation increment 2). Both halves come
             # from one helper shared with the profile so the post page and
             # the profile cannot drift on who may report what.

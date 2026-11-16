@@ -52,6 +52,7 @@ from reeltalk.core.models import (
     add_reply,
     conversation,
     mark_watched,
+    replied_ids,
     reply_counts,
     shelve_to_watchlist,
 )
@@ -309,6 +310,51 @@ def test_reply_counts_runs_no_query_for_an_empty_id_list(db):
     with CaptureQueriesContext(connection) as ctx:
         assert reply_counts([]) == {}
     assert len(ctx.captured_queries) == 0
+
+
+@pytest.mark.django_db
+def test_replied_ids_names_only_the_viewers_own_answers(alice, bob, dune):
+    # The reply icon's fact, and the one the tally cannot carry: bob answered
+    # one post and nobody else did, so that is the only id in the answer.
+    one = _review(alice, dune)
+    two = _review(alice, Film.objects.create(title="Arrival", year=2016))
+    _reply(bob, one)
+    assert replied_ids(bob, [one.pk, two.pk]) == {one.pk}
+    assert replied_ids(alice, [one.pk, two.pk]) == set()
+
+
+@pytest.mark.django_db
+def test_replied_ids_ignores_a_reply_the_viewer_deleted(alice, bob, dune):
+    # A tombstoned reply is not an answer the member took, so the icon must
+    # not still claim one.
+    one = _review(alice, dune)
+    gone = _reply(bob, one)
+    assert replied_ids(bob, [one.pk]) == {one.pk}
+    gone.delete()
+    assert replied_ids(bob, [one.pk]) == set()
+
+
+@pytest.mark.django_db
+def test_replied_ids_runs_no_query_for_an_empty_id_list(db):
+    alice = member(localname="alice", password="s3cretpass")
+    with CaptureQueriesContext(connection) as ctx:
+        assert replied_ids(alice, []) == set()
+    assert len(ctx.captured_queries) == 0
+
+
+@pytest.mark.django_db
+def test_replied_ids_is_one_query_whatever_the_batch(alice, bob, dune):
+    # The feed pays this once per page, not once per row — same budget rule
+    # reply_counts follows, and the same reason: feed_entries is a list.
+    posts = []
+    for i in range(6):
+        film = Film.objects.create(title=f"Film {i}", year=2000 + i)
+        posts.append(_review(alice, film))
+    for post in posts:
+        _reply(bob, post)
+    with CaptureQueriesContext(connection) as ctx:
+        assert len(replied_ids(bob, [p.pk for p in posts])) == 6
+    assert len(ctx.captured_queries) == 1
 
 
 # --- The feed (decision 2) ---------------------------------------------------
@@ -645,8 +691,12 @@ def test_a_local_post_without_a_deleted_parent_shows_no_orphan_line(alice, dune)
 # Reworked on the owner's pass of 2026-10-05 from a text count that appeared
 # only above zero into an icon control that is always there. The icon is a
 # link to the post page carrying ?reply=1, so it opens the composer rather
-# than merely naming the thread, and the two-state ink reports whether the
-# post has replies at all.
+# than merely naming the thread.
+#
+# The ink rule changed on the owner's pass of 2026-11-15: red now means the
+# READER answered, not that the post has replies. The counter beside the icon
+# already says how many people answered, and it cannot say whether you are one
+# of them — which is the fact a member needs before answering twice.
 
 
 @pytest.mark.django_db
@@ -658,16 +708,59 @@ def test_a_feed_row_shows_its_reply_control_and_count(alice, bob, dune, admin):
     row = _row(_home(_login("alice")), parent.pk)
     assert 'class="reply-btn"' in row
     assert f'href="/status/{parent.pk}/?reply=1"' in row
-    # Replies exist, so the ink is the red-outline state.
-    assert 'data-state="others"' in row
+    # Alice wrote both replies, so the ink is hers.
+    assert 'data-state="mine"' in row
+    assert "You replied" in row
     assert '<span class="reply-count" aria-live="polite">2</span>' in row
+
+
+@pytest.mark.django_db
+def test_the_reply_icon_stays_idle_when_only_someone_else_answered(
+    alice, bob, dune, admin
+):
+    # The state the owner took away. A thread alice never joined is a thread
+    # she may still join, and a red icon on it would claim an answer she never
+    # gave — while the control beside it still opens an empty composer.
+    alice.follows.add(bob)
+    parent = _review(bob, dune)
+    carol = member(localname="carol", password="s3cretpass")
+    _reply(carol, parent)
+    row = _row(_home(_login("alice")), parent.pk)
+    assert 'data-state="idle"' in row
+    assert "You replied" not in row
+    assert '<span class="reply-count" aria-live="polite">1</span>' in row
+
+
+@pytest.mark.django_db
+def test_the_post_page_marks_the_control_for_the_readers_own_reply(alice, bob, dune):
+    # The same rule on the page the control links to. Alice answered, so the
+    # bubble on her post's page is hers; bob reading the same page sees a
+    # thread he never joined and gets the cream icon with the same count.
+    parent = _review(bob, dune)
+    _reply(alice, parent)
+    alice_page = _login("alice").get(f"/status/{parent.pk}/").content.decode()
+    assert 'class="reply-btn"' in alice_page
+    assert 'data-state="mine"' in alice_page
+    assert "You replied" in alice_page
+
+
+@pytest.mark.django_db
+def test_the_post_page_leaves_the_control_idle_for_a_reader_who_only_read_it(
+    alice, bob, dune
+):
+    parent = _review(bob, dune)
+    _reply(alice, parent)
+    bob_page = _login("bob").get(f"/status/{parent.pk}/").content.decode()
+    assert "Spice must be reviewed." in bob_page  # the page rendered…
+    assert 'data-state="idle"' in bob_page
+    assert "You replied" not in bob_page
 
 
 @pytest.mark.django_db
 def test_a_row_with_no_replies_still_shows_the_control_at_zero(alice, bob, dune, admin):
     # The owner chose "always show, zero included" to match the applaud
     # count, which means the old "no replies, no count" behaviour is gone.
-    # The control is present and reads 0 in the white-outline state.
+    # The control is present and reads 0 in the cream state.
     alice.follows.add(bob)
     parent = _review(bob, dune)
     row = _row(_home(_login("alice")), parent.pk)

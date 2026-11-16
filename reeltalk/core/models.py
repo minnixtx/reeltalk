@@ -847,6 +847,38 @@ def reply_counts(status_ids: list[int]) -> dict[int, int]:
     return {row["reply_parent_id"]: row["n"] for row in rows}
 
 
+def replied_ids(user, status_ids: list[int]) -> set[int]:
+    """Which of ``status_ids`` ``user`` has answered, in one query.
+
+    The reply control's own half of what :func:`liked_ids` does for applause:
+    the icon now reports whether *the viewer* replied, while the number beside
+    it reports everyone, so the page needs the viewer's state as a fact and
+    cannot infer it from the tally.
+
+    A tombstoned reply does not count. The control is an offer to act, and a
+    reply the member deleted is not one they took — leaving it red would make
+    the icon claim an answer that is no longer on the page.
+
+    Direct children only, which is the same set :func:`reply_counts` tallies, so
+    the icon and the number beside it always describe the same replies. It is
+    also the complete answer for a local member: this instance's composer only
+    ever answers the status you are reading, so anything you wrote under a
+    thread is a direct child of that thread's own row. Deeper levels arrive
+    from remote threads, written by other people.
+
+    Unlike :func:`reply_counts` this says nothing about *other* members, so it
+    carries no suspension clause: a suspended viewer cannot load the page, and
+    every other author's state is irrelevant to this answer.
+    """
+    if not user.is_authenticated or not status_ids:
+        return set()
+    return set(
+        Status.objects.filter(
+            user=user, reply_parent_id__in=status_ids, deleted=False
+        ).values_list("reply_parent_id", flat=True)
+    )
+
+
 # Upper bound on how many levels of a thread the post page walks. A bound on
 # the work, not on the model — see ``conversation``.
 REPLY_THREAD_MAX_DEPTH = 12
@@ -1032,6 +1064,14 @@ class FeedEntry:
     reports, and it shows on a remote mirror too: R85's split again, a count
     is a fact about the post and only the offer to act on it is gated.
 
+    ``replied_by_viewer`` is whether the reader answered the row's status
+    themselves. The owner's pass of 2026-11-15 split the two reply facts apart:
+    the tally on the counter says how many people answered, the icon says
+    whether *you* did, which is the one thing a count cannot report and the one
+    fact the reader acts on twice by accident without it. Same split the
+    applause control already makes between ``like_count`` and
+    ``liked_by_viewer``.
+
     ``is_list_face`` marks the row as standing for a list's post face
     (§2K increment 4). It is set from ``status_type == LIST`` in
     :func:`feed_entries`, where the ``Status`` is actually in hand — never
@@ -1070,6 +1110,7 @@ class FeedEntry:
     like_count: int = 0
     liked_by_viewer: bool = False
     reply_count: int = 0
+    replied_by_viewer: bool = False
     is_list_face: bool = False
     list_strip: ListStrip | None = None
     # Who the row was addressed to (visibility V1), for the marker the template
@@ -1262,22 +1303,24 @@ def _status_entry(status: "Status") -> "FeedEntry":
 def _attach_interaction_counts(entries: list["FeedEntry"], user) -> None:
     """Like state and reply tallies for a batch of rows, in a fixed query count.
 
-    One grouped like count, one membership query, one grouped reply count,
-    whatever the batch holds. Rows without a status have nothing to interact
-    with and keep their defaults. ``user=None`` (an anonymous reader) gets
-    nobody's like state — :func:`liked_ids` answers the empty set — while the
-    counts stay honest, since a count is a fact about the post and only the
-    offer to act on it is gated (R85).
+    One grouped like count, one like-membership query, one grouped reply count,
+    one reply-membership query, whatever the batch holds. Rows without a status
+    have nothing to interact with and keep their defaults. ``user=None`` (an
+    anonymous reader) gets nobody's like state — :func:`liked_ids` answers the
+    empty set — while the counts stay honest, since a count is a fact about the
+    post and only the offer to act on it is gated (R85).
     """
     status_ids = [entry.status_id for entry in entries if entry.status_id is not None]
     counts = like_counts(status_ids)
     liked = liked_ids(user, status_ids) if user is not None else set()
     replies = reply_counts(status_ids)
+    answered = replied_ids(user, status_ids) if user is not None else set()
     for entry in entries:
         if entry.status_id is not None:
             entry.like_count = counts.get(entry.status_id, 0)
             entry.liked_by_viewer = entry.status_id in liked
             entry.reply_count = replies.get(entry.status_id, 0)
+            entry.replied_by_viewer = entry.status_id in answered
 
 
 def status_feed_entries(statuses, viewer) -> list["FeedEntry"]:

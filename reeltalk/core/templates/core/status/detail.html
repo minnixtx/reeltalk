@@ -33,7 +33,7 @@
     {% endcomment %}
     {% if user.is_authenticated %}
       <span class="applaud">
-        <button type="button" class="applaud-btn" data-url="{% url 'status-like' status.id %}" data-state="{% if liked_by_viewer %}mine{% elif like_count %}others{% else %}idle{% endif %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}" title="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
+        <button type="button" class="applaud-btn" data-url="{% url 'status-like' status.id %}" data-state="{% if liked_by_viewer %}mine{% else %}idle{% endif %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}" title="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
         <span class="applaud-count" aria-live="polite">{{ like_count }}</span>
       </span>
     {% elif like_count %}
@@ -41,8 +41,9 @@
     {% endif %}
     {% comment %}
     The reply control, beside the applaud one (owner pass, 2026-10-05).
-    Same two-state ink as the feed row: red outline when the thread has
-    replies, white outline when it does not.
+    Same ink rule as the feed row since the owner's pass of 2026-11-15: red
+    when the reader answered this post, white when they did not, whoever else
+    did or did not. The thread's size is the counter's job.
 
     The count here is ``replies|length`` — the block-filtered thread count
     the heading already shows — not the viewer-independent feed tally.
@@ -56,7 +57,7 @@
     {% endcomment %}
     {% if user.is_authenticated and status.film %}
       <span class="reply">
-        <a class="reply-btn" href="?reply=1" data-state="{% if replies|length %}others{% else %}idle{% endif %}" title="{% if replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply to this post{% else %}Reply to this post{% endif %}"></a>
+        <a class="reply-btn" href="?reply=1" data-state="{% if replied_by_viewer %}mine{% else %}idle{% endif %}" title="{% if replied_by_viewer %}You replied — reply again{% elif replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if replied_by_viewer %}You replied — reply again to this post{% elif replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply to this post{% else %}Reply to this post{% endif %}"></a>
         <span class="reply-count" aria-live="polite">{{ replies|length }}</span>
       </span>
     {% endif %}

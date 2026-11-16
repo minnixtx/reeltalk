@@ -414,13 +414,12 @@ def _applaud_states(body) -> list[str]:
     """The ``data-state`` of every applaud button on the page, in order.
 
     Scoped to the applaud control rather than read off the whole body. The
-    reply control added on the 2026-10-05 pass carries its own
-    ``data-state="idle"`` on any post with no replies, so a page-wide
-    ``'data-state="idle"' not in body`` stopped meaning anything the moment
-    both controls shared the attribute name — it would fail on a page whose
-    applaud icons were all perfectly correct. Reading the attribute off the
-    element that owns it is the only version of this assertion that still
-    asserts something.
+    reply control added on the 2026-10-05 pass carries the same attribute name
+    on its own anchor, so a page-wide ``'data-state="idle"' not in body``
+    stopped meaning anything the moment both controls shared it — it would fail
+    on a page whose applaud icons were all perfectly correct. Reading the
+    attribute off the element that owns it is the only version of this
+    assertion that still asserts something.
     """
     return re.findall(r'class="applaud-btn"[^>]*?data-state="([a-z]+)"', body)
 
@@ -435,17 +434,20 @@ def test_feed_icon_state_is_idle_when_nothing_has_been_applauded(
 
 
 @pytest.mark.django_db
-def test_feed_icon_state_is_others_when_only_someone_else_applauded(
-    alice, bob, dune, admin
-):
+def test_feed_icon_stays_idle_when_only_someone_else_applauded(alice, bob, dune, admin):
+    # The state the owner's pass of 2026-11-15 took away. The icon answers
+    # "did I applaud" and the counter answers "how many people did", so carol's
+    # applause belongs on the number: a red icon here would claim bob had
+    # applauded a post he never touched, and the click would then applaud it
+    # rather than take anything back.
     status = _review(alice, dune)
     carol = member(localname="carol", password="s3cretpass")
     carol.follows.add(alice)
     Like.objects.create(user=carol, status=status)
     bob.follows.add(alice)
-    # Bob sees that the post IS applauded without having done it himself, so
-    # the icon is the red outline rather than the white one.
-    assert _applaud_states(_home(_login("bob"))) == ["others"]
+    body = _home(_login("bob"))
+    assert _applaud_states(body) == ["idle"]
+    assert '<span class="applaud-count" aria-live="polite">1</span>' in body
 
 
 @pytest.mark.django_db
@@ -457,17 +459,22 @@ def test_feed_icon_state_is_mine_when_the_viewer_applauded(alice, bob, dune, adm
 
 
 @pytest.mark.django_db
-def test_mine_wins_over_others_when_both_applauded(alice, bob, dune, admin):
-    # The three states are exclusive by construction — the template picks
-    # "mine" first, so a post applauded by the viewer AND by others still
-    # reads as theirs rather than flipping to the shared outline.
+def test_the_viewers_own_applause_wins_the_icon_over_everyone_elses(
+    alice, bob, dune, admin
+):
+    # The two facts are now held by two different halves of the control, so
+    # both are true at once: the icon is the reader's and the count is the
+    # total. A post applauded by the viewer AND by others still reads as
+    # theirs rather than going cream because other people are in the number.
     status = _review(alice, dune)
     carol = member(localname="carol", password="s3cretpass")
     carol.follows.add(alice)
     bob.follows.add(alice)
     Like.objects.create(user=carol, status=status)
     Like.objects.create(user=bob, status=status)
-    assert _applaud_states(_home(_login("bob"))) == ["mine"]
+    body = _home(_login("bob"))
+    assert _applaud_states(body) == ["mine"]
+    assert '<span class="applaud-count" aria-live="polite">2</span>' in body
 
 
 @pytest.mark.django_db

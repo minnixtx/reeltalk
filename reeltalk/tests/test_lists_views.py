@@ -703,3 +703,24 @@ def test_the_reply_count_on_the_list_page_counts_the_live_thread(alice, bob, dun
     body = _body(_login("alice").get(f"/list/{film_list.pk}/"))
     assert "Replies (0)" in body
     assert 'class="reply-count" aria-live="polite">0<' in body
+
+
+@pytest.mark.django_db
+def test_the_list_page_marks_the_reply_control_for_the_readers_own_reply(
+    alice, bob, dune
+):
+    # The ink answers "did I answer this list", not "did anyone" (owner pass,
+    # 2026-11-15). Bob's reply moves the counter on alice's page and leaves her
+    # icon cream; only her own answer turns it red.
+    def reply_tag(client) -> str:
+        body = _body(client.get(f"/list/{film_list.pk}/"))
+        return re.search(r'class="reply-btn"[^>]*', body).group(0)
+
+    film_list = create_list(alice, title="Sci-Fi", films=[dune])
+    _login("bob").post(f"/status/{film_list.status_id}/reply/", {"content": "One."})
+    assert 'data-state="idle"' in reply_tag(_login("alice"))
+
+    _login("alice").post(f"/status/{film_list.status_id}/reply/", {"content": "Two."})
+    mine = reply_tag(_login("alice"))
+    assert 'data-state="mine"' in mine
+    assert "You replied" in mine
