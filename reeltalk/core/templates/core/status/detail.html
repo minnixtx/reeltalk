@@ -3,11 +3,31 @@
 
 {% block title %}{{ status.user.localname }}{% if status.film %} on {{ status.film.title }}{% endif %}{% endblock %}
 
+{# The poster column needs a wider page than the 40rem reading column, and the #}
+{# width is a property of the column, so it rides on main rather than the article. #}
+{% block main_class %} status-page{% endblock %}
+
 {% block content %}
 {# The post page (R83 decision 3): one status in full, then its replies. #}
 {# A mirror renders here like any other post, and since increment 5 it is #}
 {# interactive too — the Like and the threaded Create both reach its home. #}
-<article class="status-post">
+{# Owner pass, 2026-11-16: the poster is this page's own, not the feed row's #}
+{# thumbnail, and everything the post says sits in one column to its right. #}
+<a class="post-back" href="{% url 'index' %}">← Back to feed</a>
+<article class="status-post{% if status.film %} has-poster{% endif %}">
+  {% if status.film %}
+    {# The film title leads the page, as it does on the film's own page, and it #}
+    {# stays the link there: this page is about a review of a film, and the film #}
+    {# is the one destination on it that is not the post itself. #}
+    <h1 class="post-film"><a href="{% url 'film' status.film.id %}">{{ status.film.title }}{% if status.film.year %} <span class="muted">({{ status.film.year }})</span>{% endif %}</a></h1>
+    <div class="post-poster">
+      {% if status.film.poster %}
+        <img class="poster" src="{{ status.film.poster.url }}" alt="">
+      {% else %}
+        <span class="poster poster-placeholder" aria-hidden="true"></span>
+      {% endif %}
+    </div>
+  {% endif %}
   <div class="review-head">
     {% if status.user.avatar %}
       <img class="avatar avatar-row" src="{{ status.user.avatar.url }}" alt="">
@@ -24,54 +44,17 @@
     {# whatever that audience is. #}
     {% include "_audience_tag.html" with visibility=status.visibility label=status.get_visibility_display %}
     {% comment %}
-    Any member gets the control, on a local post or on a mirror of another
-    instance's. Increment 5 made a like on a remote post deliverable, so
-    withholding it there would now be the opposite of the honest absence
-    R83 decision 5 asked for. An anonymous reader still gets the count with
-    no button: the number is a fact about the post, the offer needs an
-    account (R85).
+    The applaud count for a reader with no account (R85). It stays in the
+    metadata line because it is a fact about the post, not an offer: the
+    button beside it is what an anonymous reader cannot be given, since the
+    like route is login_required. A member gets the number down in the
+    action row with the control that changes it.
     {% endcomment %}
-    {% if user.is_authenticated %}
-      <span class="applaud">
-        <button type="button" class="applaud-btn" data-url="{% url 'status-like' status.id %}" data-state="{% if liked_by_viewer %}mine{% else %}idle{% endif %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}" title="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
-        <span class="applaud-count" aria-live="polite">{{ like_count }}</span>
-      </span>
-    {% elif like_count %}
+    {% if not user.is_authenticated and like_count %}
       <span class="muted">Applauded {{ like_count }} time{{ like_count|pluralize }}</span>
     {% endif %}
-    {% comment %}
-    The reply control, beside the applaud one (owner pass, 2026-10-05).
-    Same ink rule as the feed row since the owner's pass of 2026-11-15: red
-    when the reader answered this post, white when they did not, whoever else
-    did or did not. The thread's size is the counter's job.
-
-    The count here is ``replies|length`` — the block-filtered thread count
-    the heading already shows — not the viewer-independent feed tally.
-    That is the pre-existing R85 split between the two numbers, kept rather
-    than silently unified: this page hides the blocked rows, so it must
-    count what it renders.
-
-    Gated on ``status.film`` for the same reason the composer is: a post
-    with no film behind it cannot be replied to at all, so the offer is
-    withheld rather than offered and refused.
-    {% endcomment %}
-    {% if user.is_authenticated and status.film %}
-      <span class="reply">
-        <a class="reply-btn" href="?reply=1" data-state="{% if replied_by_viewer %}mine{% else %}idle{% endif %}" title="{% if replied_by_viewer %}You replied — reply again{% elif replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if replied_by_viewer %}You replied — reply again to this post{% elif replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply to this post{% else %}Reply to this post{% endif %}"></a>
-        <span class="reply-count" aria-live="polite">{{ replies|length }}</span>
-      </span>
-    {% endif %}
   </div>
-  {% if status.film %}
-    <div class="feed-item">
-      {% if status.film.poster %}
-        <img class="thumb" src="{{ status.film.poster.url }}" alt="">
-      {% else %}
-        <span class="thumb thumb-placeholder"></span>
-      {% endif %}
-      <p class="feed-film"><a href="{% url 'film' status.film.id %}">{{ status.film.title }}{% if status.film.year %} ({{ status.film.year }}){% endif %}</a></p>
-    </div>
-  {% endif %}
+  <hr class="post-rule">
   {% if status.content %}<div class="review-body">{{ status.content|safe }}</div>{% endif %}
   {% comment %}
   The report control (moderation increment 2). Placed inside the article,
@@ -98,6 +81,47 @@
   {% endcomment %}
   {% if parent_deleted %}
     <p class="muted reply-parent-deleted">This replies to a post that has been deleted.</p>
+  {% endif %}
+  {% comment %}
+  The action row (owner pass, 2026-11-16). The two controls used to ride at
+  the end of the metadata line, which is where the feed row carried them
+  until its own 2026-11-13 pass took them out for the same reason: they are
+  controls, not facts, and here they had a whole page of their own to close
+  rather than a row of a list. Same split the feed row draws now.
+
+  Both stay gated exactly as they were. Any member gets the applaud control,
+  on a local post or on a mirror of another instance's — increment 5 made a
+  like on a remote post deliverable, so withholding it there would be the
+  opposite of the honest absence R83 decision 5 asked for. The reply control
+  is gated on ``status.film`` for the same reason the composer is: a post
+  with no film behind it cannot be replied to at all, so the offer is
+  withheld rather than offered and refused.
+  {% endcomment %}
+  {% if user.is_authenticated %}
+    <div class="row-actions">
+      <span class="applaud">
+        <button type="button" class="applaud-btn" data-url="{% url 'status-like' status.id %}" data-state="{% if liked_by_viewer %}mine{% else %}idle{% endif %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}" title="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
+        <span class="applaud-count" aria-live="polite">{{ like_count }}</span>
+      </span>
+      {% comment %}
+      The reply control (owner pass, 2026-10-05). Same ink rule as the feed
+      row since the owner's pass of 2026-11-15: red when the reader answered
+      this post, white when they did not, whoever else did or did not. The
+      thread's size is the counter's job.
+
+      The count here is ``replies|length`` — the block-filtered thread count
+      the heading already shows — not the viewer-independent feed tally.
+      That is the pre-existing R85 split between the two numbers, kept rather
+      than silently unified: this page hides the blocked rows, so it must
+      count what it renders.
+      {% endcomment %}
+      {% if status.film %}
+        <span class="reply">
+          <a class="reply-btn" href="?reply=1" data-state="{% if replied_by_viewer %}mine{% else %}idle{% endif %}" title="{% if replied_by_viewer %}You replied — reply again{% elif replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if replied_by_viewer %}You replied — reply again to this post{% elif replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply to this post{% else %}Reply to this post{% endif %}"></a>
+          <span class="reply-count" aria-live="polite">{{ replies|length }}</span>
+        </span>
+      {% endif %}
+    </div>
   {% endif %}
 </article>
 
@@ -165,10 +189,10 @@
 {% endif %}
 {% if user.is_authenticated %}
   {% comment %}
-  Deliberately outside the composer's gate: the like control renders in the
-  row head on pages that carry no composer — a mirrored note with no film
-  behind it — so the script driving that control cannot live behind that
-  condition without leaving the button inert.
+  Deliberately outside the composer's gate: the like control renders on pages
+  that carry no composer — a mirrored note with no film behind it — so the
+  script driving that control cannot live behind that condition without
+  leaving the button inert.
   {% endcomment %}
   <script src="{% static 'js/likes.js' %}" defer></script>
   <script src="{% static 'js/comments.js' %}" defer></script>

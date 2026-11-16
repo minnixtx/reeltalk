@@ -16,6 +16,7 @@ Replies are rendered but empty by default — nothing writes ``reply_parent``
 until increment 4 — so the reply tests hand-build the threading state.
 """
 
+import re
 from datetime import timedelta
 
 import pytest
@@ -115,7 +116,9 @@ def test_post_page_renders_the_status_in_full(alice, dune):
     body = _login("alice").get(f"/status/{status.pk}/").content.decode()
     assert "Spice must be reviewed." in body
     assert "alice" in body
-    assert "Dune (2021)" in body
+    # The year wears the film page's muted span, so this asserts on the text a
+    # reader sees rather than the markup that carries it.
+    assert "Dune (2021)" in re.sub(r"<[^>]+>", "", body)
     assert "width:90%" in body  # the 4.5/5 star fill
 
 

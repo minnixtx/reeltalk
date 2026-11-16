@@ -3809,6 +3809,172 @@ summary:focus-visible {
 .feed .review-body a:focus-visible {
   text-decoration: underline;
 }
+
+/* --- The post page (owner pass, 2026-11-16) ---------------------------------
+   A post on its own page gets a poster of its own instead of the feed row's
+   40px thumbnail, and everything the post says sits in one column to the right
+   of it. The proportions come off the owner's mockup of that date: there the
+   poster is 437px of a 1444px band and the prose 1007px, so the art is 43% of
+   the text width. Scaled onto the 62rem band the feed already uses that is a
+   280px poster beside a 648px column, which is what these values give. The
+   page has to widen for it: kept at the 40rem reading column the same poster
+   squeezes the prose to 444px and breaks the film title onto two lines. */
+
+main.status-page { --poster-w: 17.5rem; --poster-gap: 2rem; }
+
+/* The way back up the page. It goes to the feed rather than to wherever the
+   reader came from, which is the honest thing a server-rendered link can do:
+   a post is also reachable from a profile, a notification and a film page, and
+   a control named for one of those four would lie about the other three. */
+.post-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.25rem 0 1.25rem;
+  font-family: var(--ui);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--cream-muted);
+  text-decoration: none;
+}
+
+.post-back:hover,
+.post-back:focus-visible {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* The film title leads, exactly as it does on the film's own page. The face and
+   the weight are deliberately NOT restated here: an h1 already inherits
+   `font-family: var(--display)` and the display tracking from the shared h1
+   rule, which is the same route the film page's title takes, so naming them
+   again would be a second copy that can be edited on one page and not the
+   other. Only the size and the margins are this page's own. */
+.post-film {
+  margin: 0 0 0.5rem;
+  font-size: 2.1rem;
+}
+
+.post-film a {
+  color: var(--cream);
+  text-decoration: none;
+}
+
+.post-film a:hover,
+.post-film a:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* The poster is this page's own, not the row thumbnail: 2:3 like the film
+   page's, but as wide as the column it was given. height:auto is load-bearing
+   -- .poster-placeholder carries an explicit 15rem from the film page's group,
+   and an explicit height is the one thing that makes aspect-ratio do nothing. */
+.post-poster .poster {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.post-poster .poster-placeholder {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* The rule under the byline and the one above the thread are the same line:
+   the page separates a heading from its prose and prose from its replies, and
+   those are one kind of seam, so they draw one way. */
+.post-rule {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 0.9rem 0 1.1rem;
+}
+
+.status-post .review-head { margin-bottom: 0; }
+
+.status-post .review-body p:first-child { margin-top: 0; }
+
+/* The controls close the card on the left, under the prose they act on --
+   the same facts/actions split the feed row drew on 2026-11-13, with the
+   flush-right version of it that a list row needs dropped. */
+.status-post .row-actions {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 1.25rem;
+}
+
+.status-replies {
+  border-top: 1px solid var(--line);
+  margin-top: 1.5rem;
+  /* Without padding the h2's own top margin pushes through the section's top
+     edge and the rule lands directly on the heading it is meant to clear. */
+  padding-top: 1.25rem;
+}
+
+.status-replies h2 { margin-top: 0; }
+
+/* Below the phone cut the poster cannot hold a column: at a 390px viewport a
+   two-column split leaves the prose about 250px, which is too narrow to read
+   a long review in. So the title runs the full width, the poster floats beside
+   the byline, and the prose wraps past it. */
+@media (max-width: 599px) {
+  main.status-page { --poster-w: 5.5rem; --poster-gap: 0.9rem; }
+
+  .post-poster {
+    float: left;
+    width: var(--poster-w);
+    margin: 0 var(--poster-gap) 0.4rem 0;
+  }
+}
+
+@media (min-width: 600px) {
+  main.status-page { max-width: 62rem; }
+
+  /* The poster is taken out of the flow and the whole text column is padded
+     past it, rather than the page being split into a poster box and a text
+     box. There is nothing to hold: the title, byline, prose, report form and
+     controls are the article's own children in the order they read, and a
+     wrapper to feed a grid would be a fifth thing to keep in step. The card
+     reserves the art's height because a 2:3 poster's height is known, so a
+     two-line review still cannot be shorter than the poster beside it.
+     Only a post with a film gets the column: a mirrored note with none has no
+     art to make room for, and the padding would be an empty gutter. */
+  .status-post.has-poster {
+    position: relative;
+    padding-left: calc(var(--poster-w) + var(--poster-gap));
+    min-height: calc(var(--poster-w) * 1.5);
+  }
+
+  .post-poster {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: var(--poster-w);
+  }
+
+  /* The thread sits under the review column, not under the poster: it is
+     part of what is being read, and starting it at the window edge would put
+     it under the art it is answering. */
+  .status-replies,
+  .reply-form { margin-left: calc(var(--poster-w) + var(--poster-gap)); }
+}
+
+/* With no menu column to pay for, 600-1023px is a narrower page wearing the
+   same poster, and 280px of it leaves too little to read beside. */
+@media (min-width: 600px) and (max-width: 1023px) {
+  main.status-page { --poster-w: 10rem; --poster-gap: 1.25rem; }
+}
+
 /* Home rail: closer grouping and a restrained shadow beneath ticket artwork. */
 .rail {
   gap: 1rem;
