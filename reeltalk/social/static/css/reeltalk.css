@@ -50,9 +50,12 @@
   --accent: #e0554a;   /* theatrical red for focus rings, field borders, watchlist */
   /* Anchor text, resting and hovered (owner pass, 2026-10-05). Split out of
      --accent on purpose: the focus ring and the field borders keep the old
-     muted #e0554a, while link text moves to the core of the solid-red
-     clapperboard so the two read as the same red. Measured off
-     applaud-solid-red.png at alpha>=200, where the mode is fc0a13.
+     muted #e0554a, while link text moves to the core of the applaud icon's red
+     so the two read as the same red. Measured off the solid-red clapperboard art
+     of that pass at alpha>=200, where the mode is fc0a13. That art was replaced
+     on 2026-11-15 and the owner's ruling was to move the new red icons onto this
+     value, not the other way round, so a red control and a red link are one red
+     again and this line has not moved since the pass that set it.
      Hover deliberately equals resting: the old hover went brighter than the
      resting colour, and once resting moved to #fc0a13 a hover back down to
      --accent would have read as de-emphasis. */
@@ -1432,34 +1435,42 @@ ul.errorlist {
   font-weight: 600;
 }
 
-/* Applaud control (owner pass, 2026-10-05 — icon-only, replacing the pill).
+/* Applaud control (owner pass, 2026-10-05 — icon-only, replacing the pill;
+   re-drawn as clapping hands on the owner's pass of 2026-11-15, which also
+   settled what the ink is allowed to mean).
 
-   The resting icon reports THREE states, not two, because it is read as
-   reporting who has applauded:
+   The resting icon answers ONE question: did the reader applaud.
 
-     you applauded              -> solid red      data-state="mine"
-     others applauded, not you  -> red outline    data-state="others"
-     nobody applauded           -> white outline  data-state="idle"
+     you applauded   -> red    data-state="mine"
+     you did not     -> cream  data-state="idle"
 
-   Hover is a uniform scale(1.08) across all three states. The supplied
-   white-glow art is NOT used — the owner rejected the outside glow, and a
-   brightness lift cannot stand in for it on the idle icon because that art
-   is already at 253,253,253 and clamps at 255.
+   It used to answer two — yours, someone else's, nobody — off three pieces of
+   art. The owner took the middle one away: the counter beside the icon already
+   says whether a post has applause, and the one fact a number cannot carry is
+   whether the reader gave any. So the ink reports the reader and the number
+   reports everyone, which is now the same division of labour the reply control
+   beside it makes.
 
-   Both facts the state needs are already on the row (liked_by_viewer and
-   like_count), so this needed no model change. data-state is derived in the
-   template and recomputed by likes.js after each toggle.
+   The art is the owner's own SVG (``~/design-elements/reeltalk-applaud_2.svg``
+   and ``-applauded_2.svg``), held as two files only because a CSS
+   background-image cannot take its colour from the stylesheet the way an
+   inline drawing does — apart from the colour they are the same file, which is
+   what makes switching state unable to move or resize the hands. That is not a
+   free win: the three PNGs this replaced were drawn at different sizes and had
+   to be registered by core area by hand to stop the clapperboard jumping
+   between states. The drawing fills its 32-unit canvas edge to edge, which
+   puts its ink at 23.8px wide against the reply bubble's 23.3px, so the two
+   read as a pair even though they are drawn on different canvases.
+
+   Hover is a uniform scale(1.08) in both states. The supplied white-glow art
+   is NOT used — the owner rejected the outside glow, and a brightness lift
+   cannot stand in for it on the idle icon because that art is already at
+   253,253,253 and clamps at 255.
 
    The base `button` rule paints a lit red mottle with a neon rim and a
    four-stop bloom, and carries margin-top: 1rem. Both are reset here — the
    pill version's first render showed that glow sitting around the art, and
-   without the margin reset the control hangs 16px below the avatar.
-
-   The three shipped PNGs were NOT drawn the same size. At alpha>=200 the
-   clapperboard bodies measured 1059x973 (white outline), 1028x976 (red
-   outline) and 1023x989 (solid red). They are registered by core AREA,
-   centred on the core centre, so changing state never resizes the
-   clapperboard. Registering by ink bbox instead would have shifted it. */
+   without the margin reset the control hangs 16px below the avatar. */
 .applaud {
   display: inline-flex;
   align-items: center;
@@ -1472,7 +1483,7 @@ ul.errorlist {
   height: 26px;
   padding: 0;
   border: 0;
-  background: url("../images/applaud-icon-idle.png") center / contain no-repeat;
+  background: url("../images/applaud-icon-idle.svg") center / contain no-repeat;
   background-color: transparent;
   box-shadow: none;
   text-shadow: none;
@@ -1480,19 +1491,14 @@ ul.errorlist {
   cursor: pointer;
 }
 
-.applaud-btn[data-state="others"] {
-  background-image: url("../images/applaud-icon-others.png");
-}
-
 .applaud-btn[data-state="mine"] {
-  background-image: url("../images/applaud-icon-mine.png");
+  background-image: url("../images/applaud-icon-mine.svg");
 }
 
 /* Uniform scale, not a brightness lift. The idle art is already at
    253,253,253, so brightness() clamps at 255 and is invisible on it — a
-   lift would have registered on the red states only, leaving the three
-   states feeling inconsistent. transform is paint-only, so the row never
-   reflows.
+   lift would have registered on the red state only, leaving the two states
+   feeling inconsistent. transform is paint-only, so the row never reflows.
 
    The box-shadow and filter resets here are load-bearing, not decoration.
    `button:hover, .btn:hover` paints a five-stop red bloom and `button:hover`
@@ -1514,8 +1520,9 @@ ul.errorlist {
 
 /* Mono on purpose: the digits are the one piece of this control that is real
    text, and the site's lettering is a typewriter face. The number is always
-   white and never tracks the icon: the icon alone carries who applauded, so a
-   red number would be a second, redundant copy of that signal. */
+   white and never tracks the icon: the icon carries whether YOU applauded and
+   the number carries how many people did, so a red number would be a second,
+   redundant copy of a signal the ink already gives. */
 .applaud-count {
   font-family: ui-monospace, "DejaVu Sans Mono", "Liberation Mono", monospace;
   font-weight: 700;
@@ -1523,23 +1530,32 @@ ul.errorlist {
   color: var(--white);
 }
 
-/* Reply control (owner pass, 2026-10-05). Sits immediately after the applaud
-   control and follows the same visual contract — 26px icon, plain monospace
-   count, no border, uniform scale(1.08) on hover with the same load-bearing
+/* Reply control (owner pass, 2026-10-05; artwork and ink rule redone on the
+   owner's pass of 2026-11-15). Sits immediately after the applaud control and
+   follows the same visual contract — 26px icon, plain monospace count, no
+   border, uniform scale(1.08) on hover with the same load-bearing
    box-shadow/filter resets against the base `button:hover` bloom.
 
-   TWO states, not three. The owner chose these over the applaud's three on the
-   grounds that the third state would have had to mean "you replied", and a
-   reply is not reversible the way a like is — nothing this control does can
-   take one back, so an icon claiming authorship of a reply would be a claim
-   the control cannot act on.
+   TWO states, keyed on the reader, which makes it read exactly like the
+   applaud control beside it:
 
-     post has replies  -> red outline  data-state="others"
-     no replies yet    -> white outline data-state="idle"
+     you replied     -> red    data-state="mine"
+     you have not    -> cream  data-state="idle"
 
-   The solid-red artwork was therefore NOT shipped: ManifestStaticFilesStorage
-   hashes and serves every file in the static tree whether or not a rule
-   points at it, so an unused PNG is dead weight on every deploy.
+   That reverses the 2026-10-05 ruling, which refused a "you replied" state on
+   the grounds that a reply is not reversible, so an icon claiming authorship of
+   one would be a claim the control cannot act on. The owner took it back: the
+   red is not an offer to undo, it is a record of where you already are, and it
+   is the one fact the counter cannot give — a thread of nine looks identical
+   whether or not you are in it. The tooltip keeps saying what the click does
+   ("reply again"), so the control never promises an undo it cannot perform.
+
+   The red ships as a second file rather than a recoloured first one for the
+   same reason the applaud's does: a CSS background-image cannot take its
+   colour from the stylesheet. It is the cream drawing with the fill swapped and
+   nothing else changed, which test_applaud_reply_icons.py holds — a red bubble
+   that drifted from the cream one would be two different bubbles wearing one
+   control.
 
    Unlike the applaud this is an <a>, not a <button> — it navigates rather
    than toggling, so it must be a real link for middle-click, open-in-new-tab
@@ -1560,7 +1576,7 @@ ul.errorlist {
   height: 26px;
   padding: 0;
   border: 0;
-  background: url("../images/reply-icon-idle.png") center / contain no-repeat;
+  background: url("../images/reply-icon-idle.svg") center / contain no-repeat;
   background-color: transparent;
   box-shadow: none;
   text-shadow: none;
@@ -1568,8 +1584,8 @@ ul.errorlist {
   cursor: pointer;
 }
 
-.reply-btn[data-state="others"] {
-  background-image: url("../images/reply-icon-others.png");
+.reply-btn[data-state="mine"] {
+  background-image: url("../images/reply-icon-mine.svg");
 }
 
 .reply-btn:hover,
@@ -1580,7 +1596,8 @@ ul.errorlist {
 }
 
 /* Same mono treatment and the same always-white rule as .applaud-count: the
-   number is a count, not a status, and the icon carries the status. */
+   number counts everyone who answered, the icon says whether you are one of
+   them, and neither job is done twice. */
 .reply-count {
   font-family: ui-monospace, "DejaVu Sans Mono", "Liberation Mono", monospace;
   font-weight: 700;

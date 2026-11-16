@@ -118,9 +118,11 @@ a second channel to say so.
     <div class="row-actions">
       {# The control takes the *narrower* flag (R84): "may I put a control here", never "may I open this". Since increment 5 that set includes mirrors — an Applaud now reaches their home instance. #}
       {# Icon-only, no text: the accessible name and the tooltip both come from #}
-      {# the label below. data-state carries WHO has applauded, which is two #}
-      {# facts, not one — liked_by_viewer picks mine-vs-not, like_count picks #}
-      {# others-vs-nobody. The count stays a SIBLING of the button: clicking #}
+      {# the label below. Since the owner's pass of 2026-11-15 the icon answers #}
+      {# one question — did *I* applaud — so data-state reads liked_by_viewer #}
+      {# alone. Whether anyone else did is the counter's job, and the two facts #}
+      {# read better split across the two halves of the control than stacked #}
+      {# into one icon. The count stays a SIBLING of the button: clicking #}
       {# a number must not toggle anything. #}
       {% comment %}
       N6 adds the second clause: the row is now rendered to signed-out visitors
@@ -134,7 +136,7 @@ a second channel to say so.
       {% endcomment %}
       {% if entry.interactive %}
         <span class="applaud">
-          <button type="button" class="applaud-btn" data-url="{% url 'status-like' entry.status_id %}" data-state="{% if entry.liked_by_viewer %}mine{% elif entry.like_count %}others{% else %}idle{% endif %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}" title="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
+          <button type="button" class="applaud-btn" data-url="{% url 'status-like' entry.status_id %}" data-state="{% if entry.liked_by_viewer %}mine{% else %}idle{% endif %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}" title="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
           <span class="applaud-count" aria-live="polite">{{ entry.like_count }}</span>
         </span>
       {% endif %}
@@ -165,13 +167,19 @@ a second channel to say so.
 
       The count always renders, zero included, matching the applaud count.
 
+      The icon reports whether the READER replied, not whether anyone did
+      (owner pass, 2026-11-15) — the counter beside it already answers the
+      second question, and a member who answered a busy thread cannot tell
+      that from a count. So the label names the reader's own state first and
+      the thread's size second, never both at once.
+
       And it is gated on the same second clause as the applaud control above:
       an anonymous reader gets neither button, because the reply route is
       ``login_required`` too.
       {% endcomment %}
       {% if entry.replyable %}
         <span class="reply">
-          <a class="reply-btn" href="{% url 'status' entry.status_id %}?reply=1" data-state="{% if entry.reply_count %}others{% else %}idle{% endif %}" title="{% if entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply to this post{% else %}Reply to this post{% endif %}"></a>
+          <a class="reply-btn" href="{% url 'status' entry.status_id %}?reply=1" data-state="{% if entry.replied_by_viewer %}mine{% else %}idle{% endif %}" title="{% if entry.replied_by_viewer %}You replied — reply again{% elif entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if entry.replied_by_viewer %}You replied — reply again to this post{% elif entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply to this post{% else %}Reply to this post{% endif %}"></a>
           <span class="reply-count" aria-live="polite">{{ entry.reply_count }}</span>
         </span>
       {% endif %}

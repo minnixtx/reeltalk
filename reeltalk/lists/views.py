@@ -127,6 +127,12 @@ def list_detail(request, list_id):
             "like_count": like_count,
             "liked_by_viewer": request.user.is_authenticated
             and face.likes.filter(user=request.user).exists(),
+            # Whether the viewer has answered the list's face themselves
+            # (owner pass, 2026-11-15): the reply icon reports that, the tally
+            # beside it reports everyone. Same single-row lookup as the like
+            # state above it.
+            "replied_by_viewer": request.user.is_authenticated
+            and face.replies.filter(user=request.user, deleted=False).exists(),
             # Whether the viewer already has a pointer at this list, so the
             # Save control renders in its Saved state rather than being
             # painted by the browser. Same one-row lookup the like state uses.

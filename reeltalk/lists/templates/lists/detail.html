@@ -41,21 +41,23 @@
       {% endcomment %}
       {% if user.is_authenticated %}
       <span class="applaud">
-        <button type="button" class="applaud-btn" data-url="{% url 'status-like' film_list.status.id %}" data-state="{% if liked_by_viewer %}mine{% elif like_count %}others{% else %}idle{% endif %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}" title="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
+        <button type="button" class="applaud-btn" data-url="{% url 'status-like' film_list.status.id %}" data-state="{% if liked_by_viewer %}mine{% else %}idle{% endif %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}" title="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
         <span class="applaud-count" aria-live="polite">{{ like_count }}</span>
       </span>
       {% elif like_count %}
       <span class="muted">Applauded {{ like_count }} time{{ like_count|pluralize }}</span>
       {% endif %}
       {% comment %}
-      The reply control, with the post page's two-state ink. Unlike the
+      The reply control, with the post page's ink rule: red when the reader
+      answered this list, white when they did not (owner pass, 2026-11-15),
+      with the counter beside it carrying how many people answered. Unlike the
       post page this is NOT gated on a film: a list's face has no film and
       L13 made a reply to it legal by leaving it untyped, so the offer and
       the write agree here for a different reason than they do there.
       {% endcomment %}
       {% if user.is_authenticated %}
       <span class="reply">
-        <a class="reply-btn" href="?reply=1" data-state="{% if replies|length %}others{% else %}idle{% endif %}" title="{% if replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply to this list{% else %}Reply to this list{% endif %}"></a>
+        <a class="reply-btn" href="?reply=1" data-state="{% if replied_by_viewer %}mine{% else %}idle{% endif %}" title="{% if replied_by_viewer %}You replied — reply again{% elif replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if replied_by_viewer %}You replied — reply again to this list{% elif replies|length %}{{ replies|length }} repl{{ replies|length|pluralize:'y,ies' }} — reply to this list{% else %}Reply to this list{% endif %}"></a>
         <span class="reply-count" aria-live="polite">{{ replies|length }}</span>
       </span>
       {% endif %}

@@ -1,5 +1,6 @@
 /* Applaud toggle (feed interactions increment 3, R83 decision 4; restyled to
-   the clapperboard button on the owner's pass of 2026-10-05). The wire stays
+   the bare icon button on the owner's pass of 2026-10-05, and re-drawn as a
+   pair of hands on the pass of 2026-11-15). The wire stays
    "like" — route, model and ActivityPub verb are unchanged; only the visible
    control changed. Deliberately small vanilla JS per R6 — no framework, no
    build step. Same shape as the one-click watchlist control in search.js: the
@@ -25,12 +26,13 @@
       shown.textContent = count;
     }
     btn.setAttribute("aria-pressed", liked ? "true" : "false");
-    // The resting icon reports WHO has applauded, which is two facts and not
-    // one: whether it is yours, and whether there is any applause at all.
-    // Both come from the server, so the icon cannot drift out of step with the
-    // tally the way a client-side increment would allow.
-    var others = !liked && typeof count === "number" && count > 0;
-    btn.setAttribute("data-state", liked ? "mine" : others ? "others" : "idle");
+    // The resting icon answers ONE question — did I applaud — so the state is
+    // the caller's own and nothing else. Whether anyone else did is the
+    // counter's job (owner pass, 2026-11-15, which took the old "someone else
+    // applauded" state off the ink). Both halves still come back from the
+    // server, so neither can drift out of step with the other the way a
+    // client-side increment would allow.
+    btn.setAttribute("data-state", liked ? "mine" : "idle");
     // The control carries no visible text, so the tooltip and the accessible
     // name are the only thing that says what it is and what it will do.
     var label = liked ? "Applauded — click to remove" : "Applaud";
