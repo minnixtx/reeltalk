@@ -49,7 +49,9 @@ def test_every_submit_control_on_the_page_takes_the_red_dressing():
     """Swept, not listed: a control added to the queue later has to be dressed
     the same way or this goes red."""
     buttons = _submit_buttons()
-    assert len(buttons) >= 9, f"expected the whole queue's controls, found {len(buttons)}"
+    assert len(buttons) >= 9, (
+        f"expected the whole queue's controls, found {len(buttons)}"
+    )
     undressed = [b for b in buttons if "cinema-button--primary" not in b]
     assert not undressed, f"controls left in the outlined treatment: {undressed}"
 
