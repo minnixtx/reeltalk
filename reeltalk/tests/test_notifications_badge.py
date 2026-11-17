@@ -223,7 +223,7 @@ def test_the_badge_is_an_anchor_not_a_button(member, alice, bob, post):
     notify(alice, bob, Notification.Kind.LIKE, post)
     region = _header_user(member.get(MEMBER_PAGE).content.decode())
     assert '<a class="notifications-link"' in region
-    # A bare <button> here would arrive pre-lit crimson in Bebas caps, so
+    # A bare <button> here would arrive as a solid red block in Bebas caps, so
     # the corner must contain no button at all.
     assert "<button" not in region
 
@@ -361,19 +361,26 @@ def _base_control_blocks(css):
     ]
 
 
-def test_the_applied_stylesheet_lights_the_bare_control_in_three_blocks():
+def test_the_applied_stylesheet_flats_the_bare_control_in_three_blocks():
     css = _stylesheet()
     blocks = _base_control_blocks(css)
-    # R96's claim, read off the file rather than trusted: exactly three
-    # rule blocks make a bare <button> or .btn the lit crimson control.
+    # Exactly three rule blocks dress a bare <button> or .btn: its shape, its
+    # fill, and its caps face. The owner's pass of 2026-11-16 retired the lit
+    # recipe R96 recorded here — mottled crimson tile over a gradient, a hot
+    # rim, a neon bloom — so the guard now pins the opposite: one flat brick red
+    # under the dirty cream, no rim, no glow, and neither custom property that
+    # carried the old recipe.
     assert len(blocks) == 3
-    lit = "\n".join(blocks)
-    assert "var(--blood-red)" in lit
-    assert "var(--neon-mottle)" in lit
-    assert "var(--neon-rim)" in lit
-    assert "box-shadow" in lit
-    assert "var(--display)" in lit
-    assert "text-transform: uppercase" in lit
+    flat = "\n".join(blocks)
+    assert "var(--red-brick)" in flat
+    assert "color: var(--cream)" in flat
+    assert "var(--cream-muted)" not in flat
+    assert "border: none" in flat
+    assert "var(--neon-mottle)" not in flat
+    assert "var(--neon-rim)" not in flat
+    assert "linear-gradient" not in flat
+    assert "var(--display)" in flat
+    assert "text-transform: uppercase" in flat
 
 
 def _media_block(css: str, query: str) -> str:

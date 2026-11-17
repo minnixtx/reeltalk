@@ -1,7 +1,7 @@
 /* ReelTalk stylesheet. Grindhouse / midnight-movie visual identity (M6
    artwork, R60): layered near-black browns, dirty-cream text, and red used as
    theatrical lighting. Typography carries most of the identity — Bebas Neue for
-   titles/section headings and the lit red controls, Oswald for metadata and
+   titles/section headings and the red controls, Oswald for metadata and
    small headings, Archivo for body/reviews and the header's own text, Monoton
    only for the neon wordmark, Kaushan Script only for the footer sign-off. The
    owner-supplied poster texture fades inward from the outer edges;
@@ -17,9 +17,11 @@
   --cream:        #e9dfcb;  /* body text */
   --cream-muted:  #b8aa91;  /* secondary text */
   --white:        #ffffff;  /* post prose, dates and header links (owner pass, 2026-10-04) */
-  --red:        #d42b26;  /* primary red — fills, display headings */
+  --red:        #d42b26;  /* primary red — fills, display headings, a control's hover */
   --red-bright: #ff4138;  /* neon/bright red — active, glow, key highlights */
   --red-dark:   #721713;  /* dark red — deep fills, shadows */
+  --red-brick:  #892a22;  /* the resting red control fill — sampled from the owner's
+                             button-color.png reference (2026-11-16) at its mode */
   --amber:   #e0a52b;  /* amber accent + focus */
   --mustard: #c79836;  /* mustard */
   --teal:    #43868a;  /* teal tertiary */
@@ -30,15 +32,9 @@
   --line:    #5a432c;  /* thin amber/brown borders */
   --steel:   #5c5852;  /* dirty steel gray — search trim (mockup) */
   --avatar-ring: #d9c3b3;  /* worn cream bezel around an avatar disc */
-  --neon-rim: #ff6a5b;  /* hot glass edge on a lit red control (button, step disc) */
-
-  /* Worn crimson fill for lit red controls: an original mottled tile (generated
-     for this project) painted over a dark-to-darker red gradient, so the fill is
-     uneven like lacquered metal instead of flat paint. */
-  --neon-mottle: url("../images/button-mottle.png");
 
   /* Typography roles. */
-  --display: "Bebas Neue", sans-serif;  /* film titles, section headings, lit red controls */
+  --display: "Bebas Neue", sans-serif;  /* film titles, section headings, red controls */
   --ui:      "Oswald", sans-serif;      /* metadata, tabs, genre pills, small headings */
   --body:    "Archivo", sans-serif;     /* body text + reviews */
   --script:  "Kaushan Script", cursive;  /* the footer sign-off only — neon signage */
@@ -442,9 +438,9 @@ a {
   margin: 0 0 10px;
 }
 
-/* The sheet's buttons must not arrive pre-lit: the three bare-button blocks
-   would otherwise dress the close control and the Log out row in Bebas
-   caps with bloom. */
+/* The sheet's buttons must not arrive dressed as a red control: the three
+   bare-button blocks would otherwise paint the close control and the Log out
+   row in Bebas caps on a red fill. */
 .more-sheet button {
   background: none;
   border: 0;
@@ -453,6 +449,12 @@ a {
   letter-spacing: 0;
   color: #edddc4;
   font-family: var(--body);
+}
+
+/* The sheet's rows are bare <button>s, so the base hover fill would land on them
+   at (0,1,1) and light up the row the pointer merely crosses. */
+.more-sheet button:hover {
+  background: none;
 }
 
 .more-sheet-close {
@@ -648,6 +650,12 @@ a {
     text-transform: none;
     letter-spacing: 0;
     font: 11px/1.2 sans-serif;
+  }
+
+  /* The More row is a bare <button>, so the base hover fill must be kept off it
+     exactly as it is off the More sheet's rows. */
+  .bottom-nav button:hover {
+    background: none;
   }
 
   .bottom-nav svg {
@@ -1006,10 +1014,6 @@ button,
   text-decoration: none;
 }
 
-button:hover {
-  filter: brightness(1.1);
-}
-
 /* Small inline form (header log-out button). */
 form.inline {
   display: inline;
@@ -1233,7 +1237,7 @@ ul.errorlist {
 
 /* The way forward at the foot of the feed (§2I increment 2, R132 decision 6).
    Deliberately NOT `.btn`: this is a link to more of what the reader is already
-   looking at, not a command, and a solid lit-red block under every page of the
+   looking at, not a command, and a solid red block under every page of the
    feed would outshout the rows it follows. Quiet centred text link, with the
    same underline-on-hover signal the row's own links use. */
 .feed-more {
@@ -1467,10 +1471,10 @@ ul.errorlist {
    cannot stand in for it on the idle icon because that art is already at
    253,253,253 and clamps at 255.
 
-   The base `button` rule paints a lit red mottle with a neon rim and a
-   four-stop bloom, and carries margin-top: 1rem. Both are reset here — the
-   pill version's first render showed that glow sitting around the art, and
-   without the margin reset the control hangs 16px below the avatar. */
+   The base `button` rule paints a flat red fill and carries margin-top: 1rem.
+   Both are reset here — the pill version's first render showed that fill
+   sitting behind the art, and without the margin reset the control hangs 16px
+   below the avatar. */
 .applaud {
   display: inline-flex;
   align-items: center;
@@ -1500,13 +1504,13 @@ ul.errorlist {
    lift would have registered on the red state only, leaving the two states
    feeling inconsistent. transform is paint-only, so the row never reflows.
 
-   The box-shadow and filter resets here are load-bearing, not decoration.
-   `button:hover, .btn:hover` paints a five-stop red bloom and `button:hover`
-   adds filter: brightness(1.1); both are (0,1,1) and therefore OUTSPECIFY the
-   (0,1,0) `.applaud-btn` resets in the base rule. Without repeating them on
-   the hover selector the icon lights up with the site's button halo the moment
-   the cursor arrives. */
-.applaud-btn:hover {
+   The resets here are load-bearing, not decoration. `button:hover, .btn:hover`
+   paints the hover fill at (0,1,1) and therefore OUTSPECIFIES the (0,1,0)
+   `.applaud-btn` resets in the base rule, so the selector carries the element
+   name to win at (0,2,1) and the background has to be repeated here: without it a
+   red plate arrives behind the artwork the moment the cursor does. */
+button.applaud-btn:hover {
+  background-color: transparent;
   transform: scale(1.08);
   box-shadow: none;
   filter: none;
@@ -1533,8 +1537,8 @@ ul.errorlist {
 /* Reply control (owner pass, 2026-10-05; artwork and ink rule redone on the
    owner's pass of 2026-11-15). Sits immediately after the applaud control and
    follows the same visual contract — 26px icon, plain monospace count, no
-   border, uniform scale(1.08) on hover with the same load-bearing
-   box-shadow/filter resets against the base `button:hover` bloom.
+   border, uniform scale(1.08) on hover with the same resets the applaud control
+   beside it carries.
 
    TWO states, keyed on the reader, which makes it read exactly like the
    applaud control beside it:
@@ -2224,9 +2228,10 @@ table.results th {
   border-bottom: 1px solid var(--border);
 }
 
-/* The step discs carry the same lit-red recipe as the buttons (owner pass,
-   2026-09-19): mottled crimson under a hot rim, bloom scaled to the disc and
-   kept as tight as the reference's halo. */
+/* The step discs take the same flat red as the controls now (owner pass,
+   2026-11-16); they carried the retired lit recipe too, and nothing on the site
+   mixes the two styles. Width and height hold the outer box under border-box, so
+   losing the 2px rim leaves the disc the same size. */
 .step-num {
   flex-shrink: 0;
   width: 2rem;
@@ -2236,15 +2241,9 @@ table.results th {
   justify-content: center;
   font-weight: 700;
   color: var(--cream);
-  background-color: #861713;
-  background-image: var(--neon-mottle), radial-gradient(circle at 50% 28%, #a0221b, #6d1210);
-  border: 2px solid var(--neon-rim);
+  background-color: var(--red-brick);
+  border: none;
   border-radius: 50%;
-  box-shadow:
-    inset 0 0 7px rgba(255, 74, 52, 0.5),
-    0 0 3px rgba(255, 96, 74, 0.8),
-    0 0 8px rgba(255, 45, 32, 0.42);
-  text-shadow: 0 1px 2px rgba(46, 2, 2, 0.8);
 }
 
 .step-body h2 {
@@ -2462,46 +2461,37 @@ table.results th {
   padding-right: 0.6rem;
 }
 
-/* Buttons: lit red controls (owner pass, 2026-09-19; bloom tightened to the
-   reference 2026-09-19). The reference button is not flat paint — sampling its
-   interior gives luminance ~42 with dark and light blotching, wrapped in a ~2px
-   rim that peaks at (245,120,118). Its glow is a *tight* halo, not a wide one:
-   the mockup's luminance sits at flat backdrop until ~3px out and only lifts at
-   the rim (2px above / 4px below at backdrop+4). So the fill is a mottled
-   crimson tile over a dark-to-darker red gradient (the light lives in the edge,
-   not the middle), and the rim carries hot glass plus three close bloom stops,
-   same motif as the nav tube (R67) and the relit wordmark (R68). */
+/* Buttons: flat red controls (owner pass, 2026-11-16). The lit recipe this sheet
+   carried before that pass — a mottled crimson tile over a dark-to-darker
+   gradient, a hot rim and a three-stop bloom — reads as an older era of styling,
+   so the fill is one flat red with no rim and no glow. The resting fill is the
+   brick red sampled off the owner's button-color.png reference and the hover is
+   the sheet's own --red, so a control lifts on the pointer instead of glowing;
+   that replaced the old `button:hover { filter: brightness(1.1) }`, which is gone.
+   The padding is 2px wider per side than the old content box because that is
+   exactly what the 2px border used to occupy: drop the border without it and every
+   control shrinks by 4px and the rows they sit in move with them.
+   A background on `button:hover, .btn:hover` outspecifies the un-dressed controls
+   declared earlier in the sheet — the applaud icon, the More sheet's rows, the
+   phone bottom bar — so each of those resets it on its own hover selector.
+   The label stays the shape block's --cream: the primary used to paint its own
+   near-white #fff2e4 and that is gone with the rest of it. */
 button,
 .btn {
-  background-color: #861713;
-  background-image: var(--neon-mottle),
-    linear-gradient(180deg, #9c1d17 0%, #861713 45%, #6b100e 100%);
-  border: 2px solid var(--neon-rim);
+  background-color: var(--red-brick);
+  border: none;
   border-radius: 7px;
-  box-shadow:
-    inset 0 0 10px rgba(255, 74, 52, 0.5),
-    inset 0 1px 0 rgba(255, 205, 195, 0.3),
-    0 0 3px rgba(255, 96, 74, 0.8),
-    0 0 7px rgba(255, 45, 32, 0.45),
-    0 0 12px rgba(255, 30, 20, 0.18);
-  text-shadow: 0 1px 2px rgba(46, 2, 2, 0.8);
+  padding: calc(0.5rem + 2px) calc(1.1rem + 2px);
 }
 
 button:hover,
 .btn:hover {
-  box-shadow:
-    inset 0 0 12px rgba(255, 96, 70, 0.6),
-    inset 0 1px 0 rgba(255, 205, 195, 0.35),
-    0 0 4px rgba(255, 110, 86, 0.9),
-    0 0 9px rgba(255, 55, 40, 0.52),
-    0 0 15px rgba(255, 35, 24, 0.22);
+  background-color: var(--red);
 }
 
-/* A disabled control must not read as lit. */
+/* A disabled control must not read as the live one. */
 button:disabled {
-  border-color: #93504a;
-  box-shadow: inset 0 0 8px rgba(120, 30, 22, 0.5);
-  filter: saturate(0.55) brightness(0.8);
+  background-color: var(--red-dark);
   cursor: default;
 }
 
@@ -2903,7 +2893,7 @@ a.genre-pill:hover {
 
 /* --- Typography roles (M6 artwork, R60) ------------------------------------
    Placed last so these win over the `font: inherit` shorthands above. Bebas
-   Neue for titles/section headings and the lit red controls; Oswald for
+   Neue for titles/section headings and the red controls; Oswald for
    metadata/small headings; Archivo (the body default) is used everywhere else,
    including the header's own text — see the rules below. */
 h1,
@@ -2935,7 +2925,7 @@ table.results th,
   font-size: 0.88rem;
 }
 
-/* The lit red controls take the marquee face (owner pass, 2026-09-19): Bebas
+/* The red controls take the marquee face (owner pass, 2026-09-19): Bebas
    Neue in caps, which is what the reference's button label reads as. Bebas
    ships a single weight, so 400 is explicit — leaving the inherited 600 would
    synthesise faux-bold — and it runs condensed, so the size and tracking step up
@@ -2952,11 +2942,12 @@ button,
 }
 
 /* Ghost controls (Block / Follow / one-click Add to watchlist) share the
-   `button` element but are not lit red, so they keep the metadata face and their
-   own sentence case, weight, tracking and leading rather than inheriting the
-   marquee label above. The reply composer's submit joins for the same reason: it
-   is a bare `<button>` in a form that is not `form.inline`, and a caps marquee
-   label on a reply box would read as a lit CTA rather than a small inline
+   `button` element but are not red-filled, so they keep the metadata face
+   and their own sentence case, weight, tracking and leading rather than
+   inheriting the marquee label above. The reply composer's submit joins for
+   the same reason: it is a bare `<button>` in a form that is not
+   `form.inline`, and a caps marquee
+   label on a reply box would read as a red CTA rather than a small inline
    control. The applaud control left this list on the 2026-10-05 pass — it carries
    no text at all now, the word being baked into the artwork, so there is no
    label here for it to get wrong. */
@@ -3012,7 +3003,7 @@ summary:focus-visible {
    minted single-use link under it once generated. Panel treatment matches
    the home rail's panels so it reads as an object the site already has.
    The Invite control deliberately sits in a plain <form>, NOT form.inline:
-   form.inline strips the lit red fill and forces sentence case, and the
+   form.inline strips the red fill and forces sentence case, and the
    label here is the caps control. */
 .invite-box {
   margin: 1.5rem 0;
@@ -3341,11 +3332,10 @@ summary:focus-visible {
 }
 
 /* The dropdown's rows are <button>s, not <a>s, because picking one is an
-   action rather than a navigation. That means they arrive wearing the lit
-   crimson control chrome and the marquee face, and both have to come off —
-   otherwise every suggestion row is a big glowing red slab. The hover rule
-   repeats the filter/shadow resets for the same reason the base ones do
-   (R135). */
+   action rather than a navigation. That means they arrive wearing the red
+   control fill and the marquee face, and both have to come off — otherwise every
+   suggestion row is a red slab. The hover rule repeats the background and shadow
+   resets for the same reason the base ones do (R135). */
 .list-add-picker .suggest-row {
   display: flex;
   width: 100%;
@@ -3430,7 +3420,7 @@ summary:focus-visible {
 }
 
 /* The delete sits last and quietest. Every primary control on this site is
-   lit crimson, so a destructive one styled as a primary would be the
+   a solid red block, so a destructive one styled as a primary would be the
    loudest thing on the page and the easiest to hit by accident; it takes
    the ghost look and only picks up the accent on hover. The hover rule
    repeats the filter/shadow resets because button:hover outspecs a bare
@@ -3475,8 +3465,8 @@ summary:focus-visible {
 /* --- Saving a list (§2K increment 5, L2 / R140) -------------------------
    The Save control and the notice a deleted list wears on the Saved tab. */
 
-/* The Save control is `.btn` and nothing more — R140 2 ruled that lit
-   crimson weight and explicitly parked any further design work on it for a
+/* The Save control is `.btn` and nothing more — R140 2 ruled that crimson
+   weight and explicitly parked any further design work on it for a
    future whole-UI pass, so the only line here is the reset R134 #6 demands
    of anything dropped into `.review-head`: `button, .btn` carries
    `margin-top: 1rem` and that rule is not opt-in. */
@@ -4017,7 +4007,7 @@ main.status-page { --poster-w: 17.5rem; --poster-gap: 2rem; }
 }
 
 /* Shared cinema controls: keep after legacy component rules so all opt-in
-   controls use the same typography, rim, hover and touch dimensions. */
+   controls use the same typography, fill, hover and touch dimensions. */
 .film-actions button,
 .film-actions .btn,
 .btn.cinema-button {
@@ -4053,27 +4043,27 @@ main.status-page { --poster-w: 17.5rem; --poster-gap: 2rem; }
   filter: none;
 }
 
+/* The red member of the cinema family, flattened in the same pass (owner pass,
+   2026-11-16). The fill is set with the `background` shorthand and the shadow is
+   reset explicitly because the ghost rule above paints a gradient image and a
+   cream inner ring, and either one leaks through on any property left undeclared
+   here. The padding is 1px wider per side, which is what the 1px rim used to
+   occupy, so the control keeps the ghost's outer box exactly. */
 .film-actions .film-watched,
 .btn.cinema-button--primary {
-  background: linear-gradient(180deg, #891c18, #60100e);
-  border: 1px solid #df5a50;
-  color: #fff2e4;
-  box-shadow:
-    inset 0 0 6px rgba(255, 74, 52, 0.14),
-    0 0 3px rgba(255, 45, 32, 0.22);
+  background: var(--red-brick);
+  border: none;
+  padding: calc(0.45rem + 1px) calc(0.9rem + 1px);
+  box-shadow: none;
 }
 
 .film-actions .film-watched:hover,
 .btn.cinema-button--primary:hover {
-  background: linear-gradient(180deg, #a42620, #761411);
-  border-color: #ef7368;
-  color: #fff2e4;
-  box-shadow:
-    inset 0 0 6px rgba(255, 74, 52, 0.2),
-    0 0 5px rgba(255, 45, 32, 0.3);
+  background: var(--red);
+  box-shadow: none;
 }
 
-/* The lit controls' focus ring is the site-wide `button:focus-visible` rule
+/* The red controls' focus ring is the site-wide `button:focus-visible` rule
    above - it was listed here first, but the global rule made this redundant. */
 
 .film-actions svg,
