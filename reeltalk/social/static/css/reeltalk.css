@@ -4063,6 +4063,44 @@ main.status-page { --poster-w: 17.5rem; --poster-gap: 2rem; }
   box-shadow: none;
 }
 
+/* The two red submit controls on the Profile / Settings page (owner pass,
+   2026-11-17). The cinema rule above zeroes margin-top, which is right for a
+   control that sits inside a row of controls but left these two flush against
+   whatever they submit: measured on the rendered page, "Save changes" sat 7px
+   under its last field and "Invite" sat 0px under its pitch line. 1rem is the
+   offset the legacy `button` rule already gives an undressed submit, so this
+   restores the house spacing rather than inventing a new number. Scoped to the
+   two forms, not the family: the film-action buttons live in a row and must
+   keep margin-top 0. */
+.profile-form .btn.cinema-button--primary,
+.invite-form .btn.cinema-button--primary {
+  margin-top: 1rem;
+}
+
+/* The moderation queue joins them in the same pass (owner pass, 2026-11-17).
+   Every control there submits the field directly above it and none of them had
+   any room: measured on the rendered page, both the report card's Dismiss /
+   Delete post row and the block-server form's button sat 0px under their note
+   input. The page's own class is the scope, so a control added to the queue
+   later gets the same offset without anyone remembering to ask. */
+.moderation-queue .btn.cinema-button {
+  margin-top: 1rem;
+}
+
+/* Inside the card's action row (owner pass, 2026-11-17, second round). The two
+   submit buttons are inline siblings, so the only space between them was the
+   word space in the markup -- measured at 3.4px, which reads as one control
+   with two labels. 0.75rem is the gap .film-actions already uses between
+   adjacent controls. The disclosures below the row sat flush against it at 0px;
+   they take the same 1rem the row itself gets. */
+.dismiss-form button + button {
+  margin-left: 0.75rem;
+}
+
+.dismiss-form details {
+  margin-top: 1rem;
+}
+
 /* The red controls' focus ring is the site-wide `button:focus-visible` rule
    above - it was listed here first, but the global rule made this redundant. */
 

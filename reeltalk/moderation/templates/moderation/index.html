@@ -126,12 +126,13 @@
         being split in two — two forms would mean two note inputs and two
         chances of filling in the wrong one.
 
-        ``.btn`` moves to **delete** and Dismiss becomes a plain button.
-        §2D names this trap directly: ``.btn`` *is* the lit crimson control,
-        so two actions of different severity rendering identically is wrong,
-        and the destructive one takes the lit control while the lighter one
-        takes the plain one the rest of the site uses. The parked R73 pass
-        styles both properly.
+        Every control on this card takes the same red submit treatment the rest
+        of the site's forms use (owner pass, 2026-11-17). Before that the
+        destructive verb alone was lit and Dismiss was plain, which is what §2D
+        asked for while ``.btn`` was the only lit control on the page; with one
+        flat red across the site, severity is carried by the drawers below
+        instead — delete is one click, everything heavier is two, with a
+        warning to read in between.
 
         ``can_delete`` is computed by the view from ``can_act_on`` (R103) —
         the template reads a boolean and does not decide a permission. The
@@ -142,17 +143,9 @@
           {% csrf_token %}
           <label for="note-{{ card.latest.id }}">Note (kept on the record)</label>
           <input type="text" id="note-{{ card.latest.id }}" name="note" maxlength="500">
-          <button type="submit" class="btn cinema-button">Dismiss</button>
+          <button type="submit" class="btn cinema-button cinema-button--primary">Dismiss</button>
           {% if card.can_delete %}
-            <button type="submit" class="btn cinema-button" formaction="{% url 'moderation-delete-status' card.latest.id %}">Delete post</button>
-            {% if not card.target_user.local %}
-              {# Said plainly because it is the difference between a #}
-              {# moderator thinking they removed a post from the network #}
-              {# and one who knows they removed it from here. We cannot #}
-              {# sign a Delete as an account we do not own, so a remote #}
-              {# author's post is removed from this instance only. #}
-              <span class="muted">From another server — this removes it here only.</span>
-            {% endif %}
+            <button type="submit" class="btn cinema-button cinema-button--primary" formaction="{% url 'moderation-delete-status' card.latest.id %}">Delete post</button>
           {% endif %}
 
           {% comment %}
@@ -160,18 +153,16 @@
           shares this form's note field via ``formaction`` rather than being
           a second form of its own.
 
-          The disclosure is the whole answer to the ``.btn`` collision
-          §2D names. ``.btn`` *is* the lit crimson control, so a second
-          lit button beside increment 3's "Delete post" would render two
-          different severities identically. Collapsed by default, they are
-          never adjacent: the card shows Dismiss and (maybe) Delete, and
-          Suspend only appears when someone deliberately opens it.
+          The disclosure is what separates this from "Delete post" now that
+          every control on the card is the same red (owner pass,
+          2026-11-17). Collapsed by default, the two are never adjacent: the
+          card shows Dismiss and (maybe) Delete, and Suspend only appears when
+          someone deliberately opens it.
 
           That ordering is worth more than colour would have been. Delete
           costs one click; suspend costs two, with a warning to read
           between them. The heavier action is harder to fire by accident,
-          which is the property we actually wanted, and it costs no CSS —
-          R73 stays parked and increment 3's rendering is untouched.
+          which is the property the colour used to stand in for.
 
           The warning is plain language rather than "suspend" because the
           word does not carry what it means: this person will not be able
@@ -189,19 +180,18 @@
                 anything — the account and its content are still here, and a
                 moderator can restore them later.
               </p>
-              <button type="submit" class="btn cinema-button" formaction="{% url 'moderation-suspend' card.latest.id %}">Suspend account</button>
+              <button type="submit" class="btn cinema-button cinema-button--primary" formaction="{% url 'moderation-suspend' card.latest.id %}">Suspend account</button>
             </details>
           {% endif %}
 
           {% comment %}
           Ban (moderation increment 5), in its own collapsed disclosure for
-          the same reason suspend is in one: ``.btn`` is the lit crimson
-          control, so a third lit button rendered beside "Delete post" would
-          make three different severities look identical. Collapsed by
-          default, nothing lit is on screen until someone opens a drawer on
-          purpose, and the interaction cost stays ordered — delete is one
-          click, suspend is two, ban is two with a warning that says the
-          word "gone" in it. No CSS added; R73 stays parked.
+          the same reason suspend is in one: the drawer, not the colour, is
+          what keeps three different severities from being one click apart.
+          Collapsed by default, nothing is on screen until someone opens a
+          drawer on purpose, and the interaction cost stays ordered — delete
+          is one click, suspend is two, ban is two with a warning that says
+          the word "gone" in it.
 
           The warning carries the one fact that is not obvious from the word
           "ban" and that cannot be undone afterwards: the writing is
@@ -228,7 +218,7 @@
                 in again, but the posts stay removed — they are gone the same
                 way an author's own delete is gone.
               </p>
-              <button type="submit" class="btn cinema-button" formaction="{% url 'moderation-ban' card.latest.id %}">Ban account</button>
+              <button type="submit" class="btn cinema-button cinema-button--primary" formaction="{% url 'moderation-ban' card.latest.id %}">Ban account</button>
             </details>
           {% endif %}
 
@@ -237,9 +227,8 @@
           that points outward, and the only one that leaves the report open.
 
           It goes in a collapsed disclosure for the same reason suspend and
-          ban do: the button takes ``.btn``, and a fourth lit control
-          rendered inline beside "Delete post" would make three different
-          severities look identical. R73 stays parked.
+          ban do: a fourth control rendered inline beside "Delete post" would
+          put four different severities one click apart.
 
           The drawer carries the two facts the word "forward" does not.
           First: who goes on the wire. Not the member who reported, and not
@@ -276,7 +265,7 @@
 
           {% comment %}
           Refuse (moderation increment 6) — the remote target's version of
-          Suspend, in a drawer for the same ``.btn`` reason.
+          Suspend, in a drawer for the same reason.
 
           The word is deliberate. "Suspend" would be a lie here: we cannot
           suspend an account on somebody else's server, and a moderator
@@ -305,7 +294,7 @@
                 <strong>{{ card.target_user.actor_url }}</strong> should go,
                 block the server below instead.
               </p>
-              <button type="submit" class="btn cinema-button" formaction="{% url 'moderation-refuse' card.latest.id %}">Refuse here</button>
+              <button type="submit" class="btn cinema-button cinema-button--primary" formaction="{% url 'moderation-refuse' card.latest.id %}">Refuse here</button>
             </details>
           {% endif %}
         </form>
@@ -343,8 +332,9 @@
   with a live ban is exactly the moment the lift is needed, so hiding it
   behind "nothing to review" would defeat the section.
 
-  The lift is a plain button, not ``.btn``. R96 reserves the lit crimson
-  control for destructive actions, and this one puts a person back. Note
+  The lift takes the same red submit control as every other form on this page
+  (owner pass, 2026-11-17); it used to stay un-dressed because R96 reserved the
+  lit control for destructive actions and this one puts a person back. Note
   also that the list is already filtered by ``can_act_on`` in the view, so
   every row here is liftable by whoever is looking at it — there is no
   "you can see this but not touch it" state to explain.
@@ -372,7 +362,7 @@
           {% endif %}
           <form method="post" action="{% url 'moderation-unban' banned_user.localname %}">
             {% csrf_token %}
-            <button type="submit" class="btn cinema-button">Lift this ban</button>
+            <button type="submit" class="btn cinema-button cinema-button--primary">Lift this ban</button>
           </form>
         </li>
       {% endfor %}
@@ -392,9 +382,8 @@
   The block form sits above the list rather than inside a drawer. It is the
   only place on this page that is not a reaction to something already on
   it, and putting it in a ``<details>`` would make the proactive control
-  look like one more response to an incoming card. It takes no ``.btn``
-  either — the lit crimson control is reserved for the destructive
-  actions on a specific reported thing, and this is a form.
+  look like one more response to an incoming card. It takes the same red submit
+  control as the rest of the page's forms (owner pass, 2026-11-17).
   {% endcomment %}
   <section class="blocked-domains">
     <h2 class="pane-title">Blocked servers</h2>
@@ -415,7 +404,7 @@
       <input type="text" id="block-domain" name="domain" placeholder="bad.example" maxlength="255">
       <label for="block-domain-note">Why (kept on the record)</label>
       <input type="text" id="block-domain-note" name="note" maxlength="500">
-      <button type="submit" class="btn cinema-button">Block this server</button>
+      <button type="submit" class="btn cinema-button cinema-button--primary">Block this server</button>
     </form>
 
     {% if blocked_domains %}
@@ -434,7 +423,7 @@
           {% endif %}
           <form method="post" action="{% url 'moderation-unblock-domain' block.id %}">
             {% csrf_token %}
-            <button type="submit" class="btn cinema-button">Lift this block</button>
+            <button type="submit" class="btn cinema-button cinema-button--primary">Lift this block</button>
           </form>
         </li>
       {% endfor %}
