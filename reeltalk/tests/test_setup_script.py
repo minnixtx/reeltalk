@@ -23,6 +23,7 @@ import select
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "setup.sh"
 TEMPLATE = REPO_ROOT / ".env.example"
 PLACEHOLDER = "your-instance.example.com"
+
+# How long the pty helper waits for the next byte before asking whether the
+# script is still alive. This is a poll interval, not a verdict: nothing here may
+# read silence as failure, which is precisely what the old five-second break did.
+QUIET_POLL_SECONDS = 5.0
+
+# The interview still has to end sometime, or a script that genuinely is stuck
+# hangs the suite instead of failing it. Set well above any honest run so that
+# only a real hang reaches it.
+RUN_CEILING_SECONDS = 180.0
 
 # settings.py reads these with env.bool and env.int, and both raise on an empty
 # string rather than falling back to the default. A rewrite that uncommented
@@ -126,10 +137,20 @@ def _run_tty(sandbox, answers):
     queue = list(answers)
     tail = ""
     chunks = []
+    deadline = time.monotonic() + RUN_CEILING_SECONDS
     while True:
-        ready, _, _ = select.select([master], [], [], 5.0)
-        if not ready:
+        left = deadline - time.monotonic()
+        if left <= 0:
             break
+        ready, _, _ = select.select([master], [], [], min(QUIET_POLL_SECONDS, left))
+        if not ready:
+            # An empty interval says the script printed nothing, which is not the
+            # same as it being stuck: a loaded runner can hold it quiet for
+            # seconds. Only the process ending, or the whole run outliving its
+            # ceiling, is allowed to end the exchange.
+            if proc.poll() is not None:
+                break
+            continue
         try:
             chunk = os.read(master, 1024)
         except OSError:
@@ -145,8 +166,8 @@ def _run_tty(sandbox, answers):
         proc.kill()
         proc.wait()
         pytest.fail(
-            "setup.sh is still waiting for input with "
-            f"{len(queue)} answer(s) unused. Output so far:\n{''.join(chunks)}"
+            f"setup.sh was still running after {RUN_CEILING_SECONDS:.0f}s, "
+            f"with {len(queue)} answer(s) unused. Output so far:\n{''.join(chunks)}"
         )
     return proc.returncode, "".join(chunks)
 
@@ -533,3 +554,52 @@ def test_prebuilt_version_takes_latest_or_an_exact_release(tmp_path, value, expe
         if "minnixtx/reeltalk" in line
     }
     assert pulled == {expected}, result.stdout
+
+
+def test_a_script_that_goes_quiet_is_not_reported_as_stuck(tmp_path):
+    """Silence from the script is a busy machine, not a stuck one.
+
+    The pty helper used to break its read loop the moment five seconds passed
+    with nothing printed, and then called any script still running "still
+    waiting for input". A loaded runner can hold the script quiet that long with
+    nothing wrong at all, and the suite goes red on a change that touched no
+    Python. This stub stands in for setup.sh and goes quiet on purpose, so the
+    helper has to survive the gap and finish the interview.
+
+    The stall has to outlast the old five-second window or the case proves
+    nothing, which is why this one test is slow on purpose.
+    """
+    (tmp_path / "setup.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "Domain [films.example.com]: "\n'
+        "read -r domain\n"
+        "sleep 7\n"
+        'printf "\\nPort [3030]: "\n'
+        "read -r port\n"
+        "exit 0\n"
+    )
+
+    code, out = _run_tty(tmp_path, ["films.example.com", "3030"])
+
+    assert code == 0
+    assert "Port" in out
+
+
+def test_a_script_that_really_is_stuck_still_fails(tmp_path, monkeypatch):
+    """Tolerating silence is only safe because something still bounds the run.
+
+    Without a ceiling a script waiting forever would hang the suite instead of
+    failing it, so the fix has two halves and this pins the second one. The
+    ceiling is pulled down to keep the case quick; the script would outlast any
+    honest value for it.
+    """
+    monkeypatch.setattr(sys.modules[__name__], "RUN_CEILING_SECONDS", 2.0)
+    (tmp_path / "setup.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "Domain [films.example.com]: "\n'
+        "read -r domain\n"
+        "sleep 600\n"
+    )
+
+    with pytest.raises(pytest.fail.Exception):
+        _run_tty(tmp_path, ["films.example.com"])
