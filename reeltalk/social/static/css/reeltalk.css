@@ -628,9 +628,14 @@ a {
     z-index: 20;
     background: #211b17;
     border-top: 1px solid #75604e;
-    padding: 6px 6px max(8px, env(safe-area-inset-bottom));
+    padding: 0 6px env(safe-area-inset-bottom);
   }
 
+  /* Icons only, at Mastodon's bar height (owner ruling 2026-11-18). The row is
+     pinned with `height` rather than `min-height` and carries its own `margin:
+     0` for a reason: the bar is a grid row and More is a <button>, so the global
+     `button, .btn { margin-top: 1rem }` used to add 16px below the row and the
+     bar measured 81px while its own rules read 65. */
   .bottom-nav a,
   .bottom-nav button {
     display: flex;
@@ -638,7 +643,8 @@ a {
     align-items: center;
     justify-content: center;
     gap: 3px;
-    min-height: 50px;
+    height: var(--bottom-nav-row);
+    margin: 0;
     min-width: 0;
     padding: 0;
     color: #b9aa94;
@@ -650,6 +656,22 @@ a {
     text-transform: none;
     letter-spacing: 0;
     font: 11px/1.2 sans-serif;
+  }
+
+  /* The word under each icon has no room left in a 50px row. It stays in the
+     DOM because it is the control's accessible name -- `display: none` would
+     take the name with it -- so it is clipped the way `.corner-label` clips its
+     hidden text. */
+  .bottom-nav .nav-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   /* The More row is a bare <button>, so the base hover fill must be kept off it
@@ -691,9 +713,13 @@ a {
     padding-bottom: max(24px, env(safe-area-inset-bottom));
   }
 
-  /* The fixed bar must not eat the page's last line. */
+  /* The fixed bar must not eat the page's last line. One number for the bar's
+     row, because the bar and this clearance are the same measurement and two
+     literals drift the moment either side changes: the bar is this row plus its
+     1px top border. */
   body {
-    padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+    --bottom-nav-row: 50px;
+    padding-bottom: calc(var(--bottom-nav-row) + 1px + env(safe-area-inset-bottom));
   }
 
   /* The search page's own field is the phone entry point; 16px keeps iOS
