@@ -392,16 +392,17 @@ def test_the_suspend_disclosure_renders_for_a_reachable_target(alice, bob, revie
 
 
 def test_the_disclosure_is_collapsed_by_default(alice, bob, review, mod):
-    """The whole answer to the ``.btn`` collision: the lit suspend button
-    sits inside a closed ``<details>``, so it is never rendered beside
-    increment 3's lit "Delete post"."""
+    """What separates suspend from "Delete post" now that every control on the
+    card is the same red: the closed ``<details>`` means the two are never
+    rendered beside each other, so the heavier action still costs a deliberate
+    extra click."""
     report_a_post(bob, review)
     page = body(logged_in(mod).get(reverse("moderation")))
     assert "<details" in page
     assert "open" not in page.split("suspend-disclosure")[1][:40]
 
 
-def test_the_suspend_button_takes_the_secondary_control(alice, bob, review, mod):
+def test_the_suspend_button_takes_the_red_submit_control(alice, bob, review, mod):
     report_a_post(bob, review)
     page = body(logged_in(mod).get(reverse("moderation")))
     disclosure = page.split("suspend-disclosure")[1]
@@ -410,8 +411,7 @@ def test_the_suspend_button_takes_the_secondary_control(alice, bob, review, mod)
     )
     assert control is not None
     classes = set(control.group(1).split())
-    assert {"btn", "cinema-button"} <= classes
-    assert "cinema-button--primary" not in classes
+    assert {"btn", "cinema-button", "cinema-button--primary"} <= classes
 
 
 def test_no_disclosure_for_a_target_the_moderator_cannot_reach(

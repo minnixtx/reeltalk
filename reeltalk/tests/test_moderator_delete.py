@@ -791,16 +791,17 @@ def test_the_delete_button_renders_for_a_moderator(bob, review, mod):
     assert "Delete post" in body
 
 
-def test_delete_and_dismiss_use_secondary_controls(bob, review, mod):
-    # Destructive actions now use the shared outlined treatment (R153).
+def test_delete_and_dismiss_take_the_red_submit_control(bob, review, mod):
+    # Every submit control on the queue takes the site's red dressing, and the
+    # room above it (owner pass, 2026-11-17). Severity is carried by the
+    # drawers, not by one control being lit and the other plain.
     report_a_post(bob, review)
     body = logged_in(mod).get(reverse("moderation")).content.decode()
     for label in ("Dismiss", "Delete post"):
         control = re.search(rf'<button[^>]*class="([^"]*)"[^>]*>{label}</button>', body)
         assert control is not None
         classes = set(control.group(1).split())
-        assert {"btn", "cinema-button"} <= classes
-        assert "cinema-button--primary" not in classes
+        assert {"btn", "cinema-button", "cinema-button--primary"} <= classes
 
 
 def test_no_delete_button_for_a_post_the_moderator_may_not_touch(
@@ -881,14 +882,18 @@ def test_the_queue_is_empty_after_the_delete(bob, review, mod):
     assert "Great film" not in body
 
 
-def test_a_mirrored_post_offers_a_here_only_delete(bob, mod):
+def test_a_mirrored_post_still_offers_a_delete(bob, mod):
+    """A mirrored author's post can only be removed from this instance, because
+    we cannot sign a Delete for an account we do not own. The queue no longer
+    says that in prose -- the owner cut the line on 2026-11-17 -- so what this
+    pins is that the control is still offered, and that the sentence stays out."""
     mirror = mirror_account("dana", "remote.example")
     film = Film.objects.create(title="Dune", year=2021)
     status = mirror_post(mirror, film, note_id=995)
     report_a_post(bob, status)
     body = logged_in(mod).get(reverse("moderation")).content.decode()
-    assert "removes it here only" in body
     assert "delete-status" in body
+    assert "removes it here only" not in body
 
 
 # --- the whole loop, with the session proven ------------------------------
