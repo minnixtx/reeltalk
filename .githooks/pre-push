@@ -48,6 +48,7 @@ TRAILER_RE='^[[:space:]]*(co-?authored-by|coauthor-by)[[:space:]]*:'
 
 ZERO="0000000000000000000000000000000000000000"
 blocked=0
+lint_shas=()
 
 in_list() {
   local needle="$1"
@@ -59,11 +60,115 @@ in_list() {
   return 1
 }
 
+# ---------------------------------------------------------------------------
+# Lint stage: the local mirror of the CI gate's first two steps.
+#
+# The gate runs `ruff check` and `ruff format --check` before it runs anything
+# else, and it aborts on the first failing step. That ordering is what makes a
+# style miss expensive rather than merely late: PR #13 (2026-11-17) lost a full
+# round trip to one line at 90 characters against the 88 limit, and because the
+# gate died at step one, its test suite never ran at all -- so the red looked
+# like a code regression and was not one. Nothing on this machine checked it:
+# the two hooks here were attribution-only and pytest does not read line
+# lengths. Blocking here costs seconds; blocking there costs the cycle.
+#
+# It lints the tree being PUSHED, not the working tree. The working tree can be
+# dirty with unrelated work, and the thing that has to be clean is the commit
+# leaving this machine, so the commit is exported with `git archive` (376
+# tracked files, measured at 42ms) and that export is what gets checked.
+#
+# ruff is not installed on the host and must not be: the version is pinned in
+# pyproject.toml and the lockfile, so the only trustworthy ruff is the one that
+# matches the pin. Two container sources, tried in order --
+#
+#   1. reeltalk-web:latest, which installs ruff from the lockfile at build time
+#      and is already present on any machine that has run the stack. Used only
+#      when its ruff reports exactly the pinned version.
+#   2. ghcr.io/astral-sh/ruff:<pin>, pulled on demand.
+#
+# Their entrypoints differ, which is why the runner carries an entrypoint
+# override: the app image enters /entrypoint.sh and needs `--entrypoint ruff`,
+# while the standalone image already enters /ruff and takes arguments directly.
+#
+# A missing image SKIPS with a warning instead of blocking. That is an
+# environment gap and not a defect in the push, and the gate remains the
+# backstop -- but the skip is printed loudly, because a guard that passes
+# silently when it never ran is worse than no guard.
+# ---------------------------------------------------------------------------
+
+lint_tree() {
+  local sha="$1"
+  local tree pin tag runner="" entry="" ver="" rc=0
+
+  tree="$(mktemp -d "${TMPDIR:-/tmp}/reeltalk-lint.XXXXXX")" || {
+    echo "  LINT SKIPPED -- mktemp failed, so nothing was checked." >&2
+    return 0
+  }
+  if ! git archive --format=tar "$sha" | tar -x -C "$tree"; then
+    rm -rf "$tree"
+    echo "  LINT SKIPPED -- could not export $sha." >&2
+    return 0
+  fi
+  if [ ! -f "$tree/pyproject.toml" ]; then
+    rm -rf "$tree"
+    echo "  LINT SKIPPED -- $sha carries no pyproject.toml, so there is no lint config." >&2
+    return 0
+  fi
+
+  pin="$(sed -n 's/^[[:space:]]*"ruff==\([0-9][0-9.]*\)".*/\1/p' "$tree/pyproject.toml" | head -n 1)"
+
+  if docker image inspect reeltalk-web:latest >/dev/null 2>&1; then
+    ver="$(docker run --rm --entrypoint ruff reeltalk-web:latest --version 2>/dev/null | awk '{print $2}')"
+    if [ -n "$pin" ] && [ "$ver" = "$pin" ]; then
+      runner="reeltalk-web:latest"
+      entry="ruff"
+    fi
+  fi
+
+  if [ -z "$runner" ] && [ -n "$pin" ]; then
+    tag="ghcr.io/astral-sh/ruff:$pin"
+    if ! docker image inspect "$tag" >/dev/null 2>&1; then
+      echo "  Pulling $tag for the lint check..."
+      docker pull -q "$tag" >/dev/null 2>&1 || true
+    fi
+    if docker image inspect "$tag" >/dev/null 2>&1; then
+      runner="$tag"
+    fi
+  fi
+
+  if [ -z "$runner" ] && [ "$ver" != "$pin" ] && docker image inspect reeltalk-web:latest >/dev/null 2>&1; then
+    echo "  NOTE: no ruff at the pinned ${pin:-unknown}; linting with reeltalk-web:latest at ${ver:-unknown} instead." >&2
+    runner="reeltalk-web:latest"
+    entry="ruff"
+  fi
+
+  if [ -z "$runner" ]; then
+    rm -rf "$tree"
+    echo "  LINT SKIPPED -- no ruff image is available and the pull failed." >&2
+    echo "  Install it once with:  docker pull ghcr.io/astral-sh/ruff:${pin:-<pin>}" >&2
+    echo "  Nothing was checked. The CI gate still runs these two steps." >&2
+    return 0
+  fi
+
+  local run=(--rm -v "$tree":/lint:ro,z)
+  [ -n "$entry" ] && run+=(--entrypoint "$entry")
+  run+=("$runner")
+
+  echo "  ruff check   ($runner)"
+  docker run "${run[@]}" check /lint --cache-dir /tmp/rc 2>&1 | sed 's/^/    /' || rc=1
+  echo "  ruff format --check"
+  docker run "${run[@]}" format --cache-dir /tmp/rc --check /lint 2>&1 | sed 's/^/    /' || rc=1
+
+  rm -rf "$tree"
+  return "$rc"
+}
+
 # git feeds one line per ref being pushed:
 #   <local_ref> <local_sha> <remote_ref> <remote_sha>
 while read -r local_ref local_sha remote_ref remote_sha; do
   # Deleting a branch -- nothing to check.
   [ "$local_sha" = "$ZERO" ] && continue
+  lint_shas+=("$local_sha")
 
   # --- leak vector 3: git notes must never leave this machine ---
   case "$remote_ref$local_ref" in
@@ -140,5 +245,34 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     fi
   done < <(git log "$range" --pretty='%H%x09%ae%x09%ce' 2>/dev/null || true)
 done
+
+# --- the lint stage, once per distinct commit being pushed ---
+if [ "$blocked" -ne 0 ]; then
+  if [ "${#lint_shas[@]}" -gt 0 ]; then
+    echo "  Lint was not run -- this push is already rejected on attribution." >&2
+  fi
+elif [ "${#lint_shas[@]}" -gt 0 ]; then
+  seen=""
+  for sha in "${lint_shas[@]}"; do
+    case "$seen" in *" $sha "*) continue ;; esac
+    seen="$seen $sha "
+    echo ""
+    echo "  Lint gate on ${sha:0:7} -- mirrors the CI gate's first two steps"
+    if ! lint_tree "$sha"; then
+      blocked=1
+      {
+        echo ""
+        echo "  PUSH REJECTED -- ${sha:0:7} does not pass the lint the CI gate runs first."
+        echo ""
+        echo "  Fix it, or format the tree and amend:"
+        echo "      docker run --rm -v \$PWD:/host:ro,z --entrypoint ruff \\"
+        echo "        reeltalk-web:latest format /host --cache-dir /tmp/rc"
+        echo ""
+        echo "  Bypass only if you mean it:  git push --no-verify"
+        echo ""
+      } >&2
+    fi
+  done
+fi
 
 exit "$blocked"
