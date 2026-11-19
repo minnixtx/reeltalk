@@ -137,10 +137,15 @@ def test_the_page_renders_every_kind_it_holds(member, alice, bob, post):
     notify(alice, bob, Notification.Kind.FOLLOW)
     notify(alice, bob, Notification.Kind.LIKE, post)
     notify(alice, bob, Notification.Kind.REPLY, post)
+    notify(alice, bob, Notification.Kind.REPLAY, post)
     content = member.get("/notifications/").content.decode()
     assert "followed you" in content
     assert "applauded" in content
     assert "replied to your post" in content
+    # The replay line carries a link between the verb and its object, so this
+    # asserts the anchor the way the page renders it rather than a plain-text
+    # phrase that the markup never contains.
+    assert f'replayed <a href="/status/{post.id}/">your post</a>' in content
 
 
 # --- Deep links --------------------------------------------------------------
@@ -551,6 +556,39 @@ def test_a_deleted_status_loses_the_film_label_with_its_link(member, alice, bob,
     content = member.get("/notifications/").content.decode()
     assert "notif-film" not in content
     assert "applauded a post that is no longer here" in content
+
+
+def test_a_replay_names_the_film_the_post_is_about(member, alice, bob, post):
+    # D7's copy rule, applied to the sixth kind (replay arc P2): the film is
+    # named whenever the post has one, and the link stays on the post — the film
+    # is context, not a second door. Same shape the like branch is pinned to.
+    notify(alice, bob, Notification.Kind.REPLAY, post)
+    content = member.get("/notifications/").content.decode()
+    assert 'about <span class="notif-film">Dune (2021)</span>' in content
+    assert f'replayed <a href="/status/{post.id}/">your post</a>' in content
+    assert f'href="/film/{post.film_id}/"' not in content
+
+
+def test_a_replay_of_a_film_less_post_keeps_the_film_free_wording(member, alice, bob):
+    # The other half of D7: with no film to name the row falls back to the plain
+    # label rather than emitting a dangling "about".
+    status = Status.objects.create(
+        user=alice, status_type=None, content="<p>A note</p>", raw_content="A note"
+    )
+    notify(alice, bob, Notification.Kind.REPLAY, status)
+    content = member.get("/notifications/").content.decode()
+    assert "notif-film" not in content
+    assert f'replayed <a href="/status/{status.id}/">your post</a>' in content
+
+
+def test_a_replay_of_a_deleted_post_says_it_is_gone(member, alice, bob, post):
+    # The gone-target fallback, which every kind needs its own wording for
+    # because the template has no catch-all to fall into.
+    notify(alice, bob, Notification.Kind.REPLAY, post)
+    post.delete()
+    content = member.get("/notifications/").content.decode()
+    assert "replayed a post that is no longer here" in content
+    assert "notif-film" not in content
 
 
 def test_a_reply_names_the_film_and_shows_what_arrived(member, alice, bob, dune, post):

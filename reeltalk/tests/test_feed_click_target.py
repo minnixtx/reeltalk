@@ -382,6 +382,24 @@ def test_the_overlay_stretches_over_the_whole_row():
 
 
 @pytest.mark.django_db
+def test_the_replay_control_renders_inside_the_action_row(alice, bob, dune, admin):
+    # The raise rule above covers ``.row-actions button`` by selector, so a
+    # replay button painted anywhere else in the row silently loses its own
+    # clicks to the overlay. This pins the render into the container the rule
+    # names — the new control earns the existing raise rule rather than needing
+    # a selector of its own.
+    # Alice has to be the follower: the home feed is the users you follow, so a
+    # bob-follows-alice world would put bob's review nowhere she can see it.
+    alice.follows.add(bob)
+    mark_watched(bob, dune, rating="4.5", content="<p>Spice.</p>")
+    review = Status.objects.get(user=bob, film=dune)
+    row = _row(_home(_login("alice")), review.pk)
+    actions = row[row.index('class="row-actions"') :]
+    assert 'class="replay-btn"' in actions
+    assert actions.index('class="replay-btn"') < actions.index('class="applaud-btn"')
+
+
+@pytest.mark.django_db
 def test_every_interactive_part_of_a_row_is_raised_above_the_overlay():
     # One rule, six selectors. If any of them goes missing, whatever it covered
     # stops receiving its own clicks and the row navigates instead — the failure

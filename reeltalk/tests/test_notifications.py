@@ -94,12 +94,16 @@ def test_the_kind_enum_holds_only_events_that_have_a_producer():
     # the staff write path in moderation/notify.py is its producer and landed
     # in the same change, written directly rather than through notify() so
     # the block guard can never mute the queue.
+    # "replay" joined the same way again in replay arc P2: the replay route is
+    # its producer and landed in the same change, firing on the row being
+    # created rather than on the toggle, so taking a replay back writes nothing.
     assert {kind.value for kind in Notification.Kind} == {
         "follow",
         "like",
         "reply",
         "mention",
         "report",
+        "replay",
     }
 
 

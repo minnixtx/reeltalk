@@ -1560,6 +1560,82 @@ button.applaud-btn:hover {
   color: var(--white);
 }
 
+/* Replay control (replay arc P2, owner ruling D5). It sits FIRST in the row's
+   action bar, before the applaud control, and copies that control's contract
+   exactly: a 26px icon, a plain monospace count as a sibling rather than a
+   child, no border, and a uniform scale(1.08) on hover.
+
+   The ink means the same thing it means on both controls beside it — red is
+   "I did this", cream is "I did not" (owner pass, 2026-11-15) — and the number
+   beside it stays white and carries everyone, because a tally is a fact about
+   the post and the ink is a fact about the reader. Two red numbers would be one
+   signal copied twice.
+
+   The art is the owner's own ``~/design-elements/replay-icon.svg``: two arrows
+   chasing each other around a small square, which is the shape this feature
+   borrows from Mastodon's boost without borrowing the word. The idle file is
+   that file byte for byte; the mine file is the same bytes with the single cream
+   fill swapped for the link red, which is what makes a state change unable to
+   move or resize the arrows — the same reason the applaud pair is two files and
+   not one recoloured, and the reason ``test_applaud_reply_icons.py`` can hold
+   the derivation. Both drawings sit on a 24-unit square canvas, so
+   ``center / contain`` maps either onto the shared 26px box without squashing
+   an axis.
+
+   The base `button` rule paints a flat red fill and carries margin-top: 1rem,
+   and both are reset here for the reason the applaud rule spells out: without
+   the fill reset a red plate sits behind the artwork, and without the margin
+   reset the control hangs 16px below where it belongs. */
+.replay {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+}
+
+.replay-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: url("../images/replay-icon-idle.svg") center / contain no-repeat;
+  background-color: transparent;
+  box-shadow: none;
+  text-shadow: none;
+  margin-top: 0;
+  cursor: pointer;
+}
+
+.replay-btn[data-state="mine"] {
+  background-image: url("../images/replay-icon-mine.svg");
+}
+
+/* Uniform scale, not a brightness lift, and the element name is load-bearing
+   for the same reason it is on ``button.applaud-btn:hover``: the base
+   `button:hover, .btn:hover` rule outspecs a plain class, so the background has
+   to be repeated here or a red plate arrives behind the artwork the moment the
+   cursor does. */
+button.replay-btn:hover {
+  background-color: transparent;
+  transform: scale(1.08);
+  box-shadow: none;
+  filter: none;
+}
+
+.replay-btn:disabled {
+  filter: saturate(0.5) brightness(0.7);
+  cursor: default;
+  box-shadow: none;
+}
+
+/* Mono, always white, same contract as ``.applaud-count`` beside it. */
+.replay-count {
+  font-family: ui-monospace, "DejaVu Sans Mono", "Liberation Mono", monospace;
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--white);
+}
+
 /* Reply control (owner pass, 2026-10-05; artwork and ink rule redone on the
    owner's pass of 2026-11-15). Sits immediately after the applaud control and
    follows the same visual contract — 26px icon, plain monospace count, no

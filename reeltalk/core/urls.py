@@ -38,6 +38,14 @@ urlpatterns = [
         views.like_status,
         name="status-like",
     ),
+    # Replay / un-replay (replay arc P2, D6): the mirror of the like route — the
+    # same URL toggles and answers JSON for the AJAX control. No broadcast until
+    # P5 builds the Announce.
+    path(
+        "status/<int:status_id>/replay/",
+        views.replay_status,
+        name="status-replay",
+    ),
     # Reply to a post (feed interactions increment 4, R83 decision 2): the
     # first writer for Status.reply_parent. Answers JSON carrying the
     # server-rendered reply row so the thread grows without a reload.

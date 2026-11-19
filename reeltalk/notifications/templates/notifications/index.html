@@ -51,6 +51,15 @@
             {% else %}
               applauded a post that is no longer here
             {% endif %}
+          {% elif row.note.kind == "replay" %}
+            {% if row.has_target %}
+              {# D7's copy rule again, and it is the same rule for the same #}
+              {# reason: the film is context, so it is named but never becomes #}
+              {# a second door — the link stays on the post that was replayed. #}
+              replayed <a href="{% url 'status' row.note.status.id %}">your post</a>{% if row.film_label %} about <span class="notif-film">{{ row.film_label }}</span>{% endif %}
+            {% else %}
+              replayed a post that is no longer here
+            {% endif %}
           {% elif row.note.kind == "reply" %}
             {% if row.has_target %}
               {# The link is the reply itself, not the post it answered — the #}
