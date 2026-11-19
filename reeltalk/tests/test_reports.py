@@ -425,9 +425,11 @@ def test_filing_a_report_never_reaches_notify(monkeypatch, bob, review):
 def test_the_report_kind_is_on_the_notification_enum():
     """The enum pin, amended by D3: ``report`` joined with its producer.
 
-    Still pinned as the exact set — a sixth value with no producer is what
+    Still pinned as the exact set - an extra value with no producer is what
     the original pin existed to refuse, and the amendment does not loosen
-    that.
+    that. Amended again in replay arc P2, where ``replay`` joined the same
+    way: its producer is the replay route, and it fires when the ``Replay``
+    row is created rather than on the toggle generally.
     """
     assert set(Notification.Kind.values) == {
         "follow",
@@ -435,6 +437,7 @@ def test_the_report_kind_is_on_the_notification_enum():
         "reply",
         "mention",
         "report",
+        "replay",
     }
 
 
