@@ -1100,6 +1100,12 @@ LIST_FEED_POSTER_CAP = 5
 # ranks are stable because they key off ``kind``, never off list position —
 # which is the whole requirement: a cursor has to be able to say "everything
 # strictly older than this row" without knowing where that row sat.
+# A replay row outranks both (replay arc P3). The new rank goes **above** the
+# existing pair rather than renumbering them, so a cursor minted before the
+# deploy still names a correct boundary against every row it meets afterwards.
+# At an equal timestamp the replay wins because the replay is the newer event on
+# the row: the original was already there, and this is the day it arrived.
+KIND_RANK_REPLAY = 2
 KIND_RANK_SHELF = 1
 KIND_RANK_STATUS = 0
 
@@ -1218,10 +1224,22 @@ class FeedEntry:
     offer-without-the-route bug R85 is written against. All three are filled by
     :func:`_attach_interaction_counts`, which is where the viewer is in hand.
 
-    ``replayed_by`` is unused until P3 grows the Following-feed replay row: it
-    names the member who replayed, as distinct from ``user``, who is the
-    original's author and owns the row's name line, stars, film and prose. It
-    lands now so the row that needs it is a fill and not a re-shape.
+    ``replayed_by`` names the member who replayed the row's post, as distinct
+    from ``user``, who is the original's author and owns the row's name line,
+    stars, film and prose. It is set on exactly one row type - the Following
+    feed's replay row - and the template draws its byline from it. ``kind``
+    stays ``"status"`` on such a row, because the row renders a status and every
+    ``kind`` check in the template is a shelf-verb check; what distinguishes it
+    is this field, which is also what :attr:`kind_rank` reads.
+
+    ``post_date`` is the second date a replay row carries, and the two are not
+    interchangeable (D11). ``date`` is the row's position in the feed order -
+    ``sort_key`` and the paging cursor both read it - and for a replay row that
+    is the day the replay happened, because the row is new to the reader that
+    day. ``post_date`` is the date of the post the row is showing, and it is
+    what the metadata line prints. Every row that is not a replay leaves it
+    empty and prints ``date``; see :attr:`display_date` for why the template
+    must never read ``date`` directly.
 
     ``is_list_face`` marks the row as standing for a list's post face
     (§2K increment 4). It is set from ``status_type == LIST`` in
@@ -1266,6 +1284,7 @@ class FeedEntry:
     replayed_by_viewer: bool = False
     replayable: bool = False
     replayed_by: Optional["User"] = None
+    post_date: datetime | None = None
     is_list_face: bool = False
     list_strip: ListStrip | None = None
     # Who the row was addressed to (visibility V1), for the marker the template
@@ -1307,8 +1326,30 @@ class FeedEntry:
         return audience.label
 
     @property
+    def display_date(self) -> datetime:
+        """The date the row's metadata line prints, which is not always
+        :attr:`date` (D11).
+
+        ``date`` orders the row; ``post_date`` describes the post. They differ on
+        one row type only, and the failure mode of reading ``date`` here is
+        silent: a replay of a 2019 review would print 2019-xx-xx as today's date
+        - no, worse, it would print *today* as the day the review was written,
+        and nothing else in the app reads that line, so nothing would notice.
+        Every row that is not a replay leaves ``post_date`` unset, so the
+        fallback is the whole rule for the rest of the feed.
+        """
+        return self.post_date if self.post_date is not None else self.date
+
+    @property
     def kind_rank(self) -> int:
-        """Where this row sits in the tiebreak (R132 decision 2)."""
+        """Where this row sits in the tiebreak (R132 decision 2).
+
+        A replay row takes :data:`KIND_RANK_REPLAY`, keyed off ``replayed_by``
+        and not off ``kind`` — which stays ``"status"`` on a replay row, because
+        the row renders a status.
+        """
+        if self.replayed_by is not None:
+            return KIND_RANK_REPLAY
         return KIND_RANK_STATUS if self.kind == "status" else KIND_RANK_SHELF
 
     @property
@@ -1466,6 +1507,83 @@ def _status_entry(status: "Status") -> "FeedEntry":
     if status.status_type == Status.Type.LIST:
         entry.is_list_face = True
     return entry
+
+
+def _replay_entry(replay: "Replay") -> "FeedEntry":
+    """The feed row that shows one replay (replay arc P3).
+
+    Built on :func:`_status_entry` and then re-pointed at the replay, because
+    everything the row *shows* belongs to the original: the name line, the stars,
+    the film, the prose, the audience and every counter are the original's, and
+    the row opens the original, since ``.review-open`` keys on ``status_id``.
+    What the replay supplies is the three facts that make it a different row from
+    the post itself - who replayed it (``replayed_by``, which the byline draws),
+    where it sits in the order (``date`` and ``source_id``, both the replay's own,
+    per D11) and the original's date for the metadata line to print
+    (``post_date``).
+
+    The row's own replay control therefore replays the original, which is the
+    right answer rather than an oversight: there is no replay of a replay here.
+    """
+    entry = _status_entry(replay.status)
+    entry.replayed_by = replay.user
+    entry.post_date = replay.status.published_date
+    entry.date = replay.published_date
+    entry.source_id = replay.pk
+    return entry
+
+
+def _replay_rows(user, member_ids, shown: set[int]) -> list["FeedEntry"]:
+    """The replay rows a Following feed shows, newest replay per original (P3).
+
+    Synthesized in Python rather than in SQL because the whole feed is already in
+    memory here, which is what makes D3's dedupe **exact** instead of
+    approximate: :attr:`shown` is the set of originals the reader already has a
+    row for, so a replay of a post they already see adds nothing, and of several
+    members who replayed one post only the newest survives.
+
+    The eligibility clauses are the failure mode the whole feature is designed
+    against - a replay must never widen who may read a post - and two of them
+    carry their weight:
+
+    * ``audience_q`` is asked of the **original's** columns, which is what makes
+      "the replay row carries the original's audience" one clause instead of a
+      hand-copy of three that can drift from the first. The seam the visibility
+      arc left is why the parameters exist.
+    * the ``status__user_id`` block exclusion is **not** redundant with
+      ``member_ids``. A replay is precisely the case where the original's author
+      is not a feed member - that is the row's whole point - so membership
+      subtraction cannot catch a blocked author, and without this clause a reader
+      would be handed the post of someone they blocked wrapped in a name they
+      follow. It is a subquery, not a list, so the page's query count does not
+      move.
+
+    Suspension of the replier drops the row (D9) exactly as it leaves the tally.
+    """
+    rows = (
+        Replay.objects.filter(
+            user_id__in=member_ids,
+            user__suspended_at__isnull=True,
+            status__deleted=False,
+            status__reply_parent__isnull=True,
+            status__user__suspended_at__isnull=True,
+            status__user__banned_at__isnull=True,
+        )
+        .exclude(status__user_id__in=user.blocks.all())
+        .filter(audience_q(user, field="status__visibility", author="status__user_id"))
+        .select_related("user", "status", "status__user", "status__film")
+        # Newest replay first, so "keep the first per original" below is the
+        # newest and not whichever row the database happened to return first.
+        .order_by("-published_date", "-id")
+    )
+    entries: list[FeedEntry] = []
+    taken: set[int] = set()
+    for replay in rows:
+        if replay.status_id in shown or replay.status_id in taken:
+            continue
+        taken.add(replay.status_id)
+        entries.append(_replay_entry(replay))
+    return entries
 
 
 def _attach_interaction_counts(entries: list["FeedEntry"], user) -> None:
@@ -1954,6 +2072,17 @@ def feed_entries(
         if entry.is_list_face:
             list_entries.append(entry)
         entries.append(entry)
+
+    # Replay rows, synthesized after the status loop so the dedupe knows what the
+    # reader already has, and **before** the batched counters so a replay row gets
+    # its tallies from the same batch as every other row and costs no extra query
+    # of its own (replay arc P3).
+    shown = {entry.status_id for entry in entries if entry.status_id is not None}
+    replay_entries = _replay_rows(user, member_ids, shown)
+    entries.extend(replay_entries)
+    # A replay of a list face needs its poster strip from the same batch, or the
+    # row renders the verb with no body under it.
+    list_entries.extend(entry for entry in replay_entries if entry.is_list_face)
 
     _attach_interaction_counts(entries, user)
 

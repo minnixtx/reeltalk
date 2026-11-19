@@ -1636,6 +1636,94 @@ button.replay-btn:hover {
   color: var(--white);
 }
 
+/* The replay byline on a feed row (replay arc P3), measured in the rendered mock
+   at ~/design-elements/replay-mock/ and ruled from it.
+
+   The line rides inside ``.review-head`` and buys its own line with a full-width
+   flex basis, the same mechanism ``.review-meta`` uses. It cannot be a child of
+   the row card: the card is a grid that pins its children by row index
+   (``.review-body`` sits on row 3 by an explicit rule), so a new card child
+   drags the poster and the prose down one row. That was tried and measured in
+   the mock, and it broke.
+
+   Two tokens, one for the line's box and one for the space under it, so the
+   avatar's offset below is DERIVED from them instead of repeating the line's
+   height as a second literal -- the drift the phone-bar pass just cleaned out of
+   the bottom nav. The head's own row-gap stays at zero (pinned in
+   test_feed_head_lines.py), so the line buys its spacing with its own margin and
+   never by moving a gap the owner set by eye. */
+.feed .review-head:has(> .replay-line) {
+  --replay-line-h: 20px;
+  --replay-line-gap: 8px;
+}
+
+.feed .review-head > .replay-line {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--replay-line-h);
+  margin: 0 0 var(--replay-line-gap);
+  font-size: 0.86rem;
+  color: var(--cream-muted);
+}
+
+/* The idle replay drawing at byline size. It is the same file the control uses,
+   so the two can never disagree about what a replay looks like. */
+.feed .review-head > .replay-line .replay-glyph {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  background: url("../images/replay-icon-idle.svg") center / contain no-repeat;
+}
+
+/* The name carries the line's one emphasis and the muted ink carries the verb,
+   so the line reads "X replayed" with X the thing the eye lands on. Anywhere-wrap
+   because a remote handle is longer than any phone column. */
+.feed .review-head > .replay-line a {
+  color: var(--cream);
+  font-weight: 600;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+/* The avatar belongs to the post, not to the line above it, so it drops with the
+   name instead of staying pinned to the top of the card. Derived, never
+   repeated: 18px is the row's own top padding and the two tokens are the line
+   and the space under it. */
+.feed .review-head:has(> .replay-line) .avatar-row {
+  top: calc(18px + var(--replay-line-h) + var(--replay-line-gap));
+}
+
+/* Variant D, the owner's pick: the line pulled left over the avatar gutter. The
+   row's left padding is 76px and the avatar sits 16px inside it, so -60px lands
+   the line's left edge on the avatar's own edge (measured 425px at 1440) rather
+   than on the text column's 485px. */
+.feed .review-head > .replay-line--flush {
+  margin-left: -60px;
+}
+
+/* The same ruling at phone measure, which needs its own arithmetic. The row's
+   padding and the avatar's inset are both smaller here (62px and 12px against the
+   wide layout's 76px and 16px), so the desktop pull overshoots the avatar by
+   10px and lands the line against the card's border instead of on the avatar's
+   edge; and the avatar's drop has to start from this layout's 16px top padding or
+   the avatar hangs 2px below the name it belongs to. Measured at 390, both
+   deviations were in the mock too, which is where they went unseen.
+
+   The breakpoint is 599 and not 600 because the sheet gives 600px itself to the
+   wide layout (``min-width: 600px`` wins there), and this follows it rather than
+   arguing with it. */
+@media (max-width: 599px) {
+  .feed .review-head > .replay-line--flush {
+    margin-left: -50px;
+  }
+
+  .feed .review-head:has(> .replay-line) .avatar-row {
+    top: calc(16px + var(--replay-line-h) + var(--replay-line-gap));
+  }
+}
+
 /* Reply control (owner pass, 2026-10-05; artwork and ink rule redone on the
    owner's pass of 2026-11-15). Sits immediately after the applaud control and
    follows the same visual contract — 26px icon, plain monospace count, no

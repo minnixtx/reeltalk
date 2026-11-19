@@ -28,6 +28,22 @@ a second channel to say so.
     <a class="review-open" href="{% url 'status' entry.status_id %}" aria-label="Open {{ entry.user.localname }}'s post"></a>
   {% endif %}
   <div class="review-head">
+    {% if entry.replayed_by %}
+      {% comment %}
+      The replay byline (replay arc P3, owner ruling from the rendered mock). It
+      is the head's FIRST child and not a new child of the row card, because the
+      card is a grid that pins its children by row index - .review-body sits on
+      row 3 by an explicit rule - so a new card child drags the poster and the
+      prose down with it. Inside the head it buys its own line with
+      flex-basis: 100%, the mechanism .review-meta already uses, and the avatar
+      drops by the same measured amount through the stylesheet's token.
+      The name is a link to the replier's profile: the line names a member, and
+      every other place the app names a member links to them. The verb stays
+      plain text after it, so the line reads as one sentence and the glyph
+      carries no accessible name of its own.
+      {% endcomment %}
+      <p class="replay-line replay-line--flush"><span class="replay-glyph" aria-hidden="true"></span><a href="{% url 'user-profile' entry.replayed_by.localname %}">{{ entry.replayed_by.localname }}</a> replayed</p>
+    {% endif %}
     {% if entry.user.avatar %}
       <img class="avatar avatar-row" src="{{ entry.user.avatar.url }}" alt="">
     {% else %}
@@ -54,7 +70,9 @@ a second channel to say so.
     {% if entry.rating %}<span title="{{ entry.rating|floatformat:'-1' }} / 5">{{ entry.rating|stars }}</span>{% endif %}
     {# Plain text, never a link: the .review-open overlay above already opens this #}
     {# post (owner pass, 2026-10-04). #}
-    <span class="post-date">{{ entry.date|date:"Y-m-d" }}</span>
+    {# display_date, never date: on a replay row date is the day the replay #}
+    {# happened (that is what pages the row) and this line describes the post (D11). #}
+    <span class="post-date">{{ entry.display_date|date:"Y-m-d" }}</span>
     {# The audience marker (visibility V1). It renders on a row the reader is #}
     {# allowed to read, which for a private row means its author alone, so the #}
     {# marker is a member telling themselves which of their own posts went out — #}
