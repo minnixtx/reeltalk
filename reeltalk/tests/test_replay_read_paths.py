@@ -1,12 +1,13 @@
-"""Replay P1: the gate and the counters (``REPLAY_PLAN.md`` §4 P1).
+"""The replay read paths: the gate, the counters and the Following feed's row
+(``REPLAY_PLAN.md`` §4 P1 and P3).
 
-**What this file can test today.** A replay has no row on any page yet - the
-control lands in P2, the Following row in P3, Local and All in P4, the wire in
-P5. What P1 builds is the three things every one of those will read from: the
-``Replay`` table, the single gate ``may_replay``, and the two batched counters.
-That is what is asserted here and nothing else - P3 and P4 extend this same file
-with their feed matrices rather than opening new ones, because the viewer
-classes below are the same classes a feed row has to answer for.
+**What is asserted here.** P1 built the three things every surface reads from -
+the ``Replay`` table, the single gate ``may_replay`` and the two batched
+counters. P3 added the first place a replay becomes a row a reader can see: the
+Following feed's replay row, with its eligibility clauses, its dedupe and its two
+dates. P4 (Local and All) and P5 (the wire) extend this same file with their own
+matrices rather than opening new ones, because the viewer classes below are the
+same classes every one of those surfaces has to answer for.
 
 The shape is copied from ``test_visibility_read_paths.py`` on purpose. The risk
 of this feature is not the table; it is someone's review rendering on a screen
@@ -49,20 +50,24 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.db import IntegrityError, connection
+from django.test import Client
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from reeltalk.core.models import (
+    KIND_RANK_REPLAY,
     Film,
     Replay,
     Status,
     Visibility,
+    _replay_rows,
+    feed_entries,
     may_replay,
     replay_counts,
     replayed_ids,
     toggle_replay,
 )
-from reeltalk.tests.members import member
+from reeltalk.tests.members import member, site_admin
 
 PASSWORD = "s3cretpass"
 User = get_user_model()
@@ -456,3 +461,318 @@ def test_replayed_ids_keeps_a_suspended_members_own_row(db, posts, suspended_rep
     suspension is a second place to disagree with the first."""
     assert suspended_replier.suspended_at is not None
     assert replayed_ids(suspended_replier, [posts["public"].pk]) == {posts["public"].pk}
+
+
+# --- The Following feed's replay row (replay arc P3) -------------------------
+
+# Whether the row exists is a property of the READER's relations, not of the
+# replay, so every case below moves one relation and one only:
+#
+#   follows the replier, not the author      -> the row (the feature's whole point)
+#   follows neither party                    -> no row: the replier is not feed material
+#   follows the replier AND the author       -> no row (D3): they already see the post
+#   follows the replier, blocked the author  -> no row: the block clause, load-bearing
+#   the replier is suspended                 -> no row (D9)
+#
+# The follow direction reads backwards the first time, so it is spelled out once
+# here: a home feed is made of the accounts *you* follow, so "the replay shows in
+# admirer's feed" is ``admirer.follows.add(replier)``, never the reverse.
+
+
+@pytest.fixture
+def admin(db):
+    # R12: / redirects to /setup/ until a superuser exists, so a render
+    # assertion against that body would prove nothing.
+    return site_admin(localname="admin", password=PASSWORD)
+
+
+@pytest.fixture
+def admirer(db, replier):
+    """A member who follows the replier and not the author."""
+    user = member(localname="admirer", password=PASSWORD)
+    user.follows.add(replier)
+    return user
+
+
+@pytest.fixture
+def keeper(db):
+    """A member with a post of their own, to sit between the replay's two dates."""
+    return member(localname="keeper", password=PASSWORD)
+
+
+def _feed(user):
+    """The feed rows, without the cursor."""
+    entries, _ = feed_entries(user)
+    return entries
+
+
+def _replay_rows_of(user, status) -> list:
+    """The replay rows in ``user``'s feed that stand for ``status``."""
+    return [
+        entry
+        for entry in _feed(user)
+        if entry.replayed_by is not None and entry.status_id == status.pk
+    ]
+
+
+def _eligibility(user):
+    """The replay rows ``user`` is *eligible* for, with the D3 dedupe emptied out.
+
+    ``shown=set()`` is the point and not an oversight. The dedupe is pinned by its
+    own tests above, and leaving it in force here would hide the audience clause
+    completely: every reader entitled to a non-public original already has that
+    post in their own feed, so the dedupe drops the row for exactly the readers
+    whose entitlement this is about.
+    """
+    return _replay_rows(user, user.feed_member_ids(), set())
+
+
+def _row_in(body: str, status_id: int) -> str:
+    """One row's own markup, so a check cannot borrow a neighbour's."""
+    marker = f'<li class="review" data-status="{status_id}"'
+    assert marker in body, f"the page holds no row for status {status_id}"
+    start = body.index(marker)
+    return body[start : body.index("</li>", start)]
+
+
+def _row_markup(who: str, status_id: int) -> str:
+    """One rendered home-feed row, by the status its row speaks for."""
+    client = Client()
+    assert client.login(username=who, password=PASSWORD)
+    return _row_in(client.get("/").content.decode(), status_id)
+
+
+@pytest.mark.django_db
+def test_a_replay_row_shows_for_a_member_who_follows_the_replier(
+    db, posts, author, replier, admirer, films
+):
+    """The row's data, all of it (``REPLAY_PLAN.md`` §4 P3).
+
+    Everything the row *shows* is the original's - the name line, the film, the
+    prose, the audience - and the three facts that make it a different row from the
+    post itself are the replay's: who, where it sits in the order, and its own id
+    as the cursor's row.
+    """
+    original = posts["public"]
+    replay = Replay.objects.get(user=replier, status=original)
+    rows = _replay_rows_of(admirer, original)
+    assert len(rows) == 1
+    entry = rows[0]
+    assert entry.user == author
+    assert entry.replayed_by == replier
+    assert entry.status_id == original.pk
+    assert entry.source_id == replay.pk
+    assert entry.film == films[0]
+    assert entry.content == original.content
+    assert entry.visibility == Visibility.PUBLIC
+    assert entry.kind == "status"
+    # The rank is what pages this row above a same-timestamp original, and it keys
+    # off replayed_by and not off kind -- kind stays "status" on a replay row.
+    assert entry.kind_rank == KIND_RANK_REPLAY
+    # Its counters are the original's, and the row may offer the control because
+    # the reader is not the author: replaying this row replays the original.
+    assert entry.replay_count == 1
+    assert entry.replayed_by_viewer is False
+    assert entry.replayable is True
+
+
+@pytest.mark.django_db
+def test_no_replay_row_for_a_member_who_follows_neither_party(db, posts, stranger):
+    """The replier is not in the reader's feed, so their replay is not either."""
+    assert _replay_rows_of(stranger, posts["public"]) == []
+
+
+@pytest.mark.django_db
+def test_the_replay_row_is_suppressed_when_the_reader_already_sees_the_original(
+    db, posts, author, replier
+):
+    """D3. Replaying a post does not resurface it for someone who already has it.
+
+    The reader follows both parties, which is the only way to make the dedupe the
+    thing under test: with the author outside their feed the row would be absent
+    for an entirely different reason.
+    """
+    both = member(localname="both", password=PASSWORD)
+    both.follows.add(author, replier)
+    entries = [entry for entry in _feed(both) if entry.status_id == posts["public"].pk]
+    # The post must be in the feed once, as itself, and not twice with the replay
+    # row riding beside it.
+    assert len(entries) == 1
+    assert entries[0].replayed_by is None
+
+
+@pytest.mark.django_db
+def test_only_the_newest_replay_of_one_post_shows(db, posts, replier, stranger):
+    """D3's second half, pinned from both directions.
+
+    The ages are set explicitly and then swapped, so the answer cannot be an
+    accident of which row was created first: the replay's own date decides.
+    """
+    reader = member(localname="reader", password=PASSWORD)
+    reader.follows.add(replier, stranger)
+    toggle_replay(stranger, posts["public"])
+    now = timezone.now()
+
+    def age(days: int) -> None:
+        Replay.objects.filter(user=replier).update(
+            published_date=now + timedelta(days=days)
+        )
+
+    age(-3)
+    rows = _replay_rows_of(reader, posts["public"])
+    assert len(rows) == 1, "two members replayed one post and the reader got two rows"
+    assert rows[0].source_id == Replay.objects.get(user=stranger).pk
+
+    age(3)  # the replier's replay is now the newer of the two
+    rows = _replay_rows_of(reader, posts["public"])
+    assert len(rows) == 1
+    assert rows[0].source_id == Replay.objects.get(user=replier).pk
+
+
+@pytest.mark.django_db
+def test_a_blocked_original_author_takes_the_replay_row_away(
+    db, posts, replier, author
+):
+    """The clause §5 names as one of the two places a replay can smuggle a post
+    past a filter that already hides it.
+
+    It is **not** redundant with feed membership: membership subtracts the blocked
+    author from the *follow* set, and here the reader never followed the author in
+    the first place - that is precisely what makes it a replay row. Without the
+    clause the reader is handed a blocked member's post wrapped in a name they
+    follow.
+    """
+    reader = member(localname="reader", password=PASSWORD)
+    reader.follows.add(replier)
+    assert len(_replay_rows_of(reader, posts["public"])) == 1
+    reader.blocks.add(author)
+    assert _replay_rows_of(reader, posts["public"]) == []
+
+
+@pytest.mark.django_db
+def test_a_suspended_repliers_row_shows_nowhere(db, posts, suspended_replier):
+    """D9: the row stays in the table and renders nowhere, and unsuspending
+    restores it because nothing was deleted to hide it."""
+    reader = member(localname="reader", password=PASSWORD)
+    reader.follows.add(suspended_replier)
+    assert _replay_rows_of(reader, posts["public"]) == []
+    suspended_replier.unsuspend()
+    suspended_replier.refresh_from_db()
+    assert len(_replay_rows_of(reader, posts["public"])) == 1
+
+
+@pytest.mark.django_db
+def test_a_replay_never_carries_an_audience_the_original_does_not(
+    db, posts, author, replier, admirer
+):
+    """The clause §5 asks to be mutation-checked, and why it is pinned at the query.
+
+    A replay inherits the original's audience, so a replay of a followers-only post
+    must reach the author's followers and nobody else. Through ``feed_entries``
+    that is invisible, and the reason is worth writing down because it reads like a
+    gap: everyone entitled to a followers-only original already has that post in
+    their own feed, so D3 drops the row for every one of them. The eligibility rule
+    is therefore pinned where it is implemented, with the dedupe emptied by hand.
+
+    It is written so that replacing ``audience_q`` with a literal
+    ``visibility="public"`` filter goes red: that clause answers "no" for the
+    entitled reader below, and that cell is the one which tells the two apart.
+    """
+    Replay.objects.create(user=replier, status=posts["followers"])
+    entitled = member(localname="entitled", password=PASSWORD)
+    entitled.follows.add(author, replier)
+    # Both of the replier's replays are eligible here: the public one on its own
+    # terms and the followers one because this reader follows its author. The
+    # second is the cell a literal ``visibility="public"`` clause would drop.
+    assert {entry.status_id for entry in _eligibility(entitled)} == {
+        posts["public"].pk,
+        posts["followers"].pk,
+    }
+    # A member who follows the replier and not the author is not entitled to the
+    # followers row, and still gets the public original's replay.
+    assert {entry.status_id for entry in _eligibility(admirer)} == {posts["public"].pk}
+
+
+@pytest.mark.django_db
+def test_a_replay_row_pages_by_the_replay_and_prints_the_original(
+    db, posts, replier, admirer, keeper, films, admin
+):
+    """D11, pinned both ways on purpose: it prints the older date and pages as
+    though it were new.
+
+    The trap has no other symptom. If the template reads ``entry.date``, a review
+    written a hundred days ago claims it was written today and nothing else in the
+    app notices - so both halves are asserted on one row, and the paging half is a
+    real cursor round trip rather than a read of ``sort_key``.
+    """
+    original = posts["public"]
+    now = timezone.now()
+    written = now - timedelta(days=100)
+    Status.objects.filter(pk=original.pk).update(published_date=written)
+    kept = Status.objects.create(
+        user=keeper,
+        film=films[1],
+        status_type=Status.Type.REVIEW,
+        content="<p>In between.</p>",
+        rating=3,
+        visibility=Visibility.PUBLIC,
+        published_date=now - timedelta(days=50),
+    )
+    admirer.follows.add(keeper)
+
+    entries = _feed(admirer)
+    assert entries[0].replayed_by is not None, "the row is not at the replay's date"
+    assert entries[0].display_date.date() == written.date()
+    assert entries[0].date.date() == now.date()
+    assert entries[-1].status_id == kept.pk
+
+    # And the cursor it mints continues from where the replay sits, not from the
+    # date printed on the row.
+    page, cursor = feed_entries(admirer, limit=1)
+    assert page[0].replayed_by is not None and cursor is not None
+    older, _ = feed_entries(admirer, cursor=cursor)
+    assert [entry.replayed_by for entry in older] == [None]
+
+    # The printed line, on the rendered page.
+    row = _row_markup("admirer", original.pk)
+    assert written.strftime("%Y-%m-%d") in row
+    assert now.strftime("%Y-%m-%d") not in row
+
+
+@pytest.mark.django_db
+def test_the_byline_is_the_heads_first_child_and_names_the_replier(
+    db, posts, replier, admirer, admin
+):
+    """The rendered byline, and the row's own control pointing at the original."""
+    original = posts["public"]
+    row = _row_markup("admirer", original.pk)
+    assert '<p class="replay-line replay-line--flush">' in row
+    assert row.index('class="replay-line') < row.index('class="avatar')
+    assert f'href="/user/{replier.localname}/"' in row
+    assert "replayed</p>" in row
+    # The row opens the original and its replay control replays the original:
+    # there is no replay of a replay here.
+    assert f'data-url="/status/{original.pk}/replay/"' in row
+
+
+@pytest.mark.django_db
+def test_the_scroll_fragment_carries_the_replay_row_and_its_cursor(
+    db, posts, replier, admirer, admin
+):
+    """The endless scroll appends rows from ``/feed/page/``, so a replay row has
+    to survive that trip: the same byline, a button with a route behind it, and the
+    ``data-cursor`` the scroll reads its next request off.
+
+    The JS half is already pinned in ``test_feed_endless_scroll.py`` — one
+    delegated listener whose selector names ``.replay-btn`` matches any element in
+    the document, appended or not — so what is pinned here is that the fragment
+    hands that listener something to match and the scroll something to page by.
+    """
+    client = Client()
+    assert client.login(username="admirer", password=PASSWORD)
+    original = posts["public"]
+    fragment = client.get("/feed/page/").content.decode()
+    row = _row_in(fragment, original.pk)
+    assert '<p class="replay-line replay-line--flush">' in row
+    assert f'data-url="/status/{original.pk}/replay/"' in row
+    assert 'data-cursor="' in row

@@ -154,6 +154,17 @@ def _row_gaps_named(selector: str) -> list[str]:
     return gaps
 
 
+def _declaration_of(selector: str, property_name: str) -> str:
+    """One property's value in ``selector``'s rule, "" when the rule omits it.
+
+    For the pins that are about a value *not* being somewhere: an assertion that a
+    rule sets no ``row-gap`` cannot be written against ``_css_rule``, which returns
+    the whole declaration block and would let the reader eyeball it.
+    """
+    match = re.search(rf"{property_name}:\s*([^;]+)", _css_rule(selector), flags=re.S)
+    return match.group(1).strip() if match else ""
+
+
 # --- The rendered row --------------------------------------------------------
 
 
@@ -284,3 +295,71 @@ def test_the_poster_is_dropped_onto_the_title_first_line():
     assert dropped, "nothing drops the poster onto the title's first line"
     title = [d for s, d in _css_rules() if s == [".feed .feed-item .feed-film"]]
     assert not [d for d in title if "top: -5px" in d], "the type is being lifted"
+
+
+# --- The replay byline, a third line the head carries (replay arc P3) --------
+
+
+def test_the_replay_line_buys_its_own_space_and_never_the_heads_gap():
+    # The byline is the one head child that needs room under it, and the head's
+    # row-gap is pinned to zero by the test above -- measured to zero by the owner
+    # because anything looser made the row read as two stacked rows. So the line
+    # carries its own margin-bottom and may not reach for the shared gap: the
+    # moment it does, the name-to-metadata gap opens again as a side effect.
+    line = ".feed .review-head > .replay-line"
+    rule = _css_rule(line)
+    assert "flex-basis: 100%" in rule, "the byline does not force its own line"
+    assert "margin: 0 0 var(--replay-line-gap)" in rule
+    head = ".feed .review-head:has(> .replay-line)"
+    gap = _declaration_of(head, "row-gap")
+    assert gap == "", "the byline is buying its space from the head's row-gap"
+    assert set(_row_gaps_named(".feed .review-head")) == {"0"}
+
+
+def test_the_avatars_drop_is_derived_from_the_line_and_not_retyped():
+    # The avatar belongs to the post, so it drops by the height of the line above
+    # it. That offset must be arithmetic on the two tokens and not a second copy
+    # of their sum: retyping 18px + 20px + 8px as 46px is the drift the phone-bar
+    # pass just cleaned out of the bottom nav, and it goes wrong silently the first
+    # time anyone edits a token.
+    tokens = _css_rule(".feed .review-head:has(> .replay-line)")
+    assert "--replay-line-h: 20px" in tokens
+    assert "--replay-line-gap: 8px" in tokens
+    top = _declaration_of(".feed .review-head:has(> .replay-line) .avatar-row", "top")
+    assert top.startswith("calc("), f"the avatar offset must be derived: {top!r}"
+    assert "var(--replay-line-h)" in top and "var(--replay-line-gap)" in top
+
+
+def test_the_replay_line_is_pulled_left_over_the_avatar_gutter():
+    # The owner's pick from the mock (variant D): the line starts on the avatar's
+    # own edge, not on the text column's. The row's left padding is 76px and the
+    # avatar sits 16px inside it, so the pull is the difference -- and the number
+    # is that arithmetic, not a taste value.
+    assert "margin-left: -60px" in _css_rule(".feed .review-head > .replay-line--flush")
+    line_color = _declaration_of(".feed .review-head > .replay-line", "color")
+    assert line_color == "var(--cream-muted)"
+
+
+def test_the_phone_measure_gets_its_own_pull_and_its_own_top():
+    # The pull and the avatar's drop are arithmetic on the row's own padding and
+    # the avatar's own inset, and both change at the phone breakpoint: 62px of
+    # padding with the avatar 12px in, against the wide layout's 76px and 16px.
+    # Carrying the wide numbers into the phone overshoots -- measured at 390 the
+    # line landed 10px past the avatar, against the card border, and the avatar
+    # hung 2px below the name it belongs to. The phone gets its own two numbers and
+    # still derives the avatar from the same two tokens, so one edit cannot leave
+    # the two measures disagreeing.
+    #
+    # The breakpoint is 599px because the sheet gives 600px itself to the wide
+    # layout (``min-width: 600px`` wins there); this follows that, it does not
+    # argue with it.
+    flush = _css_rule_under_media(
+        "max-width: 599px", ".feed .review-head > .replay-line--flush"
+    )
+    assert "margin-left: -50px" in flush, "the phone is wearing the wide pull"
+    avatar = _css_rule_under_media(
+        "max-width: 599px", ".feed .review-head:has(> .replay-line) .avatar-row"
+    )
+    assert "calc(16px + var(--replay-line-h) + var(--replay-line-gap))" in avatar, (
+        "the phone avatar is not derived from this measure's own padding"
+    )
