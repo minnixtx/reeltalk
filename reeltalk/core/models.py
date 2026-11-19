@@ -759,6 +759,143 @@ def liked_ids(user, status_ids: list[int]) -> set[int]:
     )
 
 
+class Replay(models.Model):
+    """A member's replay of someone else's post — the local twin of a boost.
+
+    Shaped exactly like :class:`Like` above, on purpose. One row per
+    (user, status) is the whole model of the feature: binary, no reaction
+    types, no denormalised count column. The pair is also the natural inbound
+    dedup key — a redelivered remote ``Announce`` lands on the same pair, so
+    the constraint that enforces the binary rule is the same thing that stops a
+    duplicate from double-counting.
+
+    **A replay is not a post.** It carries no content, no film and no audience
+    of its own; it borrows the original's, including the original's
+    visibility (D2 — the deliberate departure from Mastodon, which gives a
+    boost the booster's own default privacy). That single inheritance is the
+    leak the design closes: a replay can never widen who is allowed to read a
+    review, because every read path filters the *original* and the replay row
+    rides along underneath it rather than opening a second door beside it.
+
+    **D9, stated here so nobody "repairs" it.** A soft-deleted original leaves
+    its replay rows in place and nothing renders them, and that is not a bug
+    waiting to be fixed. The delete path is the original's own; a second
+    cascade that cleared interaction rows would be a second delete ordering to
+    get wrong for no visible gain. The same answer holds for a suspended
+    replier — the row stays, the tally and the feeds drop it, and unsuspending
+    restores it exactly because nothing was deleted to hide it.
+
+    Day-one AP identity discipline (R41/R42), the same as ``Like``: a replay
+    written by a local member mints ``origin_id`` = its own pk, so the
+    outbound ``Announce`` has a stable identity to be built from and the table
+    is not re-shaped when the wire arrives. Un-replaying deletes the row, so a
+    re-replay mints a new pk and a new ``origin_id`` — which is what keeps it
+    from looking like a redelivery of the first one.
+    """
+
+    user = models.ForeignKey(
+        "social.User", on_delete=models.CASCADE, related_name="replays"
+    )
+    status = models.ForeignKey(Status, on_delete=models.CASCADE, related_name="replays")
+    published_date = models.DateTimeField(default=timezone.now, db_index=True)
+    # ActivityPub origin identity (R41): a local replay's origin is its own pk.
+    origin_id = models.PositiveBigIntegerField(null=True, blank=True)
+
+    class Meta:
+        # The feed orders a replay row by the replay's own date (D11), so the
+        # default ordering is what pages it, not a cosmetic default.
+        ordering = ["-published_date"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "status"], name="unique_replay_per_user_per_status"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user.localname} replays {self.status}"
+
+    def save(self, *args, **kwargs):
+        creating = self.pk is None
+        super().save(*args, **kwargs)
+        if creating and self.user.local and not self.origin_id:
+            # Day-one origin identity (R41), same shape as Status.save: the
+            # pk is the origin id, written after the insert needs it.
+            Replay.objects.filter(pk=self.pk).update(origin_id=self.pk)
+            self.origin_id = self.pk
+
+
+def toggle_replay(user, status: Status) -> bool:
+    """Replay ``status`` for ``user``, or take the replay back if already replayed.
+
+    Delete-first, exactly as :func:`toggle_like`: the row's existence is the
+    state, so removing it is the whole "off" transition and there is nothing to
+    update in place. The create side is guarded against a double-click — if a
+    concurrent request won the race, the unique constraint fires and we report
+    the state that was asked for rather than failing the request. The inner
+    ``atomic`` is a savepoint, so catching the error leaves the rest of the
+    request usable.
+
+    This function answers *can the row be written*, not *may it*. The audience
+    rule lives in :func:`may_replay` and its caller refuses before getting here,
+    so a route that forgot the gate writes a row that no feed will render rather
+    than one that leaks a post.
+    """
+    if Replay.objects.filter(user=user, status=status).delete()[0]:
+        return False
+    try:
+        with transaction.atomic():
+            Replay.objects.create(user=user, status=status)
+    except IntegrityError:
+        pass
+    return True
+
+
+def replay_counts(status_ids: list[int]) -> dict[int, int]:
+    """How many replays each of ``status_ids`` carries, in one grouped query.
+
+    The same three properties ``like_counts`` documents, and for the same
+    reasons. A feed page hands back a Python list rather than a queryset, so a
+    per-row count would be one query per row; one ``GROUP BY`` answers them all
+    and each row looks its own up by id. The tally is viewer-independent — one
+    reader's personal block list must not leak into another viewer's number.
+    Suspension is excluded, and does not dent that: it is one server-wide fact
+    rather than a per-viewer one, so every viewer still sees the same number,
+    and unsuspending restores the tally exactly because nothing was deleted to
+    hide it.
+
+    A status with no replays is absent from the result rather than present with a
+    zero, so callers read ``.get(pk, 0)``.
+    """
+    if not status_ids:
+        return {}
+    rows = (
+        Replay.objects.filter(status_id__in=status_ids, user__suspended_at__isnull=True)
+        .values("status_id")
+        .annotate(n=Count("id"))
+    )
+    return {row["status_id"]: row["n"] for row in rows}
+
+
+def replayed_ids(user, status_ids: list[int]) -> set[int]:
+    """Which of ``status_ids`` ``user`` has replayed, in one query.
+
+    The control needs the viewer's own state so a reloaded page draws the button
+    as it actually stands — a button labelled "Replay" that would actually take
+    a replay back is the same class of lie as one that no-ops.
+
+    Carries no suspension clause, for the same reason ``liked_ids`` doesn't: this
+    is one member asking about their own rows, and applying suspension here as
+    well as in the tally would be a second place for the two to disagree.
+    """
+    if not user.is_authenticated or not status_ids:
+        return set()
+    return set(
+        Replay.objects.filter(user=user, status_id__in=status_ids).values_list(
+            "status_id", flat=True
+        )
+    )
+
+
 def add_reply(user, parent: Status, *, content: str, raw_content: str) -> Status:
     """Reply to ``parent`` (feed interactions increment 4, R83 decision 2).
 
@@ -1406,6 +1543,49 @@ def may_read(status, viewer) -> bool:
     return status.visibility == Visibility.FOLLOWERS and (
         status.user_id in viewer.feed_member_ids()
     )
+
+
+def may_replay(user, status) -> bool:
+    """Whether ``user`` may replay ``status`` — the single home of the rule (D2).
+
+    The instance twin of :func:`may_read`, placed beside it because it exists for
+    the same reason: the route and the template both ask this one question (R85's
+    "offer without route" rule), and two answers to it is how a leak comes back
+    after the sweep that closed it.
+
+    Four clauses, and the deliberate absences matter as much as the presences:
+
+    * **not authenticated** — False. A replay is an act by a member, and an
+      anonymous reader gets a count and no control.
+    * **your own post** — False (D2b). The one place this feature does not follow
+      Mastodon: boosting your own review to the people who already follow you
+      tells them nothing, and the control is withheld from it too.
+    * **not public** — False (D2). A replay inherits the original's audience, so
+      a replay of a followers-only post would put it in front of the *replier's*
+      followers, who were never addressed by it. Public is the only audience
+      that carries.
+    * **a suspended or banned author** — False. The original renders nowhere, so
+      a replay of it could only ever accumulate an interaction nobody will see
+      the reason for — the same reason the like route 404s (R85).
+
+    It checks **no block clause**, and that is a ruling rather than an omission:
+    ``may_read`` has none either. Blocks live in the scopes
+    (``public_status_scope``, ``feed_for``), and a gate that invents its own
+    block rule is a second place for the block model to drift out of agreement
+    with the first. Where a block does bite a replay is the feed query, which
+    excludes the blocked author's originals explicitly.
+
+    A machine reader is not a ``viewer`` in here, exactly as in ``may_read``: an
+    unauthenticated request cannot say who is asking, and this answers False.
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if status.user_id == user.pk:
+        return False
+    if status.visibility != Visibility.PUBLIC:
+        return False
+    author = status.user
+    return author.suspended_at is None and author.banned_at is None
 
 
 def readable_statuses(viewer):
