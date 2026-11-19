@@ -44,11 +44,14 @@ from django.contrib.auth import get_user_model
 from django.db import connection
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 
 from reeltalk.core.models import (
     REPLY_THREAD_MAX_DEPTH,
     Film,
+    Replay,
     Status,
+    Visibility,
     add_reply,
     conversation,
     mark_watched,
@@ -56,6 +59,7 @@ from reeltalk.core.models import (
     reply_counts,
     shelve_to_watchlist,
 )
+from reeltalk.notifications.models import Notification
 from reeltalk.tests.feed import unpaged
 from reeltalk.tests.members import member, site_admin
 
@@ -843,9 +847,188 @@ def test_the_reply_control_sits_after_the_applaud_control(alice, bob, dune, admi
 
 
 @pytest.mark.django_db
+def test_the_replay_control_sits_before_the_applaud_control(alice, bob, dune, admin):
+    # The sibling of the pin above, from replay arc P2 (owner ruling D5): the
+    # replay control opens the action row, ahead of the applaud control it
+    # copies. Pinned by index for the same reason — a reorder in the partial has
+    # to fail a test and not just a screenshot review.
+    alice.follows.add(bob)
+    parent = _review(bob, dune)
+    row = _row(_home(_login("alice")), parent.pk)
+    assert row.index('class="replay-btn"') < row.index('class="applaud-btn"')
+
+
+@pytest.mark.django_db
 def test_a_bare_shelf_row_carries_no_reply_control(alice, dune, admin):
     shelve_to_watchlist(alice, dune)
     body = _home(_login("alice"))
     row = _row(body, "none")
     assert "to their Watchlist" in row  # the row rendered…
     assert "reply" not in row  # …and carries no reply control at all
+
+
+# --- The replay endpoint (replay arc P2) -------------------------------------
+#
+# The like-route shape, one feature over: the same URL toggles, the answer
+# carries both the caller's own state and the new total, and the refusals are
+# exactly the ones the page's own gate makes (R85). The gate itself — who may
+# replay what — is answered for every viewer class in
+# ``test_replay_read_paths.py``; what is pinned here is that the route enforces
+# that answer and that the ledger row lands once.
+
+
+@pytest.mark.django_db
+def test_replay_endpoint_requires_login(dune):
+    parent = _review(member(localname="zed", password="s3cretpass"), dune)
+    response = Client().post(f"/status/{parent.pk}/replay/")
+    assert response.status_code == 302
+    assert "/login/" in response.url
+
+
+@pytest.mark.django_db
+def test_replay_endpoint_is_post_only(alice, bob, dune):
+    parent = _review(alice, dune)
+    assert _login("bob").get(f"/status/{parent.pk}/replay/").status_code == 405
+
+
+@pytest.mark.django_db
+def test_replay_endpoint_needs_a_csrf_token(alice, bob, dune):
+    parent = _review(alice, dune)
+    client = Client(enforce_csrf_checks=True)
+    assert client.login(username="bob", password="s3cretpass")
+    assert client.post(f"/status/{parent.pk}/replay/").status_code == 403
+
+
+@pytest.mark.django_db
+def test_replay_endpoint_toggles_and_answers_json(alice, bob, dune):
+    # Both facts in one answer, so the button and the tally cannot drift apart
+    # the way a client-side increment would allow.
+    parent = _review(alice, dune)
+    client = _login("bob")
+    first = client.post(f"/status/{parent.pk}/replay/")
+    assert first["Content-Type"] == "application/json"
+    assert json.loads(first.content) == {"replayed": True, "count": 1}
+    assert Replay.objects.filter(user=bob, status=parent).exists()
+    second = client.post(f"/status/{parent.pk}/replay/")
+    assert json.loads(second.content) == {"replayed": False, "count": 0}
+    assert not Replay.objects.filter(user=bob, status=parent).exists()
+
+
+@pytest.mark.django_db
+def test_replay_endpoint_reports_the_total_not_just_the_callers_state(alice, bob, dune):
+    carol = member(localname="carol", password="s3cretpass")
+    parent = _review(alice, dune)
+    Replay.objects.create(user=carol, status=parent)
+    body = json.loads(_login("bob").post(f"/status/{parent.pk}/replay/").content)
+    assert body == {"replayed": True, "count": 2}
+
+
+@pytest.mark.django_db
+def test_replay_endpoint_404s_for_a_deleted_status(alice, bob, dune):
+    parent = _review(alice, dune)
+    parent.delete()
+    assert _login("bob").post(f"/status/{parent.pk}/replay/").status_code == 404
+
+
+@pytest.mark.django_db
+def test_replay_endpoint_404s_for_an_unknown_id(bob):
+    assert _login("bob").post("/status/999999/replay/").status_code == 404
+
+
+@pytest.mark.django_db
+def test_replay_endpoint_refuses_your_own_post(alice, dune):
+    # D2b, the one place this feature does not follow Mastodon. The control is
+    # withheld from your own posts, so a route that accepted one would be the
+    # offer-without-the-route bug in reverse: a write the page never offered.
+    parent = _review(alice, dune)
+    assert _login("alice").post(f"/status/{parent.pk}/replay/").status_code == 404
+    assert not Replay.objects.filter(user=alice, status=parent).exists()
+
+
+@pytest.mark.django_db
+def test_replay_endpoint_refuses_a_followers_only_original(alice, bob, dune):
+    # D2, the clause the whole design is about. A replay inherits the original's
+    # audience, so a replay of a followers-only post would put it in front of
+    # the replier's followers, who were never addressed by it. Alice follows
+    # Bob, so she can READ this post — and may still not replay it.
+    bob.follows.add(alice)
+    parent = Status.objects.create(
+        user=alice,
+        film=dune,
+        status_type=Status.Type.REVIEW,
+        content="<p>Narrow.</p>",
+        raw_content="Narrow.",
+        visibility=Visibility.FOLLOWERS,
+    )
+    assert _login("bob").post(f"/status/{parent.pk}/replay/").status_code == 404
+    assert not Replay.objects.filter(user=bob, status=parent).exists()
+
+
+@pytest.mark.django_db
+def test_replay_endpoint_refuses_a_suspended_author(alice, bob, dune):
+    parent = _review(alice, dune)
+    User.objects.filter(pk=alice.pk).update(suspended_at=timezone.now())
+    assert _login("bob").post(f"/status/{parent.pk}/replay/").status_code == 404
+    assert not Replay.objects.filter(user=bob, status=parent).exists()
+
+
+@pytest.mark.django_db
+def test_replaying_notifies_the_original_author_once_and_not_twice(alice, bob, dune):
+    # The producer fires on the row being created, never on the toggle
+    # generally: taking a replay back is not a second "replayed this" for the
+    # ledger, and a second click must not add a row either.
+    parent = _review(alice, dune)
+    client = _login("bob")
+    client.post(f"/status/{parent.pk}/replay/")
+    assert (
+        Notification.objects.filter(
+            recipient=alice, actor=bob, kind=Notification.Kind.REPLAY
+        ).count()
+        == 1
+    )
+    client.post(f"/status/{parent.pk}/replay/")
+    assert (
+        Notification.objects.filter(
+            recipient=alice, actor=bob, kind=Notification.Kind.REPLAY
+        ).count()
+        == 1
+    )
+
+
+@pytest.mark.django_db
+def test_the_feed_row_offers_the_replay_control_to_a_follower(alice, bob, dune, admin):
+    # The page and the route agree from one gate (R85): a member who may replay
+    # the row is handed a live button carrying the route's own URL.
+    parent = _review(alice, dune)
+    bob.follows.add(alice)
+    row = _row(_home(_login("bob")), parent.pk)
+    assert f'data-url="/status/{parent.pk}/replay/"' in row
+    assert 'data-state="idle"' in row
+    assert '<span class="replay-count" aria-live="polite">0</span>' in row
+
+
+@pytest.mark.django_db
+def test_the_feed_row_withholds_the_replay_control_from_your_own_post(
+    alice, dune, admin
+):
+    # D2b on the render side. The row is interactive — it carries an applaud
+    # button — and still carries no replay button, which is why the control is
+    # gated on ``replayable`` and not on ``interactive``.
+    parent = _review(alice, dune)
+    row = _row(_home(_login("alice")), parent.pk)
+    assert 'class="applaud-btn"' in row
+    assert 'class="replay-btn"' not in row
+
+
+@pytest.mark.django_db
+def test_the_feed_row_shows_a_replay_tally_and_a_mine_state(alice, bob, dune, admin):
+    # The tally is everyone's and the ink is the reader's (D4), so a replay by
+    # someone else moves the number and not the button, and the reader's own
+    # moves both.
+    parent = _review(alice, dune)
+    bob.follows.add(alice)
+    Replay.objects.create(user=bob, status=parent)
+    row = _row(_home(_login("bob")), parent.pk)
+    assert 'data-state="mine"' in row
+    assert 'aria-pressed="true"' in row
+    assert '<span class="replay-count" aria-live="polite">1</span>' in row

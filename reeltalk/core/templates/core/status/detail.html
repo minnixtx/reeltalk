@@ -53,6 +53,15 @@
     {% if not user.is_authenticated and like_count %}
       <span class="muted">Applauded {{ like_count }} time{{ like_count|pluralize }}</span>
     {% endif %}
+    {% comment %}
+    The replay tally for the same kind of reader (replay arc P2). The rule is
+    the applaud one directly above and for the same reason: a count is a fact
+    about the post, so an anonymous visitor keeps it, while the button that
+    would change it stays behind the login its route is behind.
+    {% endcomment %}
+    {% if not user.is_authenticated and replay_count %}
+      <span class="muted">Replayed {{ replay_count }} time{{ replay_count|pluralize }}</span>
+    {% endif %}
   </div>
   <hr class="post-rule">
   {% if status.content %}<div class="review-body">{{ status.content|safe }}</div>{% endif %}
@@ -99,6 +108,21 @@
   {% endcomment %}
   {% if user.is_authenticated %}
     <div class="row-actions">
+      {% comment %}
+      The replay control (replay arc P2, owner ruling D5), first in the row and
+      before the applaud control, matching the feed row. Gated on ``replayable``,
+      which is ``may_replay`` asked of this post in the view — the same function
+      the route refuses with, so the page withholds exactly what the route
+      refuses (R85): your own post (D2b) and any post that is not public (D2).
+      The applaud control beside it has no such gate because a like has no such
+      rule; the two controls share a row, not a predicate.
+      {% endcomment %}
+      {% if replayable %}
+        <span class="replay">
+          <button type="button" class="replay-btn" data-url="{% url 'status-replay' status.id %}" data-state="{% if replayed_by_viewer %}mine{% else %}idle{% endif %}" aria-pressed="{% if replayed_by_viewer %}true{% else %}false{% endif %}" title="{% if replayed_by_viewer %}Replayed — click to remove{% else %}Replay{% endif %}" aria-label="{% if replayed_by_viewer %}Replayed — click to remove{% else %}Replay{% endif %}"></button>
+          <span class="replay-count" aria-live="polite">{{ replay_count }}</span>
+        </span>
+      {% endif %}
       <span class="applaud">
         <button type="button" class="applaud-btn" data-url="{% url 'status-like' status.id %}" data-state="{% if liked_by_viewer %}mine{% else %}idle{% endif %}" aria-pressed="{% if liked_by_viewer %}true{% else %}false{% endif %}" title="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
         <span class="applaud-count" aria-live="polite">{{ like_count }}</span>

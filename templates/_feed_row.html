@@ -134,6 +134,31 @@ a second channel to say so.
       control rather than standing alone: a bare number beside where a button
       would be invites the click that is not there.
       {% endcomment %}
+      {% comment %}
+      The replay control (replay arc P2, owner ruling D5), first in the action
+      row and before the applaud control.
+
+      It is gated on ``entry.replayable`` and NOT on ``entry.interactive``, which
+      is the shape the applaud span above uses. That is the narrower R84 flag
+      again, and the reason is D2b: a row you wrote yourself is interactive, but
+      its replay route 404s, so gating on ``interactive`` would paint a button on
+      your own post that the route refuses — R85's offer-without-the-route, and
+      the one thing this feature rules out hardest. ``replayable`` is
+      ``may_replay`` asked of the row, which is the same function the route
+      refuses with, so the page withholds exactly what the route refuses rather
+      than keeping a second copy of D2 and D2b in template tags.
+
+      The count is a SIBLING of the button for the reason the applaud count
+      gives: clicking a number must not toggle anything. And the count renders
+      whatever the reader's own state is, because a tally is a fact about the
+      post and only the offer to act on it is gated (R85).
+      {% endcomment %}
+      {% if entry.replayable %}
+        <span class="replay">
+          <button type="button" class="replay-btn" data-url="{% url 'status-replay' entry.status_id %}" data-state="{% if entry.replayed_by_viewer %}mine{% else %}idle{% endif %}" aria-pressed="{% if entry.replayed_by_viewer %}true{% else %}false{% endif %}" title="{% if entry.replayed_by_viewer %}Replayed — click to remove{% else %}Replay{% endif %}" aria-label="{% if entry.replayed_by_viewer %}Replayed — click to remove{% else %}Replay{% endif %}"></button>
+          <span class="replay-count" aria-live="polite">{{ entry.replay_count }}</span>
+        </span>
+      {% endif %}
       {% if entry.interactive %}
         <span class="applaud">
           <button type="button" class="applaud-btn" data-url="{% url 'status-like' entry.status_id %}" data-state="{% if entry.liked_by_viewer %}mine{% else %}idle{% endif %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}" title="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>

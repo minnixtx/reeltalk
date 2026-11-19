@@ -42,6 +42,15 @@ class Notification(models.Model):
     would be a censorship primitive on the moderation queue, so the staff path
     computes its own permission-derived recipients and writes these rows
     directly. The guard's whole argument survives the amendment intact.
+
+    ``REPLAY`` is the sixth, and it arrives the same way — with its producer, the
+    replay route (replay arc P2, owner ruling D7). It is addressed to the
+    **original's author**, which is what makes it a new kind rather than a second
+    copy of ``LIKE``: a like tells you someone enjoyed your post and a replay
+    tells you someone sent it to their own followers, and only one of those is
+    worth reading about. The producer fires on the row being created and not on
+    the toggle generally, so taking a replay back does not leave a second ledger
+    line behind.
     """
 
     class Kind(models.TextChoices):
@@ -50,6 +59,7 @@ class Notification(models.Model):
         REPLY = "reply", "Reply"
         MENTION = "mention", "Mention"
         REPORT = "report", "Report"
+        REPLAY = "replay", "Replay"
 
     # CASCADE: a notification is addressed to a person and means nothing
     # without them. This is the one edge that decides how the table is read, so

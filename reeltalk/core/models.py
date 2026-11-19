@@ -11,7 +11,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -1209,6 +1209,20 @@ class FeedEntry:
     applause control already makes between ``like_count`` and
     ``liked_by_viewer``.
 
+    The replay trio copies that split a third time. ``replay_count`` is how many
+    members replayed the row's status, ``replayed_by_viewer`` whether the reader
+    did, and ``replayable`` whether the row may offer the control at all — the
+    narrow R84 flag for the replay rule (D2: public originals only, never your
+    own), stated in Python next to the viewer rather than guessed in the
+    template, because a button on a post whose route 404s is the
+    offer-without-the-route bug R85 is written against. All three are filled by
+    :func:`_attach_interaction_counts`, which is where the viewer is in hand.
+
+    ``replayed_by`` is unused until P3 grows the Following-feed replay row: it
+    names the member who replayed, as distinct from ``user``, who is the
+    original's author and owns the row's name line, stars, film and prose. It
+    lands now so the row that needs it is a fill and not a re-shape.
+
     ``is_list_face`` marks the row as standing for a list's post face
     (§2K increment 4). It is set from ``status_type == LIST`` in
     :func:`feed_entries`, where the ``Status`` is actually in hand — never
@@ -1248,6 +1262,10 @@ class FeedEntry:
     liked_by_viewer: bool = False
     reply_count: int = 0
     replied_by_viewer: bool = False
+    replay_count: int = 0
+    replayed_by_viewer: bool = False
+    replayable: bool = False
+    replayed_by: Optional["User"] = None
     is_list_face: bool = False
     list_strip: ListStrip | None = None
     # Who the row was addressed to (visibility V1), for the marker the template
@@ -1256,6 +1274,19 @@ class FeedEntry:
     # its author's feed. Defaults to public so a row built without it - a shelf
     # event with nothing behind it - draws nothing.
     visibility: str = "public"
+
+    @property
+    def user_id(self) -> int:
+        """The row author's pk, spelled the way ``Status`` spells it.
+
+        So a ``FeedEntry`` satisfies the little interface :func:`may_replay`
+        reads — ``user_id``, ``user``, ``visibility`` — and the feed row and the
+        route can therefore ask **one** function the same question instead of
+        keeping a second copy of D2's four clauses for templates. That
+        duplication is the whole failure mode R85 is written against: two answers
+        to "may this member replay this post" is one too many.
+        """
+        return self.user.pk
 
     @property
     def audience_label(self) -> str:
@@ -1438,24 +1469,37 @@ def _status_entry(status: "Status") -> "FeedEntry":
 
 
 def _attach_interaction_counts(entries: list["FeedEntry"], user) -> None:
-    """Like state and reply tallies for a batch of rows, in a fixed query count.
+    """Like, replay and reply state for a batch of rows, in a fixed query count.
 
-    One grouped like count, one like-membership query, one grouped reply count,
-    one reply-membership query, whatever the batch holds. Rows without a status
-    have nothing to interact with and keep their defaults. ``user=None`` (an
-    anonymous reader) gets nobody's like state — :func:`liked_ids` answers the
-    empty set — while the counts stay honest, since a count is a fact about the
-    post and only the offer to act on it is gated (R85).
+    One grouped like count, one like-membership query, one grouped replay count,
+    one replay-membership query, one grouped reply count, one reply-membership
+    query, whatever the batch holds. Rows without a status have nothing to
+    interact with and keep their defaults. ``user=None`` (an anonymous reader)
+    gets nobody's like state — :func:`liked_ids` answers the empty set — while
+    the counts stay honest, since a count is a fact about the post and only the
+    offer to act on it is gated (R85).
+
+    ``replayable`` is answered here rather than in the template because it is the
+    one replay fact that needs the viewer, and it is answered by
+    :func:`may_replay` — the same function the route refuses with — so the page
+    withholds exactly what the route refuses (R85) instead of re-deriving D2 and
+    D2b a second time in template tags. It costs no query: a row already carries
+    its author object and its audience, which is all four clauses read.
     """
     status_ids = [entry.status_id for entry in entries if entry.status_id is not None]
     counts = like_counts(status_ids)
     liked = liked_ids(user, status_ids) if user is not None else set()
+    replays = replay_counts(status_ids)
+    replayed = replayed_ids(user, status_ids) if user is not None else set()
     replies = reply_counts(status_ids)
     answered = replied_ids(user, status_ids) if user is not None else set()
     for entry in entries:
         if entry.status_id is not None:
             entry.like_count = counts.get(entry.status_id, 0)
             entry.liked_by_viewer = entry.status_id in liked
+            entry.replay_count = replays.get(entry.status_id, 0)
+            entry.replayed_by_viewer = entry.status_id in replayed
+            entry.replayable = may_replay(user, entry)
             entry.reply_count = replies.get(entry.status_id, 0)
             entry.replied_by_viewer = entry.status_id in answered
 

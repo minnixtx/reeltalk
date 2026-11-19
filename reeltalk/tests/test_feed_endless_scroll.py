@@ -140,14 +140,27 @@ def test_likes_js_binds_one_delegated_listener_not_one_per_button():
     """The trap the first appended rows would have sprung: ``init()`` runs once
     at ``DOMContentLoaded``, so a listener bound per ``.applaud-btn`` there
     leaves every applaud button on a row appended later dead. Delegation is the
-    fix, and this pins it at the source."""
+    fix, and this pins it at the source.
+
+    Retargeted by replay arc P2, which added a second toggle to the same
+    listener: the selector is now ``.applaud-btn, .replay-btn``. What the pin
+    guards is unchanged and is not about the number of controls — it is that one
+    delegated listener answers every button in a row, however many kinds of
+    button those rows come to carry. A third toggle is a new entry in the
+    selector list and the table at the top of ``likes.js``, not a new listener.
+    """
     src = LIKES_JS.read_text()
     assert 'querySelectorAll(".applaud-btn")' not in src, (
         "likes.js binds a listener per button again — applaud buttons on rows "
         "the endless scroll appends after page load would be dead"
     )
     assert 'document.addEventListener("click"' in src
-    assert 'closest(".applaud-btn")' in src
+    assert 'closest(".applaud-btn, .replay-btn")' in src
+    # One listener, whatever the number of controls: a second
+    # ``document.addEventListener("click"`` would be the shape the plan ruled
+    # out, and the one that lets a control be added to the markup and forgotten
+    # in the wire.
+    assert src.count('document.addEventListener("click"') == 1
 
 
 def test_the_scroll_js_pushes_no_urls():

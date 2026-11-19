@@ -41,9 +41,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CSS_PATH = REPO_ROOT / "reeltalk" / "social" / "static" / "css" / "reeltalk.css"
 IMAGES = REPO_ROOT / "reeltalk" / "social" / "static" / "images"
 
-# The four drawings this pass shipped, in the order the controls read: cream
-# hands, red hands, cream bubble, red bubble.
+# The six drawings the controls read, in the order they sit in the action row:
+# cream replay arrows, red replay arrows, cream hands, red hands, cream bubble,
+# red bubble. The replay pair arrived with replay arc P2 and is held to the same
+# five guards as the two pairs it sits beside — same derivation rule, same red,
+# same square canvas.
 DRAWINGS = (
+    "replay-icon-idle.svg",
+    "replay-icon-mine.svg",
     "applaud-icon-idle.svg",
     "applaud-icon-mine.svg",
     "reply-icon-idle.svg",
@@ -89,7 +94,7 @@ def _hexes(name: str) -> set:
     return set(re.findall(r"#[0-9a-fA-F]{6}", (IMAGES / name).read_text()))
 
 
-def test_the_four_drawings_are_on_disk():
+def test_the_six_drawings_are_on_disk():
     for name in DRAWINGS:
         assert (IMAGES / name).is_file(), f"{name} never landed in the static tree"
 
@@ -105,7 +110,7 @@ def test_each_drawing_is_parsable_svg(name):
     assert root.tag.endswith("svg"), f"{name} is not an SVG document"
 
 
-def test_the_stylesheet_points_at_all_four():
+def test_the_stylesheet_points_at_all_six():
     css = _css()
     for name in DRAWINGS:
         assert f'url("../images/{name}")' in css, f"the sheet no longer uses {name}"
@@ -119,7 +124,7 @@ def test_the_retired_drawings_are_gone_from_both():
 
 
 def test_every_image_the_stylesheet_names_exists():
-    """The general form of the guard, not just this swap's four files.
+    """The general form of the guard, not just one pass's files.
 
     A typo in a CSS ``url()`` is invisible: the page renders, the control is a
     blank box, and no test fails. Walking every image path in the sheet is what
@@ -153,6 +158,20 @@ def test_the_two_applaud_drawings_differ_only_by_colour():
     assert idle.replace(CREAM, "COLOR") == mine.replace(_link_red(), "COLOR")
 
 
+def test_the_replay_arrows_are_the_cream_one_with_only_the_fill_swapped():
+    """The third pair, derived the same way (replay arc P2).
+
+    ``replay-icon-mine.svg`` is the owner's idle drawing with the one fill
+    changed and nothing else, so a state change cannot move or resize the arrows.
+    The plan asked for ``#fc0a13`` and the file spells it upper-case, because that
+    is how the other two mine files spell the sheet's ``--link`` and this guard
+    compares the drawings to each other, not to the sheet's casing.
+    """
+    cream = (IMAGES / "replay-icon-idle.svg").read_text()
+    red = (IMAGES / "replay-icon-mine.svg").read_text()
+    assert cream.replace(CREAM, "COLOR") == red.replace(_link_red(), "COLOR")
+
+
 def test_the_idle_pair_is_cream_and_the_mine_pair_is_the_link_red():
     """A red control and a red link are one red (owner ruling, 2026-11-15).
 
@@ -160,9 +179,17 @@ def test_the_idle_pair_is_cream_and_the_mine_pair_is_the_link_red():
     drawing that picked up a second colour would render part of the control in
     it, and the state swap would stop being colour-only.
     """
-    for name in ("applaud-icon-idle.svg", "reply-icon-idle.svg"):
+    for name in (
+        "replay-icon-idle.svg",
+        "applaud-icon-idle.svg",
+        "reply-icon-idle.svg",
+    ):
         assert _hexes(name) == {CREAM}, f"{name} drifted off the cream"
-    for name in ("applaud-icon-mine.svg", "reply-icon-mine.svg"):
+    for name in (
+        "replay-icon-mine.svg",
+        "applaud-icon-mine.svg",
+        "reply-icon-mine.svg",
+    ):
         assert _hexes(name) == {_link_red()}, f"{name} drifted off --link"
 
 

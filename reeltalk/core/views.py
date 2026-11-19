@@ -55,10 +55,13 @@ from .models import (
     live_reviews,
     mark_watched,
     may_read,
+    may_replay,
     popular_genres,
+    replay_counts,
     resolve_film_id,
     shelve_to_watchlist,
     toggle_like,
+    toggle_replay,
     top_reviews,
     trending_films,
     unshelve_from_watchlist,
@@ -341,6 +344,21 @@ def status_detail(request, status_id):
             # one-object page has nothing to batch.
             "replied_by_viewer": request.user.is_authenticated
             and status.replies.filter(user=request.user, deleted=False).exists(),
+            # The replay control's state (replay arc P2). The same two facts the
+            # feed row gets from ``_attach_interaction_counts``. The tally goes
+            # through ``replay_counts`` even for this one row rather than through
+            # a hand-written ``status.replays.count()`` the way the like pair
+            # above does: that page says the suspension clause twice for no
+            # benefit, and a one-row call is what the helper's list argument is
+            # for. ``replayable`` is ``may_replay`` asked of this status, so the
+            # page withholds the control on exactly the posts the route refuses:
+            # your own (D2b) and any post that is not public (D2). The tally
+            # stays visible to everyone, anonymous included, because a count is a
+            # fact about the post and only the offer to act on it is gated (R85).
+            "replay_count": replay_counts([status.pk]).get(status.pk, 0),
+            "replayed_by_viewer": request.user.is_authenticated
+            and status.replays.filter(user=request.user).exists(),
+            "replayable": may_replay(request.user, status),
             # The report control (moderation increment 2). Both halves come
             # from one helper shared with the profile so the post page and
             # the profile cannot drift on who may report what.
@@ -528,6 +546,50 @@ def like_status(request, status_id):
             "liked": liked,
             "count": status.likes.filter(user__suspended_at__isnull=True).count(),
         }
+    )
+
+
+@login_required
+@require_POST
+def replay_status(request, status_id):
+    """Toggle the viewer's replay of a status (replay arc P2, D2/D2b/D6).
+
+    The mirror of :func:`like_status` above and deliberately the same shape: one
+    URL toggles, the answer carries the caller's own state *and* the new total so
+    one round trip cannot let the button and the tally drift apart.
+
+    The refusals are the same three, in the same order, for the same reason —
+    R85's rule that a route refuses exactly what the page withholds. The audience
+    rule (D2: public originals only) and the no-own-replay rule (D2b) are both
+    inside :func:`may_replay`, so this route and ``_feed_row.html`` refuse from
+    one answer rather than two. A suspended author 404s ahead of the gate for the
+    reason ``like_status`` spells out: a post that renders nowhere must not
+    quietly accept interactions nobody will ever see the reason for.
+
+    There is **no broadcast here**, unlike the like route. The ``Announce`` is
+    increment P5; until it lands a replay is a local fact, and sending a half
+    built one would be the one thing about this route that could not be taken
+    back.
+    """
+    status = get_object_or_404(
+        Status.objects.select_related("user"), id=status_id, deleted=False
+    )
+    if status.user.suspended_at is not None:
+        raise Http404
+    if not may_replay(request.user, status):
+        raise Http404
+    replayed = toggle_replay(request.user, status)
+    # Only the replay half of the toggle is an event: taking a replay back is
+    # not a second "replayed this" for the ledger. ``notify()`` owns the rest of
+    # who gets told, and it is what stops a self-row on any path that could
+    # reach it.
+    if replayed:
+        notify(status.user, request.user, Notification.Kind.REPLAY, status)
+    # Counted by ``replay_counts`` rather than guessed from the delta, so the
+    # number the button repaints to is the number the page renders — including
+    # the suspended repliers that tally drops.
+    return JsonResponse(
+        {"replayed": replayed, "count": replay_counts([status.pk]).get(status.pk, 0)}
     )
 
 
