@@ -31,7 +31,15 @@ from django.test import Client
 from django.utils import timezone
 
 import reeltalk.social.views as social_views
-from reeltalk.core.models import FEED_PAGE_SIZE, feed_entries
+from reeltalk.core.models import (
+    FEED_PAGE_SIZE,
+    KIND_RANK_REPLAY,
+    Film,
+    Replay,
+    Status,
+    decode_feed_cursor,
+    feed_entries,
+)
 from reeltalk.tests.feed import spread_shelve, unpaged
 from reeltalk.tests.members import member, site_admin
 
@@ -255,6 +263,37 @@ def test_every_row_carries_its_own_cursor_and_it_round_trips(alice, admin):
     cursors = re.findall(r'<li class="review"[^>]*data-cursor="([^"]+)"', html)
     assert len(cursors) == 3
     assert cursors == [e.cursor for e in unpaged(alice)]
+
+
+def test_the_local_fragment_carries_a_replay_row_and_its_cursor(db, admin):
+    """Replay arc P4: a public-scope replay row survives the fragment trip. The
+    byline renders, and the ``data-cursor`` the scroll reads its next request off
+    is the replay's own sort key — so the next page continues from the replay,
+    not from the original it shows. The Following-side twin of this pin is
+    ``test_the_scroll_fragment_carries_the_replay_row_and_its_cursor`` in
+    ``test_replay_read_paths.py``."""
+    member(localname="alice", password="s3cretpass")
+    bob = member(localname="bob", password="s3cretpass")
+    erin = member(localname="erin", password="s3cretpass")
+    dune = Film.objects.create(title="Dune", year=2021)
+    post = Status.objects.create(
+        user=bob,
+        film=dune,
+        status_type=Status.Type.COMMENT,
+        content="<p>Replayed on Local.</p>",
+    )
+    replay = Replay.objects.create(user=erin, status=post)
+    html = _member_client().get("/feed/page/?scope=local").content.decode()
+    assert '<p class="replay-line replay-line--flush">' in html
+    assert "Replayed on Local." in html
+    cursors = re.findall(r'<li class="review"[^>]*data-cursor="([^"]+)"', html)
+    assert len(cursors) == 2
+    # The replay is the newer row, so it opens the page and its cursor is first.
+    assert decode_feed_cursor(cursors[0]) == (
+        replay.published_date,
+        KIND_RANK_REPLAY,
+        replay.pk,
+    )
 
 
 # --- The two agree ---------------------------------------------------------

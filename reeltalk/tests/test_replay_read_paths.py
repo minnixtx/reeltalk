@@ -1,13 +1,15 @@
-"""The replay read paths: the gate, the counters and the Following feed's row
-(``REPLAY_PLAN.md`` §4 P1 and P3).
+"""The replay read paths: the gate, the counters and the feed's replay rows
+(``REPLAY_PLAN.md`` §4 P1, P3 and P4).
 
 **What is asserted here.** P1 built the three things every surface reads from -
 the ``Replay`` table, the single gate ``may_replay`` and the two batched
 counters. P3 added the first place a replay becomes a row a reader can see: the
 Following feed's replay row, with its eligibility clauses, its dedupe and its two
-dates. P4 (Local and All) and P5 (the wire) extend this same file with their own
-matrices rather than opening new ones, because the viewer classes below are the
-same classes every one of those surfaces has to answer for.
+dates. P4 extended it with the public scopes' matrix: Local and All carry replay
+rows too, and their eligibility is inherited through one subquery rather than
+re-implemented. P5 (the wire) will extend this same file with its own matrices
+rather than opening new ones, because the viewer classes below are the same
+classes every one of those surfaces has to answer for.
 
 The shape is copied from ``test_visibility_read_paths.py`` on purpose. The risk
 of this feature is not the table; it is someone's review rendering on a screen
@@ -56,6 +58,7 @@ from django.utils import timezone
 
 from reeltalk.core.models import (
     KIND_RANK_REPLAY,
+    KIND_RANK_STATUS,
     Film,
     Replay,
     Status,
@@ -63,6 +66,7 @@ from reeltalk.core.models import (
     _replay_rows,
     feed_entries,
     may_replay,
+    public_feed,
     replay_counts,
     replayed_ids,
     toggle_replay,
@@ -776,3 +780,202 @@ def test_the_scroll_fragment_carries_the_replay_row_and_its_cursor(
     assert '<p class="replay-line replay-line--flush">' in row
     assert f'data-url="/status/{original.pk}/replay/"' in row
     assert 'data-cursor="' in row
+
+
+# --- The public scopes' replay row (replay arc P4) --------------------------
+
+# Local and All carry replay rows as a second SQL population, and their
+# eligibility is **inherited** rather than re-implemented: population B is
+# ``Replay.objects.filter(status__in=<population A>)``, so every clause that
+# hides an original (deleted, suspension, ban, per-viewer blocks, audience,
+# top-level) hides its replay by construction. §5 names that subquery, with P3's
+# block exclusion, as the two places a replay can smuggle a post past a filter
+# that already hides it — so every test below moves the ORIGINAL's state (or the
+# viewer's relation to it) and asserts the two rows leave together. That pairing
+# is the proof: a hand-copied clause list that drifts from population A passes a
+# test about the replay alone and fails this one.
+#
+# The viewer is ``stranger`` almost everywhere — a member who follows neither
+# party — because a public scope must not need a follow relation to carry the
+# row, and the same absence then makes each state change the only variable.
+
+
+def _public_keys(viewer, *, local_only: bool) -> set[tuple]:
+    """Every row of one public scope, as ``(kind_rank, source_id)`` pairs — the
+    identity that tells a replay row apart from the original it replays."""
+    entries, _ = public_feed(viewer, local_only=local_only)
+    return {(entry.kind_rank, entry.source_id) for entry in entries}
+
+
+def _both_scopes(viewer) -> list[set[tuple]]:
+    """The same scope read both ways: Local and All must agree on eligibility."""
+    return [
+        _public_keys(viewer, local_only=True),
+        _public_keys(viewer, local_only=False),
+    ]
+
+
+def _status_key(status) -> tuple:
+    return (KIND_RANK_STATUS, status.pk)
+
+
+def _replay_key(replay) -> tuple:
+    return (KIND_RANK_REPLAY, replay.pk)
+
+
+@pytest.mark.django_db
+def test_a_replay_row_shows_in_both_public_scopes(db, posts, author, replier, stranger):
+    """The row, all of its data, in a scope with no follow relation anywhere.
+
+    Everything shown is the original's and the three position facts are the
+    replay's — the same contract the Following row pins, re-pinned here because
+    population B builds its rows through the same ``_replay_entry`` and a public
+    row that disagreed with the Following one would page and print differently
+    per scope.
+    """
+    original = posts["public"]
+    replay = Replay.objects.get(user=replier, status=original)
+    for local_only in (True, False):
+        entries, _ = public_feed(stranger, local_only=local_only)
+        rows = [entry for entry in entries if entry.replayed_by is not None]
+        assert len(rows) == 1, "the suspended replier's row must not render (D9)"
+        entry = rows[0]
+        assert entry.user == author
+        assert entry.replayed_by == replier
+        assert entry.status_id == original.pk
+        assert entry.source_id == replay.pk
+        assert entry.kind_rank == KIND_RANK_REPLAY
+        # D11: the row sits at the replay's date and prints the original's.
+        assert entry.date == replay.published_date
+        assert entry.post_date == original.published_date
+        assert entry.display_date == original.published_date
+
+
+@pytest.mark.django_db
+def test_a_replay_of_a_soft_deleted_post_renders_in_no_public_scope(
+    db, posts, replier, stranger
+):
+    """The eligibility-inheritance test this increment exists for.
+
+    The replay row leaves every public scope exactly when the original does, and
+    stays while it stays — the two move together because they are filtered by one
+    rule, not two that happen to match today.
+    """
+    original = posts["public"]
+    replay = Replay.objects.get(user=replier, status=original)
+    for keys in _both_scopes(stranger):
+        assert _status_key(original) in keys and _replay_key(replay) in keys
+    original.delete()  # soft: the row stays as a tombstone
+    assert Status.objects.filter(pk=original.pk).exists(), "delete must be a soft one"
+    for keys in _both_scopes(stranger):
+        assert _status_key(original) not in keys
+        assert _replay_key(replay) not in keys, (
+            "the replay outlived the filter that hid its original"
+        )
+
+
+@pytest.mark.django_db
+def test_a_replay_of_a_suspended_authors_post_renders_in_no_public_scope(
+    db, posts, author, replier, stranger
+):
+    original = posts["public"]
+    replay = Replay.objects.get(user=replier, status=original)
+    author.suspend(reason="spam ring")
+    for keys in _both_scopes(stranger):
+        assert _status_key(original) not in keys
+        assert _replay_key(replay) not in keys
+    author.unsuspend()
+    for keys in _both_scopes(stranger):
+        assert _replay_key(replay) in keys, "unsuspending restores exactly what it hid"
+
+
+@pytest.mark.django_db
+def test_a_replay_of_a_banned_authors_post_renders_in_no_public_scope(
+    db, posts, author, replier, stranger
+):
+    """Ban is its own clause and its own test: it sets ``banned_at`` and leaves
+    ``suspended_at`` alone, so an implementation that inherited only the
+    suspension clause would pass the test above and fail here."""
+    original = posts["public"]
+    replay = Replay.objects.get(user=replier, status=original)
+    author.ban(reason="repeat offender")
+    for keys in _both_scopes(stranger):
+        assert _status_key(original) not in keys
+        assert _replay_key(replay) not in keys
+
+
+@pytest.mark.django_db
+def test_a_replay_of_a_blocked_authors_post_renders_in_no_public_scope(
+    db, posts, replier, stranger, blocker
+):
+    """The per-viewer half of the subquery. Population A already hides the
+    original from the blocker (the block clause is the viewer's own); the
+    inheritance is what hides the replay — and the row must survive for a member
+    who has not blocked anybody, because a block is one reader's decision.
+    """
+    original = posts["public"]
+    replay = Replay.objects.get(user=replier, status=original)
+    for keys in _both_scopes(blocker):
+        assert _status_key(original) not in keys
+        assert _replay_key(replay) not in keys
+    for keys in _both_scopes(stranger):
+        assert _replay_key(replay) in keys
+
+
+@pytest.mark.django_db
+def test_a_suspended_repliers_replay_renders_in_no_public_scope(
+    db, posts, suspended_replier, stranger
+):
+    """D9 across the public scopes: the replier's own suspension is the one
+    eligibility clause the subquery cannot inherit, so population B carries it
+    directly — the same clause the tally and the Following synthesizer apply.
+    The world fixture wrote this replay before the suspension, which is exactly
+    the order that leaves a row behind if the clause is missing."""
+    replay = Replay.objects.get(user=suspended_replier, status=posts["public"])
+    for keys in _both_scopes(stranger):
+        assert _replay_key(replay) not in keys
+        assert _status_key(posts["public"]) in keys, (
+            "the original stays — only the suspended replay row leaves"
+        )
+    suspended_replier.unsuspend()
+    suspended_replier.refresh_from_db()
+    assert _replay_key(replay) in _public_keys(stranger, local_only=True)
+
+
+@pytest.mark.django_db
+def test_a_replay_of_a_non_public_post_renders_in_no_public_scope(
+    db, posts, replier, follower
+):
+    """The audience clause rides along with the subquery.
+
+    ``may_replay`` refuses to write this row, but the row can exist: an author
+    flipping a public post to followers-only after the replay, or an inbound
+    pair from a federation peer. The viewer is ``follower`` — entitled to the
+    original in Following and still owed its absence from a public timeline,
+    which is the cell that separates the inherited ``visibility=public`` clause
+    from no clause at all.
+    """
+    Replay.objects.create(user=replier, status=posts["followers"])
+    replay = Replay.objects.get(user=replier, status=posts["followers"])
+    for keys in _both_scopes(follower):
+        assert _status_key(posts["followers"]) not in keys
+        assert _replay_key(replay) not in keys
+
+
+@pytest.mark.django_db
+def test_a_replay_of_a_reply_renders_in_no_public_scope(
+    db, posts, author, replier, stranger, films
+):
+    """Top-level rides along too: a turn in someone else's conversation is not a
+    feed row, and replaying one does not promote it."""
+    reply = Status.objects.create(
+        user=author,
+        film=films[0],
+        status_type=Status.Type.COMMENT,
+        content="<p>A turn in the thread.</p>",
+        reply_parent=posts["public"],
+    )
+    replay = Replay.objects.create(user=replier, status=reply)
+    for keys in _both_scopes(stranger):
+        assert _status_key(reply) not in keys
+        assert _replay_key(replay) not in keys

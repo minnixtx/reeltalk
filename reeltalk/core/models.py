@@ -1842,6 +1842,71 @@ def public_status_scope(viewer=None, *, local_only: bool = False):
     return statuses.select_related("user", "film").order_by("-published_date", "-id")
 
 
+def _population_boundary(rank: int, cursor_key: tuple[datetime, int, int]) -> Q:
+    """The Q that keeps one population strictly older than a cursor (replay arc P4).
+
+    One rule for every population, replacing the two-rank special case it
+    generalises: a row of population ``rank`` is strictly older than the cursor
+    ``(date, cursor_rank, source_id)`` when its date is earlier, or the dates tie
+    and its population sits below the cursor's rank, or the dates and the rank
+    tie and its own id is lower. The shelf-cursor behaviour falls out of the
+    middle clause rather than being special-cased at the call site: a cursor
+    minted on a Following page carries ``KIND_RANK_SHELF`` or
+    ``KIND_RANK_REPLAY``, both above every public population's rank, so every
+    same-date row of the public populations passes on the rank clause alone.
+
+    Ids from two tables are never compared. The equal-rank branch is the only one
+    that may read ``source_id``, because it is the only one where the cursor's id
+    and the row's id name rows of the same table; a ``Status.id`` and a
+    ``Replay.id`` are unrelated sequences and ordering them would be noise.
+    """
+    date, cursor_rank, source_id = cursor_key
+    older = Q(published_date__lt=date)
+    if rank > cursor_rank:
+        # Same-date rows of this population are *newer* than the cursor row, so
+        # only the strictly-earlier dates are old enough to belong on the page.
+        return older
+    same_date = Q(published_date=date)
+    if rank == cursor_rank:
+        same_date &= Q(id__lt=source_id)
+    return older | same_date
+
+
+def _public_replay_scope(viewer, *, local_only: bool):
+    """Population B of a public scope: replays whose original passes population A.
+
+    The ``status__in`` subquery is the whole design of this function (replay arc
+    P4). Filtering replays by the population-A queryset means a replay inherits
+    **every** clause population A applies — ``deleted``, suspension, ban,
+    per-viewer blocks, ``visibility=public``, top-level — because a replay row is
+    kept only while its original survives those filters. A hand-copied clause
+    list here would be a second eligibility rule to keep in step with the first,
+    and the failure mode is a replay smuggling a hidden post onto a public
+    timeline; §5 names this subquery, with P3's block exclusion, as the two
+    places that can happen. It stays a subquery rather than a materialised id
+    list so the page's query count does not move with the population's size.
+
+    Locality is the one clause that does not ride along (D10): a replay is local
+    activity, so Local keys on the **replier's** ``user__local``, over the
+    un-localized original scope. ``status__in=public_status_scope(local_only=True)``
+    would be the other answer — locality of the original — and D10 ruled against
+    it in those words.
+
+    Suspension of the replier drops the row (D9), the same clause the tally and
+    the Following synthesizer apply; the original's account state already rides
+    in with the subquery.
+    """
+    replays = Replay.objects.filter(
+        status__in=public_status_scope(viewer, local_only=False),
+        user__suspended_at__isnull=True,
+    )
+    if local_only:
+        replays = replays.filter(user__local=True)
+    return replays.select_related(
+        "user", "status", "status__user", "status__film"
+    ).order_by("-published_date", "-id")
+
+
 def public_feed(
     viewer, *, local_only: bool, limit: int | None = None, cursor: str | None = None
 ) -> tuple[list["FeedEntry"], str | None]:
@@ -1849,47 +1914,69 @@ def public_feed(
 
     Returns the same ``(entries, next_cursor)`` pair as :func:`feed_entries` so
     the view, the fragment route and the endless scroll treat all three scopes
-    identically. Rows are ``"status"`` entries only: shelf events stay in the
-    Following feed, which is the scope whose membership rule produces them
-    (owner ruling 2026-10-28: Home is the users you follow; Local and All are
-    posts).
+    identically. Rows are live posts and the replays of live posts (replay arc
+    P4): shelf events stay in the Following feed, which is the scope whose
+    membership rule produces them (owner ruling 2026-10-28: Home is the users you
+    follow; Local and All are posts).
 
-    Unlike ``feed_entries`` this pages **in SQL**, because the population here is
-    the whole instance rather than one member's follow set — computing and
-    sorting every local post per page request would be the expensive version of
-    the same answer. The cursor is the existing :func:`encode_feed_cursor`
-    marker, so a page boundary is still "everything strictly older" and a post
-    that lands mid-scroll cannot shift a row off the next page. The marker's
-    kind rank is honoured rather than ignored: a shelf row sorts *newer* than a
-    same-timestamp status (``KIND_RANK_SHELF``), so a cursor cut from a
-    Following page and pasted onto a Local URL still names a correct boundary.
+    **Two SQL populations, merged per page.** Population A is
+    :func:`public_status_scope`, ordered ``(-published_date, -id)`` as it always
+    was; population B is :func:`_public_replay_scope`, ordered by the replay's
+    own date and id (D11), which is what interleaves a replay into the stream on
+    the day it happened rather than the day its original did. Both are paged in
+    SQL, because the population here is the whole instance rather than one
+    member's follow set — computing and sorting everything per page request would
+    be the expensive version of the same answer. The page is the merged
+    ``limit`` rows with the highest ``sort_key``; the ranks keep the merge total
+    because a replay row outranks a same-instant status (``KIND_RANK_REPLAY``)
+    and no row ever ties its own table's id.
+
+    Paging fetches ``limit + 1`` from **each** population, merges, keeps
+    ``limit``, and reads ``has_more`` off whether the merged set exceeded
+    ``limit``. That is exact, and the proof is one line: if either population has
+    more than ``limit`` rows left it returns its ``limit + 1``, so the merged set
+    exceeds the page; if neither does, the merged set is the whole remainder and
+    the comparison is the truth. Anything sloppier mints a cursor to an empty
+    page, which this codebase already calls worse than no link.
+
+    The cursor is the existing :func:`encode_feed_cursor` marker, applied to each
+    population by :func:`_population_boundary`, so a page boundary is still
+    "everything strictly older" and a post or replay that lands mid-scroll cannot
+    shift a row off the next page. A marker minted on a Following page — a shelf
+    row or a replay row — carries a rank above both public populations and still
+    names a correct boundary here, exactly as the shelf cursor always did.
     """
     statuses = public_status_scope(viewer, local_only=local_only)
+    replays = _public_replay_scope(viewer, local_only=local_only)
     if cursor:
         try:
-            date, kind_rank, source_id = decode_feed_cursor(cursor)
+            cursor_key = decode_feed_cursor(cursor)
         except ValueError:
             # Unreadable marker: page 1, not a 500. Same rule as feed_entries —
             # a mistyped address bar is not an error page for a reader who did
             # nothing wrong.
             pass
         else:
-            older = Q(published_date__lt=date)
-            same_date = Q(published_date=date)
-            if kind_rank <= KIND_RANK_STATUS:
-                same_date &= Q(id__lt=source_id)
-            statuses = statuses.filter(older | same_date)
+            statuses = statuses.filter(
+                _population_boundary(KIND_RANK_STATUS, cursor_key)
+            )
+            replays = replays.filter(_population_boundary(KIND_RANK_REPLAY, cursor_key))
 
     if limit is None:
-        rows = list(statuses)
+        status_rows = list(statuses)
+        replay_rows = list(replays)
     else:
-        # One extra row is all this needs to know whether to offer a cursor at
-        # all: a link to an empty page is worse than no link.
-        rows = list(statuses[: limit + 1])
-    has_more = limit is not None and len(rows) > limit
-    rows = rows[:limit] if has_more else rows
+        # One extra row from each population is all this needs to know whether to
+        # offer a cursor at all: a link to an empty page is worse than no link.
+        status_rows = list(statuses[: limit + 1])
+        replay_rows = list(replays[: limit + 1])
 
-    entries = [_status_entry(status) for status in rows]
+    entries = [_status_entry(status) for status in status_rows]
+    entries += [_replay_entry(replay) for replay in replay_rows]
+    entries.sort(key=lambda entry: entry.sort_key, reverse=True)
+    has_more = limit is not None and len(entries) > limit
+    entries = entries[:limit] if has_more else entries
+
     _attach_interaction_counts(entries, viewer)
     list_entries = [entry for entry in entries if entry.is_list_face]
     if list_entries:
