@@ -20,6 +20,13 @@ test would pass while one of them was wide open.
 **Following must not have changed.** The last test in the membership section
 asserts that against ``feed_entries`` directly, because §7 says so and because
 every other test in this file could pass with a broken Home feed.
+
+**Replay rows (replay arc P4).** Local and All carry replay rows as a second SQL
+population merged per page. The eligibility matrix — the inherited clauses that
+hide a replay whenever its original is hidden — is pinned in
+``test_replay_read_paths.py``; what this file owns is the scope-specific half:
+locality keys on the replier (D10), the row interleaves by the replay's own date
+(D11), and the cursor keeps its promises across the merge.
 """
 
 import re
@@ -32,7 +39,10 @@ from django.utils import timezone
 
 from reeltalk.core.models import (
     FEED_PAGE_SIZE,
+    KIND_RANK_REPLAY,
+    KIND_RANK_STATUS,
     Film,
+    Replay,
     Status,
     encode_feed_cursor,
     public_feed,
@@ -65,6 +75,13 @@ def alice(db):
 def bob(db):
     """A local member alice does not follow."""
     return member(localname="bob", password="s3cretpass")
+
+
+@pytest.fixture
+def erin(db):
+    """A local member who replays posts. Local, so their replays are Local
+    material (D10)."""
+    return member(localname="erin", password="s3cretpass")
 
 
 @pytest.fixture
@@ -452,3 +469,202 @@ def test_a_strangers_older_link_needs_no_scope_parameter(alice, bob, dune):
     body = Client().get("/").content.decode()
     assert 'href="/?c=' in body
     assert 'href="/?scope=local&amp;c=' not in body
+
+
+# --- Replay rows in the public scopes (replay arc P4) -------------------------
+
+# The eligibility matrix — a replay disappearing whenever its original does — is
+# pinned in ``test_replay_read_paths.py``, because it is one inherited subquery
+# rather than scope-specific behaviour. What lives here is the scope-specific
+# half: D10 (locality keys on the replier), D11 (the row interleaves by the
+# replay's own date), and the cursor machinery keeping every promise across the
+# merge of the two populations.
+
+
+def _merged_keys(viewer, *, local_only: bool) -> set[tuple]:
+    """One whole scope as ``(kind_rank, source_id)`` pairs — the identity that
+    tells a replay row apart from the original it replays."""
+    entries, _ = public_feed(viewer, local_only=local_only)
+    return {(entry.kind_rank, entry.source_id) for entry in entries}
+
+
+def _status_key(status) -> tuple:
+    return (KIND_RANK_STATUS, status.pk)
+
+
+def _replay_key(replay) -> tuple:
+    return (KIND_RANK_REPLAY, replay.pk)
+
+
+def test_a_local_replay_of_a_remote_post_shows_in_local(alice, erin, dune):
+    """D10: Local keys on who replayed, not on where the original was authored.
+    The mirror itself stays out of Local; a local member's replay of it is this
+    instance's own activity and is in."""
+    carol = _remote_author()
+    mirror = _mirror(carol, dune, "remote post replayed locally")
+    replay = Replay.objects.create(user=erin, status=mirror)
+    assert _replay_key(replay) in _merged_keys(alice, local_only=True)
+    assert _status_key(mirror) not in _merged_keys(alice, local_only=True)
+    assert _replay_key(replay) in _merged_keys(alice, local_only=False)
+
+
+def test_a_remote_replay_of_a_local_post_stays_out_of_local(alice, bob, dune):
+    """The other half of D10: a foreign member's replay is not local activity,
+    even when the post it replays is. All carries it, Local does not."""
+    carol = _remote_author()
+    post = _post(bob, dune, "local post replayed from abroad")
+    replay = Replay.objects.create(user=carol, status=post)
+    assert _replay_key(replay) not in _merged_keys(alice, local_only=True)
+    assert _replay_key(replay) in _merged_keys(alice, local_only=False)
+    assert _status_key(post) in _merged_keys(alice, local_only=True)
+
+
+def test_replay_rows_interleave_with_posts_by_the_replay_date(alice, bob, erin, dune):
+    """D11 in the public scopes: a replay of an old post sits at the replay's
+    place in the stream — between the posts published around that day — while
+    the line it prints still names the original's date."""
+    now = timezone.now()
+    newest = _post(bob, dune, "newest post", published_date=now - timedelta(hours=1))
+    oldest = _post(bob, dune, "oldest post", published_date=now - timedelta(hours=5))
+    replay = Replay.objects.create(user=erin, status=oldest)
+    Replay.objects.filter(pk=replay.pk).update(published_date=now - timedelta(hours=3))
+    entries, _ = public_feed(alice, local_only=True)
+    assert [(entry.kind_rank, entry.source_id) for entry in entries] == [
+        _status_key(newest),
+        _replay_key(replay),
+        _status_key(oldest),
+    ]
+    assert entries[1].display_date == oldest.published_date
+
+
+def test_paged_walk_of_the_merged_scopes_has_no_gap_and_no_duplicate(
+    alice, bob, erin, dune
+):
+    """The concatenation identity, re-pinned across the merge: paging to the end
+    returns exactly the unpaged list, replay rows in their own mid-stream seats,
+    no row on two pages and none skipped."""
+    posts = _make_posts(
+        bob, dune, PAGE + 4, newest_at=timezone.now() - timedelta(hours=1)
+    )
+    # Three replays aged to land between the posts, so the replay rows sit
+    # mid-stream rather than all above or below the block.
+    for i, target in enumerate(posts[3:6], start=1):
+        replay = Replay.objects.create(user=erin, status=target)
+        Replay.objects.filter(pk=replay.pk).update(
+            published_date=posts[i].published_date - timedelta(seconds=30)
+        )
+    whole, _ = public_feed(alice, local_only=True)
+    seen: list[tuple] = []
+    cursor = None
+    for _ in range(100):
+        entries, cursor = public_feed(alice, local_only=True, limit=PAGE, cursor=cursor)
+        seen.extend((entry.kind_rank, entry.source_id) for entry in entries)
+        if cursor is None:
+            break
+    else:
+        pytest.fail("the merged cursor never terminated")
+    assert seen == [(entry.kind_rank, entry.source_id) for entry in whole]
+    assert len(seen) == len(set(seen)), "a row appeared on two pages"
+
+
+def test_a_tied_status_and_replay_straddle_a_page_boundary_cleanly(
+    alice, bob, erin, dune
+):
+    """The nastiest case for the merge: a status and a replay of a *different*
+    post tie on the instant and land on either side of the boundary. The replay
+    outranks the status (``KIND_RANK_REPLAY``), so page 1 ends on the replay and
+    page 2 opens with the status — the equal-rank id comparison never crosses
+    tables, because at a tie between the populations it is never needed."""
+    at = timezone.now() - timedelta(hours=2)
+    _make_posts(bob, dune, PAGE - 1, newest_at=at + timedelta(minutes=10 * PAGE))
+    old = _post(
+        bob, dune, "replayed at the boundary", published_date=at - timedelta(hours=1)
+    )
+    replay = Replay.objects.create(user=erin, status=old)
+    Replay.objects.filter(pk=replay.pk).update(published_date=at)
+    tied = _post(bob, dune, "tied with the replay", published_date=at)
+
+    page1, cursor = public_feed(alice, local_only=True, limit=PAGE)
+    assert len(page1) == PAGE
+    assert (page1[-1].kind_rank, page1[-1].source_id) == _replay_key(replay)
+    assert cursor is not None
+    page2, next_cursor = public_feed(alice, local_only=True, limit=PAGE, cursor=cursor)
+    assert page2[0].status_id == tied.pk and page2[0].replayed_by is None
+    assert next_cursor is None
+    seen = [(entry.kind_rank, entry.source_id) for entry in page1 + page2]
+    assert len(seen) == len(set(seen)), "the tied pair duplicated across the boundary"
+    assert _status_key(tied) in seen and _replay_key(replay) in seen
+
+
+def test_a_replay_landing_mid_scroll_neither_duplicates_nor_drops_a_row(
+    alice, bob, erin, dune
+):
+    """The cursor's whole reason, now across two populations: page 1 is taken, a
+    fresh replay lands above the boundary (its date is now, whatever post it
+    picks), and page 2 is still exactly what was behind page 1."""
+    _make_posts(bob, dune, PAGE + 2, newest_at=timezone.now() - timedelta(hours=1))
+    before = [
+        (entry.kind_rank, entry.source_id)
+        for entry in public_feed(alice, local_only=True)[0]
+    ]
+    _, cursor = public_feed(alice, local_only=True, limit=PAGE)
+    assert cursor is not None
+    oldest = min(Status.objects.filter(user=bob), key=lambda s: s.published_date)
+    Replay.objects.create(user=erin, status=oldest)
+    page2 = public_feed(alice, local_only=True, limit=PAGE, cursor=cursor)[0]
+    assert [(entry.kind_rank, entry.source_id) for entry in page2] == before[PAGE:]
+
+
+def test_a_cursor_minted_on_a_following_replay_row_names_a_correct_local_boundary(
+    alice, bob, erin, dune
+):
+    """The shelf-cursor rule above, replay version: a Following cursor carries
+    its rank and a Local page honours it. The replay sits at the same instant as
+    a Local status; the status sorts *below* the replay rank, so pasting the
+    cursor must keep every same-instant status rather than drop it."""
+    at = timezone.now() - timedelta(hours=2)
+    alice.follows.add(erin)
+    post = _post(
+        bob, dune, "replayed on Following", published_date=at - timedelta(hours=1)
+    )
+    Replay.objects.create(user=erin, status=post, published_date=at)
+    home = unpaged(alice)
+    assert home[-1].replayed_by is not None, "the fixture's last home row is the replay"
+    same = _post(bob, dune, "same instant as that replay", published_date=at)
+    entries, _ = public_feed(
+        alice, local_only=True, limit=PAGE, cursor=encode_feed_cursor(home[-1])
+    )
+    ids = {entry.status_id for entry in entries}
+    assert same.pk in ids, "a same-instant status sorts below the replay rank and stays"
+    assert post.pk in ids
+
+
+def test_no_cursor_when_the_merged_page_is_exactly_full(alice, bob, erin, dune):
+    """The +1-from-each rule at its exact edge: the two populations together hold
+    exactly one page, so neither returns its extra row and no link may point at
+    an empty page."""
+    posts = _make_posts(
+        bob, dune, PAGE - 1, newest_at=timezone.now() - timedelta(hours=1)
+    )
+    Replay.objects.create(user=erin, status=posts[-1])
+    entries, cursor = public_feed(alice, local_only=True, limit=PAGE)
+    assert len(entries) == PAGE
+    assert cursor is None, "a cursor over an exactly-full merge points at an empty page"
+
+
+def test_a_cursor_at_the_page_edge_points_at_a_page_that_exists(alice, bob, erin, dune):
+    """One row more than a full page, and the extra row is a replay aged below
+    the block: the cursor must name exactly that row, so page 2 is one row and
+    never empty."""
+    posts = _make_posts(bob, dune, PAGE, newest_at=timezone.now() - timedelta(hours=1))
+    replay = Replay.objects.create(user=erin, status=posts[-1])
+    Replay.objects.filter(pk=replay.pk).update(
+        published_date=timezone.now() - timedelta(hours=2)
+    )
+    page1, cursor = public_feed(alice, local_only=True, limit=PAGE)
+    assert len(page1) == PAGE and cursor is not None
+    page2, next_cursor = public_feed(alice, local_only=True, limit=PAGE, cursor=cursor)
+    assert [(entry.kind_rank, entry.source_id) for entry in page2] == [
+        _replay_key(replay)
+    ]
+    assert next_cursor is None
