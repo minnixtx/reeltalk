@@ -1,4 +1,7 @@
-"""Inbound interactions — a remote user's Like reaching us (increment 6).
+"""Inbound interactions — a remote user's Like or replay reaching us.
+
+``handle_like`` arrived with feed interactions increment 6; ``handle_announce``
+arrived with the replay arc's P5 and keeps its two attribution rules whole.
 
 The inbound counterpart of ``broadcast.broadcast_like``: what we send when a
 member likes a post, arriving back the other way when a remote user likes one
@@ -44,7 +47,11 @@ deleted object; a count attached to something that no longer has content is
 a fact about nothing, and nothing on this instance renders it.
 """
 
-from reeltalk.core.models import Like
+from reeltalk.core.models import (
+    Like,
+    Replay,
+    audience_sends_externally,
+)
 from reeltalk.notifications.models import Notification, notify
 
 from .identity import reference_url
@@ -86,4 +93,46 @@ def handle_like(activity, sender, request) -> str | None:
     # calls ``notify()`` rather than creating a row directly.
     if created:
         notify(status.user, sender, Notification.Kind.LIKE, status)
+    return None
+
+
+def handle_announce(activity, sender, request) -> str | None:
+    """Record a remote user's replay of a status we already have (replay P5).
+
+    The inbound twin of :func:`~reeltalk.activitypub.broadcast.broadcast_replay`,
+    and it keeps ``handle_like``'s two rules verbatim for the same reasons
+    ``handle_like`` gives them: the row is attributed to the **verified
+    sender**, never ``activity["actor"]`` — a replay, like a Like, carries no
+    content, so a handler that believed the wire field would let anyone write
+    a replay as anyone — and the target resolves only among rows this instance
+    already holds, with ``resolve_status_reference``'s no-fetch posture.
+
+    Then one refusal ``handle_like`` has no use for, taken from the live peer
+    rather than invented: Mastodon's ``announceable?`` drops a boost of a
+    status whose audience does not go out, *unless the booster owns it* (a
+    self-boost of one's own narrow post is the peer's one allowed exception).
+    The local twin of that rule is ``may_replay`` refusing every non-public
+    original outright; here the narrow-audience refusal is the private case
+    only, because a replay row can never widen who may read anything — every
+    read path filters the *original* (the arc's first failure mode, closed at
+    the query), so a replay of a followers-only original lands as a row that
+    renders only for readers the original already admits.
+
+    Keyed on ``(sender, status)`` — the unique pair the ``Replay`` docstring
+    names as the redelivery key, exactly like ``Like`` — so a redelivered
+    ``Announce`` lands on the same row and cannot double-count. The author's
+    notification rides on ``created``, the same event-not-activity rule
+    ``handle_like`` states.
+    """
+    target_url = reference_url(activity.get("object"))
+    status = resolve_status_reference(target_url, request)
+    if status is None:
+        return f"dropped, no such note here ({target_url})"
+    if status.deleted:
+        return "dropped, the target is a tombstone"
+    if not audience_sends_externally(status.visibility) and status.user_id != sender.pk:
+        return "dropped, the original's audience does not go out"
+    _replay, created = Replay.objects.get_or_create(user=sender, status=status)
+    if created:
+        notify(status.user, sender, Notification.Kind.REPLAY, status)
     return None

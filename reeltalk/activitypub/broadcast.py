@@ -47,6 +47,7 @@ from .identity import (
     person_delete_activity,
 )
 from .objects import (
+    announce_activity,
     create_activity,
     delete_activity,
     like_activity,
@@ -532,6 +533,42 @@ def broadcast_like(request, status, user, *, liked: bool) -> None:
     """
     activity = like_activity(user, status, request, undo=not liked)
     return _deliver_signed(request, user, activity, [status.user])
+
+
+def broadcast_replay(
+    request, status, user, *, replayed: bool, origin_id
+) -> list[DeliveryFailure]:
+    """Tell a replay's audience that a local member replayed or un-replayed.
+
+    The audience is the **replier's followers**, which is why this cannot ride
+    ``_announce`` / ``_deliver_to_followers``: their whole subject is "the
+    status author's followers", and a replay is not the author's news — it is
+    the replier's. It goes through ``_deliver_signed`` directly with the
+    replier's own follower list, signed by the replier, who holds the only key
+    that can speak for the act. Local followers are skipped by the delivery
+    layer as everywhere else: they read the ``Replay`` row their feed already
+    renders.
+
+    **Nothing goes out when the original is not**
+    :func:`~reeltalk.core.models.sends_externally`. The route cannot reach
+    that case — ``may_replay`` admits public originals only — so the gate is
+    the same defense-in-depth ``_announce`` carries for private statuses: a
+    caller that skips the gate still cannot put a private post's existence on
+    the wire.
+
+    ``origin_id`` is the ``Replay`` row's AP identity, and the caller has to
+    hand it over because on the un-replay half the row is already deleted by
+    the time this runs — the ``Announce`` id the peer stored the boost under
+    (see :func:`~reeltalk.activitypub.objects.announce_activity`) can only be
+    rebuilt from the value ``toggle_replay`` read off the row it deleted.
+    ``None`` means the toggle lost a double-click race and this request created
+    no row to name: the request that won owns the event and its broadcast, so
+    this one sends nothing.
+    """
+    if origin_id is None or not sends_externally(status):
+        return []
+    activity = announce_activity(user, status, request, origin_id, undo=not replayed)
+    return _deliver_signed(request, user, activity, user.followers.all())
 
 
 def broadcast_reply(request, reply) -> None:

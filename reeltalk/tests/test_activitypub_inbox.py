@@ -10,6 +10,7 @@ activity types.
 import base64
 import hashlib
 import json
+import logging
 from datetime import UTC, datetime
 from email.utils import format_datetime
 
@@ -34,6 +35,10 @@ from reeltalk.social.models import User
 
 REMOTE_ACTOR = "https://remote.example/user/carol/"
 REMOTE_KEY_ID = f"{REMOTE_ACTOR}#main-key"
+# The three 401 branches of the inbox view must be tellable apart from the log
+# alone: behind a reverse proxy the source address names the proxy, not the
+# sender, so the logged reason plus keyid is the only attribution there is.
+VIEWS_LOGGER = "reeltalk.activitypub.views"
 
 
 @pytest.fixture()
@@ -370,7 +375,9 @@ def test_process_unknown_types_ignored_gracefully():
     # without raising and without creating content.
     sender = User.objects.create_user(localname="alice", password="p")
     request = _request_with_host()
-    for type_name in ("Announce", "Add", "Book", 42, ["Follow"], None):
+    # "Announce" was in this tuple until the replay arc P5 registered a
+    # handler for it — the old relay ruling is closed and reversed.
+    for type_name in ("Add", "Book", 42, ["Follow"], None):
         result = process_inbound_activity(
             {"id": f"https://remote.example/activity/{type_name!s}", "type": type_name},
             sender,
@@ -434,12 +441,17 @@ def test_extract_key_id_none_without_signature():
 
 
 @pytest.mark.django_db
-def test_inbox_rejects_unsigned_post(client):
+def test_inbox_rejects_unsigned_post(client, caplog):
     User.objects.create_user(localname="alice", password="p")
-    response = client.post(
-        "/user/alice/inbox/", data=b"{}", content_type="application/activity+json"
-    )
+    with caplog.at_level(logging.WARNING, logger=VIEWS_LOGGER):
+        response = client.post(
+            "/user/alice/inbox/", data=b"{}", content_type="application/activity+json"
+        )
     assert response.status_code == 401
+    # Named so: a refusal with no keyid at all is a different problem from one
+    # whose keyid resolved but did not verify, and the log is the only place
+    # that distinction survives.
+    assert "no keyid presented" in caplog.text
 
 
 @responses.activate
@@ -483,7 +495,7 @@ def test_inbox_duplicate_delivery_is_idempotent(client, remote_keypair, person_d
 
 
 @pytest.mark.django_db
-def test_inbox_rejects_invalid_signature(client, person_doc):
+def test_inbox_rejects_invalid_signature(client, person_doc, caplog):
     User.objects.create_user(localname="alice", password="p")
     mirror_user_from_person(person_doc)  # carol's mirror exists...
     attacker_private, _public = crypto.generate_keypair()
@@ -491,14 +503,21 @@ def test_inbox_rejects_invalid_signature(client, person_doc):
     activity = {"id": "https://remote.example/activity/12", "type": "Follow"}
     body = json.dumps(activity).encode()
     headers = _signed_post("/user/alice/inbox/", body, attacker_private)
-    response = _post_inbox(client, "/user/alice/inbox/", body, headers)
+    with caplog.at_level(logging.WARNING, logger=VIEWS_LOGGER):
+        response = _post_inbox(client, "/user/alice/inbox/", body, headers)
     assert response.status_code == 401
     assert DeliveredActivity.objects.count() == 0
+    # The two halves of the attribution: which key was offered, and which
+    # account it belongs to. A peer that rotated its key and one that is
+    # forging look identical at 401 and differ completely in the log.
+    assert "signature mismatch" in caplog.text
+    assert REMOTE_KEY_ID in caplog.text
+    assert REMOTE_ACTOR in caplog.text
 
 
 @responses.activate
 @pytest.mark.django_db
-def test_inbox_rejects_unresolvable_sender(client):
+def test_inbox_rejects_unresolvable_sender(client, caplog):
     # No mirror and an unreachable remote: the delivery is rejected before
     # anything is parsed or recorded.
     User.objects.create_user(localname="alice", password="p")
@@ -507,9 +526,15 @@ def test_inbox_rejects_unresolvable_sender(client):
     activity = {"id": "https://remote.example/activity/13", "type": "Follow"}
     body = json.dumps(activity).encode()
     headers = _signed_post("/user/alice/inbox/", body, private_pem)
-    response = _post_inbox(client, "/user/alice/inbox/", body, headers)
+    with caplog.at_level(logging.WARNING, logger=VIEWS_LOGGER):
+        response = _post_inbox(client, "/user/alice/inbox/", body, headers)
     assert response.status_code == 401
     assert DeliveredActivity.objects.count() == 0
+    # Distinct from a signature mismatch: here we never learned who the keyid
+    # belonged to, so the keyid is the only name available and it must be
+    # logged.
+    assert "keyid not resolvable" in caplog.text
+    assert REMOTE_KEY_ID in caplog.text
 
 
 @responses.activate
@@ -594,7 +619,7 @@ def test_inbox_unknown_type_from_known_sender_ignored_gracefully(
     private_pem, _public_pem = remote_keypair
     activity = {
         "id": "https://remote.example/activity/16",
-        "type": "Announce",
+        "type": "Add",
         "object": {"id": "https://remote.example/book/9", "type": "Book"},
     }
     body = json.dumps(activity).encode()

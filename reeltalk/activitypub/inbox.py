@@ -20,7 +20,7 @@ from django.db import transaction
 
 from .flags import handle_flag
 from .follow import handle_accept, handle_follow, handle_reject, handle_undo
-from .interactions import handle_like
+from .interactions import handle_announce, handle_like
 from .models import DeliveredActivity
 from .statuses import handle_create, handle_delete, handle_update
 
@@ -48,6 +48,11 @@ HANDLERS: dict[str, Callable[[dict, Any, Any], "str | None"]] = {
     # even though it changes nothing so that "we were accepted" is a decided
     # outcome here rather than a miss in the ignore path.
     "Like": handle_like,
+    # Replay arc P5: the inbound half of the replay pair. Before it, an
+    # ``Announce`` was the "ignored gracefully" answer the old relay ruling
+    # had pinned; the replay arc reversed that ruling, and a peer's boost of
+    # one of our posts now moves the counter.
+    "Announce": handle_announce,
     "Accept": handle_accept,
     "Reject": handle_reject,
     # Increment 6's inbound report. A peer's moderator forwarding a

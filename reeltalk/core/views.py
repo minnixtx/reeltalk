@@ -17,6 +17,7 @@ from django.views.decorators.http import require_POST
 from reeltalk.activitypub import read_auth
 from reeltalk.activitypub.broadcast import (
     broadcast_like,
+    broadcast_replay,
     broadcast_reply,
     broadcast_shelf_event,
     broadcast_status_create,
@@ -566,10 +567,12 @@ def replay_status(request, status_id):
     reason ``like_status`` spells out: a post that renders nowhere must not
     quietly accept interactions nobody will ever see the reason for.
 
-    There is **no broadcast here**, unlike the like route. The ``Announce`` is
-    increment P5; until it lands a replay is a local fact, and sending a half
-    built one would be the one thing about this route that could not be taken
-    back.
+    The broadcast (P5) goes to the **replier's** followers, not the original's
+    author — the one broadcast on this route whose audience is not the post's,
+    and the reason ``broadcast_replay`` exists beside ``broadcast_like`` rather
+    than reusing it. The ``origin_id`` it is handed is the toggle's second
+    answer: on the off half the row is already deleted, and the peer matches
+    the ``Undo`` to the ``Announce`` by that identity.
     """
     status = get_object_or_404(
         Status.objects.select_related("user"), id=status_id, deleted=False
@@ -578,7 +581,10 @@ def replay_status(request, status_id):
         raise Http404
     if not may_replay(request.user, status):
         raise Http404
-    replayed = toggle_replay(request.user, status)
+    replayed, origin_id = toggle_replay(request.user, status)
+    broadcast_replay(
+        request, status, request.user, replayed=replayed, origin_id=origin_id
+    )
     # Only the replay half of the toggle is an event: taking a replay back is
     # not a second "replayed this" for the ledger. ``notify()`` owns the rest of
     # who gets told, and it is what stops a self-row on any path that could
