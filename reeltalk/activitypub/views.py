@@ -14,6 +14,7 @@ document), verify the signature, then dedup + dispatch in ``inbox``.
 """
 
 import json
+import logging
 
 from django.conf import settings
 from django.http import HttpResponse, HttpResponseGone, JsonResponse
@@ -39,6 +40,8 @@ from .inbox import process_inbound_activity
 from .mirrors import resolve_sender
 from .objects import create_activity
 from .signatures import extract_key_id, verify_request
+
+logger = logging.getLogger(__name__)
 
 
 def _local_user(localname: str) -> "User | None":
@@ -323,6 +326,36 @@ def _inbox_too_large(request) -> bool:
     return len(request.body) > limit
 
 
+def _refuse_inbox(reason: str, *, key_id: str = "", source: str = "", sender=None):
+    """Refuse an inbox delivery with 401, having first said *which* refusal.
+
+    The attribution is the whole reason this helper exists. Before it, all three
+    401 branches in ``_handle_inbox_post`` were indistinguishable in the log:
+    Django recorded only ``Unauthorized: /inbox/``, and on any deployment behind
+    a reverse proxy the logged source address is the proxy's rather than the
+    sender's — so a peer we were refusing in volume was literally unnamed. The
+    keyid is the only identifier such a request carries, and it usually embeds
+    the actor, so naming it is what turns "209 refusals" into "this account,
+    failing this way".
+
+    The reason strings are a closed set on purpose (no keyid, unresolvable
+    keyid, signature mismatch): they are the diagnostic, and a test pins each
+    one so a future edit cannot quietly merge two branches back into one.
+
+    Nothing of the body is logged. It is unauthenticated input of unbounded
+    size, and the keyid already names who to go look at.
+    """
+    actor = getattr(sender, "actor_url", None) or "-"
+    logger.warning(
+        "Inbox refused 401 (%s): keyid=%s source=%s resolved=%s",
+        reason,
+        key_id or "-",
+        source or "-",
+        actor,
+    )
+    return HttpResponse(status=401)
+
+
 def _handle_inbox_post(request):
     """Verify + process one inbound activity delivery (M4 increment 4).
 
@@ -367,17 +400,19 @@ def _handle_inbox_post(request):
         # Nothing was spent on this request — no fetch, no verification — so it
         # is not counted. Charging free refusals would let noise spend the
         # budget a real peer needs.
-        return HttpResponse(status=401)
+        return _refuse_inbox("no keyid presented", source=source)
 
     sender = resolve_sender(key_id, request)
     if sender is None or not sender.public_key:
         # This one cost an outbound fetch for an address we learned nothing
         # about. That is the cost being bounded.
         inbox_throttle.record_failure(source)
-        return HttpResponse(status=401)
+        return _refuse_inbox("keyid not resolvable", key_id=key_id, source=source)
     if not verify_request(request, sender.public_key):
         inbox_throttle.record_failure(source)
-        return HttpResponse(status=401)
+        return _refuse_inbox(
+            "signature mismatch", key_id=key_id, source=source, sender=sender
+        )
     try:
         activity = json.loads(request.body)
     except ValueError:

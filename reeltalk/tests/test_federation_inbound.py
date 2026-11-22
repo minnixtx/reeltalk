@@ -174,6 +174,7 @@ def test_the_handler_registry_is_exactly_what_we_mean_it_to_be():
         "Update",
         "Delete",
         "Like",
+        "Announce",
         "Accept",
         "Reject",
         "Flag",

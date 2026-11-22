@@ -824,8 +824,19 @@ class Replay(models.Model):
             self.origin_id = self.pk
 
 
-def toggle_replay(user, status: Status) -> bool:
+def toggle_replay(user, status: Status) -> tuple[bool, int | None]:
     """Replay ``status`` for ``user``, or take the replay back if already replayed.
+
+    Returns ``(replayed, origin_id)``: the new state, and the ``Replay`` row's
+    AP identity — the created row's on the way in, the deleted row's on the way
+    out. The second half is not a convenience: the outbound ``Announce`` builds
+    its id from that identity (R41), and on the off transition the row is gone
+    by the time the broadcast runs, so this is the one place it can still be
+    read. A local row always mints ``origin_id`` in ``save()``; the ``pk``
+    fallback keeps the answer total for a row written before the identity
+    existed. The lone ``None`` is the lost-race branch, where this request
+    created no row of its own to name — the request that won owns the event,
+    and a caller that broadcasts should stay silent.
 
     Delete-first, exactly as :func:`toggle_like`: the row's existence is the
     state, so removing it is the whole "off" transition and there is nothing to
@@ -840,14 +851,26 @@ def toggle_replay(user, status: Status) -> bool:
     so a route that forgot the gate writes a row that no feed will render rather
     than one that leaks a post.
     """
-    if Replay.objects.filter(user=user, status=status).delete()[0]:
-        return False
+    existing = (
+        Replay.objects.filter(user=user, status=status)
+        .values_list("pk", "origin_id")
+        .first()
+    )
+    if existing is not None:
+        Replay.objects.filter(user=user, status=status).delete()
+        pk, origin_id = existing
+        return False, origin_id or pk
     try:
         with transaction.atomic():
-            Replay.objects.create(user=user, status=status)
+            replay = Replay.objects.create(user=user, status=status)
     except IntegrityError:
-        pass
-    return True
+        winner = (
+            Replay.objects.filter(user=user, status=status)
+            .values_list("pk", "origin_id")
+            .first()
+        )
+        return True, (winner[1] or winner[0]) if winner else None
+    return True, replay.origin_id or replay.pk
 
 
 def replay_counts(status_ids: list[int]) -> dict[int, int]:

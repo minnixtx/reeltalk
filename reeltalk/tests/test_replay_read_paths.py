@@ -340,11 +340,20 @@ def test_a_replay_outlives_its_original_being_soft_deleted(db, posts, replier):
 @pytest.mark.django_db
 def test_toggle_replay_turns_it_on_then_off(db, posts, stranger):
     """The row's existence is the whole state, exactly as with a like: removing
-    it is the entire "off" transition and there is nothing to update in place."""
+    it is the entire "off" transition and there is nothing to update in place.
+
+    The second half of the answer is the row's AP identity — the created row's
+    on the way in, the deleted row's on the way out, because the outbound
+    ``Announce`` builds its id from it and the off half has already deleted
+    the row by the time the broadcast runs (P5)."""
     target = posts["public"]
-    assert toggle_replay(stranger, target) is True
-    assert Replay.objects.filter(user=stranger, status=target).count() == 1
-    assert toggle_replay(stranger, target) is False
+    replayed, origin_id = toggle_replay(stranger, target)
+    assert replayed is True
+    row = Replay.objects.get(user=stranger, status=target)
+    assert origin_id == row.origin_id == row.pk
+    replayed, deleted_origin = toggle_replay(stranger, target)
+    assert replayed is False
+    assert deleted_origin == origin_id
     assert Replay.objects.filter(user=stranger, status=target).count() == 0
 
 
@@ -352,13 +361,13 @@ def test_toggle_replay_turns_it_on_then_off(db, posts, stranger):
 def test_unreplaying_then_replaying_mints_a_new_origin_id(db, posts, stranger):
     """Delete-then-create is what keeps a re-replay from looking like a
     redelivery of the first one, so the second row must be a different object
-    with a different identity."""
+    with a different identity — and the toggle must hand each identity back at
+    the moment its ``Announce`` or ``Undo`` is built."""
     target = posts["public"]
-    toggle_replay(stranger, target)
-    first = Replay.objects.get(user=stranger, status=target).origin_id
-    toggle_replay(stranger, target)
-    toggle_replay(stranger, target)
-    second = Replay.objects.get(user=stranger, status=target).origin_id
+    _, first = toggle_replay(stranger, target)
+    _, off_again = toggle_replay(stranger, target)
+    assert off_again == first, "the Undo must name the Announce it undoes"
+    _, second = toggle_replay(stranger, target)
     assert Replay.objects.filter(user=stranger, status=target).count() == 1
     assert first != second
 

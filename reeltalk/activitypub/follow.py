@@ -35,7 +35,7 @@ local user's feed (increment 6 supplies those statuses).
 
 import uuid
 
-from reeltalk.core.models import Like
+from reeltalk.core.models import Like, Replay
 from reeltalk.notifications.models import Notification, notify
 from reeltalk.social.models import User
 
@@ -124,23 +124,27 @@ def handle_follow(activity, sender, request):
 
 
 def handle_undo(activity, sender, request):
-    """An Undo: act when it undoes a Follow or a Like; ignore everything else.
+    """An Undo: act when it undoes a Follow, a Like, or an Announce; else ignore.
 
     The object of an Undo is the activity being undone — a dict whose
     ``type`` says what is being taken back and whose own ``object`` names the
-    thing it was aimed at. Two types are ours to act on:
+    thing it was aimed at. Three types are ours to act on:
 
     * ``Follow`` — drop the follow M2M between the verified sender and the
       user named inside it.
     * ``Like`` (feed interactions increment 5) — drop the sender's like of
       the status named inside it. The status is resolved among rows this
       instance already has, never fetched.
+    * ``Announce`` (replay arc P5) — drop the sender's replay of the status
+      named inside it: the same ``(sender, status)`` pair the inbound
+      ``Announce`` wrote on, and nothing else.
 
     Anything else (an Undo of a Create, a malformed object, an unresolvable
-    target) is not ours to act on and is ignored gracefully. The like is
-    found by ``(sender, status)`` — the unique pair R83 decision 4 put on
-    the table — not by resolving the inner ``Like``'s id, so an Undo
-    arrives correctly even though we never stored the activity it refers to.
+    target) is not ours to act on and is ignored gracefully. The like and the
+    replay are found by ``(sender, status)`` — the unique pair R83 decision 4
+    put on the table, and the one the ``Replay`` table copies — not by
+    resolving the inner activity's id, so an Undo arrives correctly even
+    though we never stored the activity it refers to.
     """
     inner = activity.get("object")
     if not isinstance(inner, dict):
@@ -153,12 +157,14 @@ def handle_undo(activity, sender, request):
         followed = resolve_known_actor(target_url, request)
         if followed is not None:
             sender.follows.remove(followed)
-    elif inner_type == "Like":
+    elif inner_type in ("Like", "Announce"):
         status = resolve_status_reference(target_url, request)
         if status is not None:
-            # Deleting zero rows is the correct answer to an Undo of a like
-            # we never recorded, so this stays idempotent without a check.
-            Like.objects.filter(user=sender, status=status).delete()
+            # Deleting zero rows is the correct answer to an Undo of an
+            # interaction we never recorded, so this stays idempotent without
+            # a check.
+            rows = Like if inner_type == "Like" else Replay
+            rows.objects.filter(user=sender, status=status).delete()
 
 
 def _answered_follow(activity, sender, request):

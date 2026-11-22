@@ -662,6 +662,74 @@ def like_activity(liker, target, request, *, undo: bool) -> dict:
     }
 
 
+def announce_activity(replier, target, request, replay_id, *, undo: bool) -> dict:
+    """An ``Announce`` activity for a replay, or the ``Undo`` wrapping one.
+
+    The object is the original's wire URL as a **reference**, not an inline
+    Note — the ``note_reference`` rule ``like_activity`` states: a replay
+    says something about someone else's post, and the only thing the receiver
+    needs is which post. The actor is the replier, who is also the signer, so
+    the receiving instance attributes the replay to the verified sender.
+
+    **The ids are keyed on the replay row's origin identity, not a uuid, and
+    that is a peer constraint rather than a style choice.** The live peer's
+    ``undo_announce`` finds the boost to remove with
+    ``Status.find_by(uri: <inner Announce's id>, account: <sender>)`` — it
+    matches on the id the original ``Announce`` carried, so the ``Undo``'s
+    inner ``Announce`` must carry that same id, which means the id must be
+    reconstructible after the row is deleted. A fresh uuid per call (the
+    ``like_activity`` idiom) cannot work: the peer's undo would look for a
+    boost URI it has never seen. This is also what the ``Replay`` docstring
+    minted ``origin_id`` for on day one (R41): a stable identity the
+    ``Announce`` is built from, and a re-replay is a new row with a new
+    ``origin_id``, so replay → undo → re-replay still never collides on an id
+    the way ``update_activity``'s rule demands.
+
+    **The audience is the replier's, which is why this builder exists at all.**
+    ``status_audience`` reads the status's own author and cannot answer this
+    row: a replay travels to the *replier's* followers. The pair follows the
+    original's visibility, because a replay inherits the original's audience
+    (D2) and the peer files what it receives from these arrays alone: a
+    public original puts the public collection in ``to`` and the replier's
+    followers collection in ``cc`` — the peer's own shape for a public boost,
+    and the one that makes its ``visibility_from_audience`` file the boost as
+    public instead of falling through to direct. A narrower original addresses
+    the replier's followers alone. A private original never reaches this
+    builder: ``broadcast_replay`` refuses it upstream, exactly as
+    ``status_audience`` documents for its own private branch.
+
+    The ``Undo`` envelope carries the same ``to``/``cc`` pair the ``Announce``
+    was addressed with. The peer's own ``UndoAnnounceSerializer`` hardcodes
+    ``to`` to the public collection and emits no ``cc``; we keep the pair
+    instead, so an undo can never be addressed wider than the act it undoes —
+    the rule ``delete_activity`` states for a tombstone.
+    """
+    actor = absolute_uri(actor_path(replier.localname))
+    followers = absolute_uri(followers_path(replier.localname))
+    if target.visibility == Visibility.PUBLIC:
+        to, cc = [PUBLIC_COLLECTION], [followers]
+    else:
+        to, cc = [followers], []
+    announce = {
+        "id": f"{actor}#announce-{replay_id}",
+        "type": "Announce",
+        "actor": actor,
+        "to": to,
+        "cc": cc,
+        "object": note_reference(request, target),
+    }
+    if not undo:
+        return announce
+    return {
+        "id": f"{actor}#undo-announce-{replay_id}",
+        "type": "Undo",
+        "actor": actor,
+        "to": to,
+        "cc": cc,
+        "object": announce,
+    }
+
+
 def shelf_event_audience(user, visibility) -> tuple[list[str], list[str]]:
     """The ``to``/``cc`` pair for a ShelfEvent (W-arc W2).
 
