@@ -70,13 +70,40 @@ class RemoteFetchError(Exception):
     """The remote actor's Person document could not be fetched or parsed."""
 
 
+class ActorGoneError(RemoteFetchError):
+    """The home server answered ``410 Gone`` for this actor: it is dead forever.
+
+    Subclassed rather than folded into :class:`RemoteFetchError` because the two
+    failures want opposite answers. Everything else the fetch can do — timeout,
+    500, garbage body — means "we could not tell who this is today", and the
+    delivery that cost us the lookup has to stay retryable in case tomorrow is
+    better. A 410 means the opposite: the actor's own server is stating, in the
+    one code reserved for it, that this identity is permanently gone, and no
+    retry will ever change that.
+
+    The case that motivated it is a deleted account whose home instance still
+    holds queued deliveries signed with its key. Refusing those with 401 keeps
+    them alive forever, because 401 is on the retryable list every peer uses
+    (see ``_refuse_inbox`` in ``views``); the queue never drains and neither
+    side ever learns.
+
+    ``404`` deliberately does **not** raise this. A missing actor is what a
+    misconfigured reverse proxy, a moved path, or a half-torn-down instance
+    looks like from here, and treating that as permanent would discard live
+    users' deliveries on a plumbing fault. 410 is the only code that is a
+    statement by the home server rather than a symptom of one.
+    """
+
+
 def fetch_person_document(actor_url: str) -> dict:
     """GET a remote actor's Person document (public — no signature needed).
 
     Raises :class:`RemoteFetchError` on any failure: unsupported scheme,
     network error, non-2xx status, non-JSON body, a document that is not a
     usable Person (missing id/publicKeyPem or the wrong type), or a document
-    whose ``id`` is not the URL it was fetched from.
+    whose ``id`` is not the URL it was fetched from. A ``410 Gone`` raises the
+    :class:`ActorGoneError` subclass, which is the one failure a caller may act
+    on permanently.
     """
     parsed = urlparse(actor_url)
     if parsed.scheme not in ("http", "https"):
@@ -93,6 +120,8 @@ def fetch_person_document(actor_url: str) -> dict:
         )
     except requests.RequestException as err:
         raise RemoteFetchError(f"Could not reach {actor_url}") from err
+    if resp.status_code == 410:
+        raise ActorGoneError(f"Actor at {actor_url} is gone (HTTP 410)")
     if resp.status_code == 404:
         raise RemoteFetchError(f"No actor at {actor_url}")
     if not resp.ok:
@@ -450,6 +479,15 @@ def _resolve_actor(actor_url: str, request, *, fetch: bool) -> "User | None":
     try:
         doc = fetch_person_document(base)
         return mirror_user_from_person(doc)
+    except ActorGoneError:
+        # Propagated instead of swallowed, and this is the only place the
+        # distinction can be made: after this line the reason the actor could
+        # not be resolved is gone, and the caller is left choosing between a
+        # retryable refusal and a final one with no evidence. "Their server
+        # says they are dead" and "I could not reach them today" are different
+        # answers to give a peer, and only the delivery in front of the caller
+        # decides which one is true.
+        raise
     except RemoteFetchError:
         return None
 
@@ -462,6 +500,11 @@ def resolve_sender(key_id: str, request) -> "User | None":
     mirror, so later deliveries verify against the stored key without
     re-fetching. Returns None when the sender cannot be resolved — the caller
     rejects the delivery.
+
+    Raises :class:`ActorGoneError` when the sender's home server says the actor
+    is permanently gone. That is not a resolution failure to report as None: it
+    is the caller's instruction to refuse the delivery in a way the peer will
+    not retry.
     """
     return _resolve_actor(key_id, request, fetch=True)
 
