@@ -37,7 +37,7 @@ from .identity import (
     person_document,
 )
 from .inbox import process_inbound_activity
-from .mirrors import resolve_sender
+from .mirrors import ActorGoneError, resolve_sender
 from .objects import create_activity
 from .signatures import extract_key_id, verify_request
 
@@ -326,8 +326,15 @@ def _inbox_too_large(request) -> bool:
     return len(request.body) > limit
 
 
-def _refuse_inbox(reason: str, *, key_id: str = "", source: str = "", sender=None):
-    """Refuse an inbox delivery with 401, having first said *which* refusal.
+def _refuse_inbox(
+    reason: str,
+    *,
+    key_id: str = "",
+    source: str = "",
+    sender=None,
+    status: int = 401,
+):
+    """Refuse an inbox delivery, having first said *which* refusal and with what code.
 
     The attribution is the whole reason this helper exists. Before it, all three
     401 branches in ``_handle_inbox_post`` were indistinguishable in the log:
@@ -338,22 +345,37 @@ def _refuse_inbox(reason: str, *, key_id: str = "", source: str = "", sender=Non
     the actor, so naming it is what turns "209 refusals" into "this account,
     failing this way".
 
-    The reason strings are a closed set on purpose (no keyid, unresolvable
-    keyid, signature mismatch): they are the diagnostic, and a test pins each
-    one so a future edit cannot quietly merge two branches back into one.
+    The reason strings are a closed set on purpose (no keyid presented, keyid not
+    resolvable, signature mismatch, actor is gone): they are the diagnostic, and
+    a test pins each one so a future edit cannot quietly merge two branches back
+    into one.
+
+    The code is a parameter because the refusals are not equally retryable, and
+    the difference is the sender's behaviour rather than ours. A peer treats
+    almost every 4xx as final — Mastodon's ``response_error_unsalvageable?`` is
+    "400-499 except 401, 408 and 429" — so 401 means *try again* to the software
+    on the other end. That is right for everything we refuse on our own account
+    (nothing presented, could not look it up today, signature did not verify) and
+    wrong for a sender the home server has declared permanently dead, where
+    "try again" is a queue that can never drain. Only that last branch passes a
+    different code, and it passes 403: not because 403 is special to us but
+    because it is the code the live peer itself uses for a sender it refuses for
+    good (its domain-block branch in ``signature_verification.rb``), while it
+    reserves 503 for a key lookup that might work later.
 
     Nothing of the body is logged. It is unauthenticated input of unbounded
     size, and the keyid already names who to go look at.
     """
     actor = getattr(sender, "actor_url", None) or "-"
     logger.warning(
-        "Inbox refused 401 (%s): keyid=%s source=%s resolved=%s",
+        "Inbox refused %d (%s): keyid=%s source=%s resolved=%s",
+        status,
         reason,
         key_id or "-",
         source or "-",
         actor,
     )
-    return HttpResponse(status=401)
+    return HttpResponse(status=status)
 
 
 def _handle_inbox_post(request):
@@ -373,10 +395,10 @@ def _handle_inbox_post(request):
 
     Status codes: 413 for a body over ``INBOX_MAX_BODY_BYTES``; 429 with
     ``Retry-After`` once an address has spent its failure budget; 401 for a
-    missing, unresolvable, or invalid signature; 400 for a signed but
-    unparseable JSON body; 202 Accepted for everything else (handled,
-    gracefully ignored, or duplicate — the outcome is not exposed to the
-    sender).
+    missing, unresolvable, or invalid signature; 403 for a sender the home
+    server declares permanently gone; 400 for a signed but unparseable JSON
+    body; 202 Accepted for everything else (handled, gracefully ignored, or
+    duplicate — the outcome is not exposed to the sender).
 
     The refusal for a spent address is 429 rather than a 4xx on purpose. A peer
     treats 4xx as final and discards the activity — Mastodon's
@@ -402,7 +424,16 @@ def _handle_inbox_post(request):
         # budget a real peer needs.
         return _refuse_inbox("no keyid presented", source=source)
 
-    sender = resolve_sender(key_id, request)
+    try:
+        sender = resolve_sender(key_id, request)
+    except ActorGoneError:
+        # The outbound fetch already happened, so this spends the same part of
+        # the address's budget as any other unresolvable sender. What differs is
+        # the answer, and the difference is the whole point: 403 is final for the
+        # peer, so the queued deliveries for a dead account drain instead of
+        # circling forever against a 401 they are coded to retry.
+        inbox_throttle.record_failure(source)
+        return _refuse_inbox("actor is gone", key_id=key_id, source=source, status=403)
     if sender is None or not sender.public_key:
         # This one cost an outbound fetch for an address we learned nothing
         # about. That is the cost being bounded.

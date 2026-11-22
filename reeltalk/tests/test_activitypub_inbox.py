@@ -24,6 +24,7 @@ from django.test import RequestFactory
 from reeltalk.activitypub import crypto, signatures
 from reeltalk.activitypub.inbox import process_inbound_activity
 from reeltalk.activitypub.mirrors import (
+    ActorGoneError,
     RemoteFetchError,
     fetch_person_document,
     mirror_user_from_person,
@@ -35,9 +36,9 @@ from reeltalk.social.models import User
 
 REMOTE_ACTOR = "https://remote.example/user/carol/"
 REMOTE_KEY_ID = f"{REMOTE_ACTOR}#main-key"
-# The three 401 branches of the inbox view must be tellable apart from the log
-# alone: behind a reverse proxy the source address names the proxy, not the
-# sender, so the logged reason plus keyid is the only attribution there is.
+# The inbox's refusal branches must be tellable apart from the log alone: behind
+# a reverse proxy the source address names the proxy, not the sender, so the
+# logged reason plus keyid is the only attribution there is.
 VIEWS_LOGGER = "reeltalk.activitypub.views"
 
 
@@ -156,6 +157,27 @@ def test_fetch_person_document_404():
     responses.add(responses.GET, REMOTE_ACTOR, status=404)
     with pytest.raises(RemoteFetchError):
         fetch_person_document(REMOTE_ACTOR)
+
+
+@responses.activate
+def test_fetch_person_document_410_is_the_one_final_failure():
+    # 410 is the only answer that is a statement by the actor's own server
+    # rather than a symptom of our plumbing, so it is the only one allowed to
+    # count as permanent.
+    responses.add(responses.GET, REMOTE_ACTOR, status=410)
+    with pytest.raises(ActorGoneError):
+        fetch_person_document(REMOTE_ACTOR)
+
+
+@responses.activate
+def test_fetch_person_document_404_is_not_a_gone_actor():
+    # The narrow half of the rule above. A missing actor is what a misconfigured
+    # reverse proxy or a moved path looks like from here, and retiring a live
+    # user's deliveries over a plumbing fault is the worse mistake of the two.
+    responses.add(responses.GET, REMOTE_ACTOR, status=404)
+    with pytest.raises(RemoteFetchError) as raised:
+        fetch_person_document(REMOTE_ACTOR)
+    assert not isinstance(raised.value, ActorGoneError)
 
 
 @responses.activate
@@ -534,6 +556,28 @@ def test_inbox_rejects_unresolvable_sender(client, caplog):
     # belonged to, so the keyid is the only name available and it must be
     # logged.
     assert "keyid not resolvable" in caplog.text
+    assert REMOTE_KEY_ID in caplog.text
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_inbox_refuses_a_gone_sender_for_good(client, caplog):
+    # The half of the last test that must not stay a 401. A deleted account's
+    # home instance keeps retrying queued deliveries signed with its key, and it
+    # reads 401 as "retry later", so refusing those with 401 is what made the
+    # loop infinite. 403 is the code the peer treats as final, and the one it
+    # uses itself for a sender it refuses for good.
+    User.objects.create_user(localname="alice", password="p")
+    responses.add(responses.GET, REMOTE_ACTOR, status=410)
+    private_pem, _public_pem = crypto.generate_keypair()
+    activity = {"id": "https://remote.example/activity/19", "type": "Follow"}
+    body = json.dumps(activity).encode()
+    headers = _signed_post("/user/alice/inbox/", body, private_pem)
+    with caplog.at_level(logging.WARNING, logger=VIEWS_LOGGER):
+        response = _post_inbox(client, "/user/alice/inbox/", body, headers)
+    assert response.status_code == 403
+    assert DeliveredActivity.objects.count() == 0
+    assert "actor is gone" in caplog.text
     assert REMOTE_KEY_ID in caplog.text
 
 
