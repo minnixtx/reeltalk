@@ -135,7 +135,14 @@ body {
   background-color: var(--black);
 }
 
-a {
+/* Red ink means clickable, and nothing else (owner ruling, 2026-11-22).
+   ``[href]`` is what makes an anchor a link, so the attribute test is the whole
+   rule. An anchor that arrives without one is inert text and must read as the
+   prose around it: a remote body's link to a domain this instance has not
+   allowed keeps its anchor and loses its href (the LinkDomain gate, §3.2), and
+   a peer's hashtag points at a tag page we do not serve. Painting those red
+   promises a click that cannot happen. */
+a[href] {
   color: var(--link);
 }
 
@@ -3979,14 +3986,16 @@ summary:focus-visible {
   background: linear-gradient(90deg, var(--red-bright), rgba(255, 65, 56, 0));
   box-shadow: none;
 }
-/* Feed prose links, including mentions: consistent with author/film links. */
+/* Feed prose links, including mentions: consistent with author/film links.
+   Gated on ``[href]`` for the same reason as the base rule above: inert prose
+   must not underline itself under the pointer. */
 .feed .review-body a {
   text-decoration: none;
   text-underline-offset: 3px;
 }
 
-.feed .review-body a:hover,
-.feed .review-body a:focus-visible {
+.feed .review-body a[href]:hover,
+.feed .review-body a[href]:focus-visible {
   text-decoration: underline;
 }
 
