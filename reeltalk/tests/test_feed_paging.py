@@ -192,7 +192,9 @@ def test_pages_concatenate_to_the_unpaged_list_exactly(alice):
 
     assert len(got) == n, f"paging produced {len(got)} rows for {n} fixture rows"
     assert {film_id(e) for e in got} == {f.pk for f in films}
-    assert len({e.source_id for e in got}) == n, "a row appeared on two pages"
+    assert len({(e.kind_rank, e.source_id) for e in got}) == n, (
+        "a row appeared on two pages"
+    )
     assert [ident(e) for e in got] == [ident(e) for e in unpaged(alice)]
     assert [e.date for e in got] == sorted((e.date for e in got), reverse=True)
 
@@ -401,7 +403,11 @@ def test_a_tied_pair_sitting_on_the_page_boundary_pages_cleanly(alice):
     assert page2[0].kind == "status"
     assert next_cursor is None
 
-    seen = [e.source_id for e in page1] + [e.source_id for e in page2]
+    # The dedup key carries kind_rank because source_id is a primary key and
+    # the two kinds come from different tables: a ShelfFilm and a Status can
+    # both be row 1, and on a feed this small they both are.
+    seen = [(e.kind_rank, e.source_id) for e in page1]
+    seen += [(e.kind_rank, e.source_id) for e in page2]
     assert len(seen) == len(set(seen)), "the tied pair duplicated across the boundary"
 
 

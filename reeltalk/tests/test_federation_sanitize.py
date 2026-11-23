@@ -28,8 +28,12 @@ Ordered by how each failure would bite:
 * The controls, which are what stop any of the above passing vacuously: prose
   that should survive does survive, an already-escaped body is not escaped
   twice, and the outbound-link allowlist now applies to remote content too.
+* The peer's own formatting markup, which is the cost of escaping instead of
+  stripping: a tag the allowlist never carried used to print on the feed as
+  its own source text.
 """
 
+import html
 import json
 
 import pytest
@@ -37,6 +41,7 @@ import responses
 from django.contrib.auth import get_user_model
 from django.test import Client
 from django.urls import reverse
+from django.utils.html import strip_tags
 
 from reeltalk.activitypub import crypto, signatures
 from reeltalk.activitypub.objects import LIST_EXTENSION
@@ -408,3 +413,92 @@ def test_a_non_string_content_is_ignored_rather_than_raising(carol, keypair):
     assert (
         Status.objects.filter(local=False, remote_url=f"{PEER}/notes/1/").count() == 0
     )
+
+
+# --- the peer's own formatting markup ---------------------------------------
+
+
+# A real Mastodon Note body, copied off the wire rather than invented. A peer
+# shortens a long URL for display by splitting it across ``span.invisible`` and
+# ``span.ellipsis``; the clickable half of a hashtag sits in a bare ``span``; a
+# mention is wrapped in ``span.h-card``. None of it is hostile, and bleach
+# escapes a tag it refuses instead of dropping it, so every tag the allowlist
+# did not carry printed on the feed as its own source text -- which is the bug
+# this section pins the absence of.
+PEER_FORMATTED_BODY = (
+    "<p>Support the Ohio Linux Fest </p>"
+    '<p><a href="https://www.zeffy.com/en-US/ticketing/ohio-linuxfest-at-the-'
+    'ohio-state-university?impact_chain_source=danny%40minnix.dev"'
+    ' target="_blank" rel="nofollow noopener" translate="no">'
+    '<span class="invisible">https://www.</span>'
+    '<span class="ellipsis">zeffy.com/en-US/ticketing/ohio</span>'
+    '<span class="invisible">-linuxfest-at-the-ohio-state-university'
+    "?impact_chain_source=danny%40minnix.dev</span></a></p>"
+    '<p><a href="https://upallnight.minnix.dev/tags/linux" class="mention hashtag"'
+    ' rel="tag">#<span>linux</span></a> '
+    '<a href="https://upallnight.minnix.dev/tags/opensource" class="mention'
+    ' hashtag" rel="tag">#<span>opensource</span></a></p>'
+    '<p><span class="h-card" translate="no">'
+    '<a href="https://upallnight.minnix.dev/users/minnix" class="u-url mention">'
+    "@<span>minnix</span></a></span> agreed</p>"
+)
+
+PEER_URL = (
+    "https://www.zeffy.com/en-US/ticketing/ohio-linuxfest-at-the-ohio-state-"
+    "university?impact_chain_source=danny%40minnix.dev"
+)
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_a_peers_formatting_spans_arrive_as_markup_not_as_page_copy(carol, keypair):
+    """The feed shows the peer's prose, not the markup that carries it.
+
+    Asserted on what a reader sees (tags stripped, entities unescaped) as well
+    as on the stored string, because the defect was exactly a difference
+    between the two: the stored HTML was inert either way, and only the render
+    turned the peer's markup into words on the page.
+    """
+    private_pem, _public = keypair
+    assert (
+        _deliver(
+            private_pem, _activity("Create", _note(PEER_FORMATTED_BODY), 15)
+        ).status_code
+        == 202
+    )
+
+    content = _mirrored_note().content
+    # Nothing arrived as escaped source text.
+    assert "&lt;" not in content
+    assert "&gt;" not in content
+    # The three shapes read as their author meant them: the whole URL
+    # (shortening is the peer client's choice, not ours to reproduce), the two
+    # hashtags, and the mention.
+    visible = html.unescape(strip_tags(content))
+    assert PEER_URL in visible
+    assert "#linux #opensource" in visible
+    assert "@minnix agreed" in visible
+    assert "<" not in visible
+    # And the gate is still a gate: a span arrives bare, and with no link
+    # domains allowed no href survives -- the §3.2 rule the controls above pin.
+    assert "class=" not in content
+    assert "href" not in content
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_a_newly_allowed_span_arrives_bare_however_the_peer_dressed_it(carol, keypair):
+    """The tag widened; the attribute gate did not.
+
+    The question a reviewer asks next about admitting ``span`` is what a peer
+    can put *on* one. Nothing: ``sanitize_html`` names only ``a`` in its
+    attribute map, so a handler and a class are both dropped rather than
+    escaped-and-shown.
+    """
+    private_pem, _public = keypair
+    body = '<p><span onclick="alert(1)" class="evil" style="x">plain</span></p>'
+    assert (
+        _deliver(private_pem, _activity("Create", _note(body), 16)).status_code == 202
+    )
+
+    assert _mirrored_note().content == "<p><span>plain</span></p>"

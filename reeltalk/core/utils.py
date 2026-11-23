@@ -8,18 +8,44 @@ import mistune
 
 from reeltalk.social.models import LinkDomain
 
-# Conservative allowlist for user-authored markdown (descriptions, reviews).
-# Markdown is rendered to HTML at write time and stored; this trims anything
-# beyond simple prose formatting (no scripts, styles, or iframes).
+# Conservative allowlist for user-authored markdown (descriptions, reviews)
+# and for HTML that arrives off the wire. Markdown is rendered to HTML at write
+# time and stored; this trims anything beyond simple prose formatting (no
+# scripts, styles, or iframes).
+#
+# The presentation tags below ``s`` are here because of remote bodies. bleach
+# *escapes* a tag it refuses rather than dropping it, so a tag missing from this
+# list does not disappear — it prints on the feed as its own source text. A
+# Mastodon Note carries three of them in ordinary prose: a long URL is split
+# across ``<span class="invisible">`` and ``<span class="ellipsis">`` so the
+# client can shorten it, the clickable half of a hashtag sits in a bare
+# ``<span>``, and a mention is wrapped in ``<span class="h-card">``. Without
+# ``span`` on this list a member following a Mastodon account reads
+# ``#&lt;span&gt;linux&lt;/span&gt;`` where the peer wrote ``#linux``.
+#
+# Widening the tag set costs nothing the attribute gate was protecting.
+# ``sanitize_html`` hands bleach an attribute map that names only ``a`` (plus
+# the two mention attributes on that path), so every tag here arrives bare: a
+# peer's ``<span class="invisible" style="...">`` keeps no class and no style,
+# which is also why these tags cannot be styled into anything they are not.
 _ALLOWED_TAGS = [
     "p",
     "br",
+    "span",
     "em",
     "strong",
     "b",
     "i",
     "u",
     "s",
+    "del",
+    "ins",
+    "sup",
+    "sub",
+    "small",
+    "mark",
+    "abbr",
+    "hr",
     "a",
     "ul",
     "ol",
@@ -35,10 +61,6 @@ _ALLOWED_TAGS = [
     "h6",
 ]
 _ALLOWED_PROTOCOLS = ["http", "https"]
-
-# The mention path adds <span> for the mention wrapper and nothing else, so
-# no other content gains a tag.
-_MENTION_TAGS = [*_ALLOWED_TAGS, "span"]
 
 # The only site-relative href the mention path admits. A mention's own link
 # carries no netloc and ``LinkDomain.is_allowed("")`` is False, so without
@@ -114,24 +136,25 @@ def sanitize_html(html: str, *, mentions: bool = False) -> str:
     protocols as ``render_markdown``, so stored user content always passes
     through one safety gate.
 
-    ``mentions=True`` widens the gate by exactly three things: the ``span``
-    tag, the mention span's two attributes, and the site-relative profile
-    href. It is opt-in per caller and **off by default**, because the other
-    consumer of this function is remote HTML from another instance's Person
-    document. Widening *that* path would let a remote bio's
-    ``href="/user/x"`` start pointing at our host instead of theirs.
+    ``mentions=True`` widens the gate by exactly two things: the mention span's
+    two attributes, and the site-relative profile href. It does not widen the
+    tag set — the mention's ``span`` is on the base list, so what the flag
+    actually buys is the ``class`` and ``data-link`` that make a span *read* as
+    a mention. The flag is opt-in per caller and **off by default**, because the
+    other consumer of this function is remote HTML from another instance's
+    Person document. Widening *that* path would let a remote bio's
+    ``href="/user/x"`` start pointing at our host instead of theirs, and let a
+    remote span arrive dressed as one of our mentions.
     """
     if not html:
         return ""
     if mentions:
-        tags = _MENTION_TAGS
         attributes = {"a": _allowed_mention_href, "span": _allowed_mention_attrs}
     else:
-        tags = _ALLOWED_TAGS
         attributes = {"a": _allowed_href}
     return bleach.clean(
         html,
-        tags=tags,
+        tags=_ALLOWED_TAGS,
         # Per-tag callable: bleach's dict form supports a filter per tag, not
         # per attribute — this one gates the only attribute <a> carries.
         attributes=attributes,

@@ -435,8 +435,8 @@ def test_nothing_underlines_the_prose_when_the_row_is_hovered():
     # Against the stylesheet before the original change it fails on
     # ``.review-open:hover ~ .review-body``, which is what makes it real.
     individual_link_interactions = {
-        ".feed .review-body a:hover",
-        ".feed .review-body a:focus-visible",
+        ".feed .review-body a[href]:hover",
+        ".feed .review-body a[href]:focus-visible",
     }
     offenders = [
         selectors
@@ -463,6 +463,36 @@ def test_post_prose_is_white_not_cream():
     assert declarations, "no .review-body rule in the shipped stylesheet"
     assert "color: var(--white)" in declarations
     assert "var(--cream)" not in declarations
+
+
+@pytest.mark.django_db
+def test_only_an_anchor_that_goes_somewhere_wears_the_link_colour():
+    # Red means clickable (owner ruling, 2026-11-22). A remote body's link to a
+    # domain this instance has not allowed keeps its anchor and loses its href
+    # (§3.2), and a peer's hashtag points at a tag page we do not serve; both
+    # render as inert text, and the bare ``a`` rule painted that text the link
+    # colour, which reads as a control that never answers. Pinned in both
+    # directions: the gated selector carries the token, and no ungated ``a``
+    # selector may reach for it anywhere in the sheet.
+    ungated = [
+        selectors
+        for selectors, declarations in _css_rules()
+        if "color: var(--link)" in declarations and "a" in selectors
+    ]
+    assert ungated == [], f"an ungated a rule paints the link colour: {ungated}"
+    assert "color: var(--link)" in (_rule_for("a[href]") or ""), (
+        "no a[href] rule carries the link colour"
+    )
+    # And inert prose must not underline itself under the pointer either.
+    prose_hover = [
+        selector
+        for selectors, declarations in _css_rules()
+        if "text-decoration: underline" in declarations
+        for selector in selectors
+        if "review-body" in selector and (":hover" in selector or ":focus" in selector)
+    ]
+    assert prose_hover, "no hover rule covers a feed prose link at all"
+    assert all("a[href]" in selector for selector in prose_hover), prose_hover
 
 
 @pytest.mark.django_db

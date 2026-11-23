@@ -101,16 +101,20 @@ def test_the_widening_keeps_the_span_attrs_and_strips_both_from_an_ordinary_anch
 
 
 @pytest.mark.django_db
-def test_span_is_denied_entirely_without_the_flag():
-    """The tag widening is the flag's, not the sanitizer's.
+def test_the_flag_widens_the_span_attributes_and_not_the_span_tag():
+    """The tag is not the flag's; the two attributes are.
 
-    Same input, no flag: the span is not a permitted tag at all and comes
-    back escaped. This is the control that makes the previous test's span
-    assertion about the widening rather than about bleach being permissive.
+    Same input, no flag: the span survives — it is on the base tag list,
+    because a peer's Note body carries a span in ordinary prose (a shortened
+    URL, a hashtag's clickable half) and bleach escapes a tag it refuses
+    rather than dropping it. What the span keeps is nothing: no ``class``, no
+    ``data-link``. That is the control which makes the previous test's span
+    assertion about the attribute widening rather than about bleach being
+    permissive, and it is what stops a remote document arriving dressed as
+    one of our mentions.
     """
     html = sanitize_html('<span class="mention" data-link="true">@alice</span>')
-    assert "<span" not in html
-    assert "&lt;span" in html
+    assert html == "<span>@alice</span>"
 
 
 @pytest.mark.django_db
@@ -423,6 +427,10 @@ def test_remote_person_html_still_loses_class_and_relative_hrefs():
     remote bio's ``href="/user/x"`` would start pointing at our host
     instead of theirs, and a remote span would arrive dressed as one of our
     mentions.
+
+    The span itself survives — it is on the base tag list, since a peer's
+    prose carries spans for URL shortening and hashtags — but it survives
+    **bare**. The assertion is that the dress comes off, not the tag.
     """
     remote = (
         '<p>remote bio with <a href="/user/alice/">a relative link</a> and '
@@ -430,9 +438,10 @@ def test_remote_person_html_still_loses_class_and_relative_hrefs():
     )
     cleaned = sanitize_html(remote)
     assert 'href="/user/alice/"' not in cleaned
-    assert "<span" not in cleaned
+    assert 'class="mention"' not in cleaned
+    assert "data-link" not in cleaned
+    assert "<span>a fake mention</span>" in cleaned
     assert "a relative link" in cleaned
-    assert "a fake mention" in cleaned
 
 
 # --- the wiring: the two status sites opt in, through their real routes ----
