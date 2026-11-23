@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
+from urllib.parse import urlparse
 
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -19,6 +20,8 @@ from django.db import IntegrityError, models, transaction
 from django.db.models import Count, F, Max, Q
 from django.utils import timezone
 from django.utils.text import slugify
+
+from reeltalk.activitypub.identity import absolute_uri
 
 if TYPE_CHECKING:
     from reeltalk.social.models import User
@@ -421,6 +424,28 @@ class ShelfFilm(models.Model):
         super().save(*args, **kwargs)
 
 
+def _is_web_url(value: str) -> bool:
+    """Whether ``value`` is an address a browser can actually be handed.
+
+    Written for :attr:`Status.share_url`, which is the first place a
+    peer-supplied string ever reaches a browser: ``Status.remote_url`` is the
+    inbound Note's ``id``, stored after a check that it is a non-empty string
+    and nothing more (no scheme allowlist, no host check), so the share helper
+    is where the scheme rule has to live. It is the same rule the film path
+    already applies at ingest (``activitypub/statuses.py``
+    ``_fetch_film_document``), and it is deliberately **narrower in scope** than
+    that one: this gates what we print, not what we accept. Validating the note
+    id on the way in is its own increment with federation blast radius of its
+    own (``SHARE_PLAN.md`` Deferred).
+
+    The ``netloc`` half is not decoration: ``urlparse("http:x")`` reports a
+    perfectly good scheme on a string with no host, which is not an address
+    either.
+    """
+    parsed = urlparse(value)
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
 class Status(models.Model):
     """A post on a film — or standalone (§3.2).
 
@@ -574,6 +599,93 @@ class Status(models.Model):
     def is_review(self) -> bool:
         """True for reviews and rating-only entries — the D5 review types."""
         return self.status_type in self.REVIEW_TYPES
+
+    @property
+    def is_reachable_offsite(self) -> bool:
+        """Could a stranger with no account here open this post at all?
+
+        The share control's one question (share arc D4), and the **shape is the
+        decision**: a property of the row that takes no viewer. An anonymous
+        reader is a first-class sharer — they are standing on a public post they
+        want to forward — and a gate written as ``may_share(user, status)``
+        invites someone to "fix" that case later, which is how a control only
+        half the audience can use gets shipped. :func:`may_replay` is the mirror
+        image and sits beside this on purpose: a replay is an act *by* a member,
+        so it takes a user and refuses an anonymous one.
+
+        Three clauses, which are the post page's own refusals read back as a
+        predicate: ``status_detail`` 404s a row the reader may not read, a
+        tombstone, and a suspended author (R102, on both of its arms). A control
+        pointing at any of those is an invitation to a dead link, which is the
+        one failure this feature has.
+
+        Two deliberate differences from ``may_replay``, both rulings:
+
+        * **your own post is reachable.** Replay withholds it (D2b); share must
+          allow it, because forwarding your own review is the most likely thing
+          a member does with this.
+        * **no block clause**, for the standing reason ``may_read`` gives —
+          blocks are per-viewer scope state and a gate inventing its own block
+          rule is a second place for that model to drift.
+
+        A ban is read alongside suspension and neither stands in for the other,
+        spelled out exactly as ``may_replay`` spells it.
+
+        Costs one query for ``self.user`` on a row not fetched with
+        ``select_related("user")`` — which is why the feed row is deferred out of
+        this arc: computed per row it is a query-count surface with its own test
+        to write (``SHARE_PLAN.md``, Deferred).
+        """
+        if self.deleted:
+            return False
+        if self.visibility != Visibility.PUBLIC:
+            return False
+        author = self.user
+        return author.suspended_at is None and author.banned_at is None
+
+    @property
+    def share_url(self) -> str:
+        """The address to hand out for this post, or "" when there is none.
+
+        Empty whenever :attr:`is_reachable_offsite` is False, and that ordering
+        is the point: a caller cannot render a control from the URL alone and so
+        cannot skip the gate, because there is no URL to build one from.
+
+        Three shapes, and the order decides which one wins:
+
+        * a **mirror** shares its home instance's URL (D3). That string is the
+          post's identity, it is what Mastodon's own copy-link hands out, and it
+          stays true while the author's server is up, where our copy of it goes
+          dead the day the mirror is dropped. It is gated on
+          :func:`_is_web_url` because it arrived off the wire. A mirror that is
+          also a list face takes this branch, and the precedence is the ruling
+          rather than an oversight: the home instance's own address is the
+          identity whatever shape it is.
+        * a **list face** shares ``/list/<id>/``, its human canonical page (L10),
+          not the Note id — the same hop ``status_detail`` makes. A face whose
+          ``FilmList`` half is missing or deleted gets nothing, because
+          ``/list/<id>/`` 404s on a deleted list and the other answer would be a
+          link to a page that is not there.
+        * a local post shares ``/status/<pk>/``.
+
+        Local addresses go through ``absolute_uri``, so they are minted off
+        ``CANONICAL_ORIGIN`` and never off the request (R108): a moderator
+        working from ``http://192.168.1.138:3030`` must not copy out a link
+        nobody else can open. Nothing is ever appended — the shared string stays
+        byte-identical to the post's identity, no ``?ref=`` to be the first
+        crack in that.
+        """
+        if not self.is_reachable_offsite:
+            return ""
+        if not self.local:
+            return self.remote_url if _is_web_url(self.remote_url) else ""
+        if self.status_type == Status.Type.LIST:
+            # Function-local, as in ``feed_entries``: lists imports this module.
+            from reeltalk.lists.models import FilmList
+
+            linked = FilmList.objects.filter(status_id=self.pk, deleted=False).first()
+            return absolute_uri(f"/list/{linked.pk}/") if linked else ""
+        return absolute_uri(f"/status/{self.pk}/")
 
     def delete(self, *args, **kwargs):
         """Soft-delete (§3.2): keep the row as a tombstone with its identity
