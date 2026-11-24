@@ -26,6 +26,7 @@ from reeltalk.activitypub.broadcast import (
 )
 from reeltalk.activitypub.identity import accepts_activitypub
 from reeltalk.activitypub.objects import film_document, note_document
+from reeltalk.core.preview import status_preview
 from reeltalk.lists.models import FilmList
 from reeltalk.mentions.models import sync_status_mentions
 from reeltalk.mentions.notify import record_mentions
@@ -373,6 +374,11 @@ def status_detail(request, status_id):
             # Free here: the row came in with ``select_related("user")`` and the
             # property reads ``self.user`` for the suspension clause.
             "share_url": status.share_url,
+            # The card a pasted link becomes (share arc S3). Built from the same
+            # ``share_url`` two lines above, so a post that has no address has no
+            # card either -- there is no second gate to keep honest, and a card
+            # that promises a page which 404s is the one failure this has.
+            "preview": status_preview(status),
             # The report control (moderation increment 2). Both halves come
             # from one helper shared with the profile so the post page and
             # the profile cannot drift on who may report what.

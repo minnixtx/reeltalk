@@ -1,0 +1,24 @@
+{% comment %}
+The card a pasted link turns into (share arc S3), included by the two pages the
+arc covers: a post and a list.
+
+It renders on ``preview.url`` and nothing else. That string is ``share_url``,
+which is empty for anything a stranger could not open, so a private post renders
+this partial for its author and prints nothing - the same one-gate rule the share
+button follows, and the reason there is no second "is this shareable" flag in the
+context to disagree with the first.
+
+Every value is built in ``reeltalk/core/preview.py`` rather than assembled here,
+so a post and a list cannot drift on what a card says, and so the wording is
+testable without a browser. The template's whole job is placement and escaping.
+{% endcomment %}
+{% if preview.url %}
+<meta property="og:url" content="{{ preview.url }}">
+<meta property="og:site_name" content="{{ preview.site_name }}">
+<meta property="og:title" content="{{ preview.title }}">
+<meta property="og:description" content="{{ preview.description }}">
+{% if preview.image %}
+<meta property="og:image" content="{{ preview.image }}">
+{% endif %}
+<meta name="twitter:card" content="{% if preview.image %}summary_large_image{% else %}summary{% endif %}">
+{% endif %}

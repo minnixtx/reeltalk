@@ -37,6 +37,7 @@ from reeltalk.activitypub.broadcast import (
 )
 from reeltalk.core.catalog import create_or_match_film, search_local
 from reeltalk.core.models import Film, Visibility, audience_q, may_read
+from reeltalk.core.preview import list_preview
 from reeltalk.core.tmdb import TmdbError, is_configured, search_films
 from reeltalk.core.views import (
     SUGGEST_LIMIT,
@@ -158,6 +159,10 @@ def list_detail(request, list_id):
             # including when this very page is rendering for the maker, who can
             # read their own private list.
             "share_url": face.share_url,
+            # The card a pasted link becomes (share arc S3), built off that same
+            # address: no address, no card. The face carries the reachability
+            # clauses, so the list's own row never has to state them.
+            "preview": list_preview(film_list, len(items)),
             # Whose list this is, decided once here rather than re-derived in
             # the template: the edit link is the only owner-only thing on
             # this page, and the routes it leads to do this same check again

@@ -4,6 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}ReelTalk{% endblock %}</title>
+  {% comment %}
+  Where a page says what it is to a machine (share arc S3). The two pages that
+  carry a card fill this with ``_link_preview.html``; every other page leaves it
+  empty, which is the ruling rather than an omission - no site-wide defaults, so a
+  page cannot promise a preview of something it has not decided to describe.
+  {% endcomment %}
+  {% block head_meta %}{% endblock %}
   <link rel="stylesheet" href="{% static 'css/reeltalk.css' %}">
   <meta name="csrf-token" content="{{ csrf_token }}">
   <script src="{% static 'js/search.js' %}" defer></script>

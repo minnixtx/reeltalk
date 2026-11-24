@@ -3,6 +3,11 @@
 
 {% block title %}{{ status.user.localname }}{% if status.film %} on {{ status.film.title }}{% endif %}{% endblock %}
 
+{% block head_meta %}
+  {# The card a pasted link becomes, when this post is one a stranger can open. #}
+  {% include "_link_preview.html" %}
+{% endblock %}
+
 {# The poster column needs a wider page than the 40rem reading column, and the #}
 {# width is a property of the column, so it rides on main rather than the article. #}
 {% block main_class %} status-page{% endblock %}
