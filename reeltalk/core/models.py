@@ -446,6 +446,69 @@ def _is_web_url(value: str) -> bool:
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
 
+def reachable_offsite(row) -> bool:
+    """Could a stranger with no account here open this row at all?
+
+    The rule :attr:`Status.is_reachable_offsite` states, lifted so it can be
+    asked of a **row** and not only of a ``Status``. The home feed builds
+    :class:`FeedEntry` values rather than statuses, and a second copy of the
+    three clauses there is the drift this avoids — the same reason
+    :class:`FeedEntry` duck-types :func:`may_replay` (R84: one question the
+    route and the template ask together). A row needs ``deleted``,
+    ``visibility`` and ``user``; anything else raises rather than defaulting
+    open.
+
+    The shape is still the ruling: **no viewer**. An anonymous reader is a
+    first-class sharer, and a gate written ``may_share(user, status)`` invites
+    someone to "fix" that case later.
+    """
+    if row.deleted:
+        return False
+    if row.visibility != Visibility.PUBLIC:
+        return False
+    author = row.user
+    return author.suspended_at is None and author.banned_at is None
+
+
+def _live_list_pk(status: "Status") -> int | None:
+    """The live ``FilmList`` behind a list's face, or ``None``."""
+    # Function-local, as in ``feed_entries``: lists imports this module.
+    from reeltalk.lists.models import FilmList
+
+    linked = FilmList.objects.filter(status_id=status.pk, deleted=False).first()
+    return linked.pk if linked else None
+
+
+def share_address(row) -> str:
+    """The address to hand out for a ``Status`` or a ``FeedEntry``, or ``""``.
+
+    :attr:`Status.share_url` is this with a ``Status``; the feed calls it per
+    row after :func:`_attach_list_strips` has already put the list id on the
+    entry, which is what keeps the whole page at a fixed query count. The three
+    shapes and the order they are tried in are S1's ruling and are written out
+    on :attr:`Status.share_url`; this is the same minting, reached two ways, so
+    a post cannot share one address on its page and another in the feed.
+
+    Empty whenever :func:`reachable_offsite` is False, and that ordering is the
+    point: a caller cannot render a control from the address alone and so cannot
+    skip the gate, because there is no address to build one from.
+    """
+    if not reachable_offsite(row):
+        return ""
+    if isinstance(row, FeedEntry):
+        mirror, remote_url, pk = row.remote, row.remote_url, row.status_id
+        is_list, list_pk = row.is_list_face, row.list_id
+    else:
+        mirror, remote_url, pk = not row.local, row.remote_url, row.pk
+        is_list = row.status_type == Status.Type.LIST
+        list_pk = _live_list_pk(row) if is_list else None
+    if mirror:
+        return remote_url if _is_web_url(remote_url) else ""
+    if is_list:
+        return absolute_uri(f"/list/{list_pk}/") if list_pk else ""
+    return absolute_uri(f"/status/{pk}/")
+
+
 class Status(models.Model):
     """A post on a film — or standalone (§3.2).
 
@@ -632,16 +695,13 @@ class Status(models.Model):
         spelled out exactly as ``may_replay`` spells it.
 
         Costs one query for ``self.user`` on a row not fetched with
-        ``select_related("user")`` — which is why the feed row is deferred out of
-        this arc: computed per row it is a query-count surface with its own test
-        to write (``SHARE_PLAN.md``, Deferred).
+        ``select_related("user")``. Every feed scope carries that join already
+        (``public_status_scope``, ``feed_for``, the replay scope), so asking it
+        per feed row costs nothing there — and the feed's rows come from
+        :func:`reachable_offsite`, the same clauses rather than a second copy
+        of them.
         """
-        if self.deleted:
-            return False
-        if self.visibility != Visibility.PUBLIC:
-            return False
-        author = self.user
-        return author.suspended_at is None and author.banned_at is None
+        return reachable_offsite(self)
 
     @property
     def share_url(self) -> str:
@@ -675,17 +735,7 @@ class Status(models.Model):
         byte-identical to the post's identity, no ``?ref=`` to be the first
         crack in that.
         """
-        if not self.is_reachable_offsite:
-            return ""
-        if not self.local:
-            return self.remote_url if _is_web_url(self.remote_url) else ""
-        if self.status_type == Status.Type.LIST:
-            # Function-local, as in ``feed_entries``: lists imports this module.
-            from reeltalk.lists.models import FilmList
-
-            linked = FilmList.objects.filter(status_id=self.pk, deleted=False).first()
-            return absolute_uri(f"/list/{linked.pk}/") if linked else ""
-        return absolute_uri(f"/status/{self.pk}/")
+        return share_address(self)
 
     def delete(self, *args, **kwargs):
         """Soft-delete (§3.2): keep the row as a tombstone with its identity
@@ -1428,6 +1478,18 @@ class FeedEntry:
     # its author's feed. Defaults to public so a row built without it - a shelf
     # event with nothing behind it - draws nothing.
     visibility: str = "public"
+    # The share control's address (share arc S2), filled by
+    # :func:`_attach_share_addresses`. Empty means "no control here", and it is
+    # the reachability gate that decided that, so a template still cannot render
+    # a button from a shape and skip the gate.
+    share_url: str = ""
+    # The three things :func:`share_address` needs to mint that address without
+    # a query of its own per row: the mirror's home URL (free, off the row it
+    # was built from), the live list behind a list face (batched, already loaded
+    # by :func:`_attach_list_strips`), and the tombstone flag the gate reads.
+    remote_url: str = ""
+    list_id: int | None = None
+    deleted: bool = False
 
     @property
     def user_id(self) -> int:
@@ -1615,6 +1677,31 @@ def _attach_list_strips(entries: list[FeedEntry]) -> None:
             posters=[posters[fid] for fid in drawn.get(row["id"], [])],
             film_count=row["item_count"],
         )
+        # The same row already in hand answers the one question ``share_address``
+        # cannot answer from a face alone, so a list row's share address costs no
+        # query of its own. A face with no live list never reaches this line, and
+        # its ``list_id`` stays ``None``, which is what makes its share address
+        # empty rather than a link to a page that is not there.
+        entry.list_id = row["id"]
+
+
+def _attach_share_addresses(entries: list["FeedEntry"]) -> None:
+    """Fill every row's share address, in no queries at all.
+
+    Runs **after** :func:`_attach_list_strips`, which is where a list row's list
+    id comes from; everything else the mint reads (author, audience, tombstone,
+    mirror home URL) is already on the row, and the author is already joined by
+    every feed scope. That is the whole reason this is a pass over the page
+    rather than a property the template reaches for: computed per row without
+    the batch it would be one query for the list faces, which is the surface
+    ``SHARE_PLAN.md`` named when it parked the feed row out of the arc.
+
+    Rows with no status — a bare shelf event — keep the empty string, and an
+    empty string is no control.
+    """
+    for entry in entries:
+        if entry.status_id is not None:
+            entry.share_url = share_address(entry)
 
 
 def _status_entry(status: "Status") -> "FeedEntry":
@@ -1638,6 +1725,10 @@ def _status_entry(status: "Status") -> "FeedEntry":
         status_id=status.id,
         remote=not status.local,
         visibility=status.visibility,
+        # Both free off this row, and both read by ``share_address`` so a feed
+        # row mints its share address with no query of its own.
+        remote_url=status.remote_url,
+        deleted=status.deleted,
     )
     if status.status_type == Status.Type.LIST:
         entry.is_list_face = True
@@ -1771,6 +1862,12 @@ def status_feed_entries(statuses, viewer) -> list["FeedEntry"]:
     """
     entries = [_status_entry(status) for status in statuses]
     _attach_interaction_counts(entries, viewer)
+    # No strip pass here, because the one caller feeds this a queryset of
+    # REVIEW_TYPES only — there is no list face to resolve. A consumer that
+    # started passing list faces would need ``_attach_list_strips`` first, or
+    # those rows would share nothing (the gate will not mint a face it cannot
+    # point at).
+    _attach_share_addresses(entries)
     return entries
 
 
@@ -2116,6 +2213,7 @@ def public_feed(
     list_entries = [entry for entry in entries if entry.is_list_face]
     if list_entries:
         _attach_list_strips(list_entries)
+    _attach_share_addresses(entries)
     next_cursor = encode_feed_cursor(entries[-1]) if has_more and entries else None
     return entries, next_cursor
 
@@ -2313,6 +2411,11 @@ def feed_entries(
     # lookups. Nothing is queried when the feed holds no list row.
     if list_entries:
         _attach_list_strips(list_entries)
+
+    # And the share addresses, after the strips because a list row's address
+    # comes off the list the strip pass just resolved. No query: everything else
+    # it reads is already on the row.
+    _attach_share_addresses(entries)
 
     # Total order, newest first (§2I increment 2). Before this the key was
     # ``entry.date`` alone, which left every same-timestamp pair ordered only by

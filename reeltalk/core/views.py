@@ -360,6 +360,19 @@ def status_detail(request, status_id):
             "replayed_by_viewer": request.user.is_authenticated
             and status.replays.filter(user=request.user).exists(),
             "replayable": may_replay(request.user, status),
+            # The share control's address (share arc S2). The view asks the row
+            # for it rather than letting the template build a path, so the page
+            # cannot guess its way past the reachability gate: ``share_url`` is
+            # empty for anything a stranger could not open, and an empty string
+            # gives the template nothing to render a button from. No second
+            # "is shareable" flag is passed, because there would be nothing to
+            # read that the address does not already carry — the predicate is
+            # inside it (``Status.share_url``), and a second flag is a second
+            # place for the two to disagree.
+            #
+            # Free here: the row came in with ``select_related("user")`` and the
+            # property reads ``self.user`` for the suspension clause.
+            "share_url": status.share_url,
             # The report control (moderation increment 2). Both halves come
             # from one helper shared with the profile so the post page and
             # the profile cannot drift on who may report what.
