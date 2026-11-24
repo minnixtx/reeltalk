@@ -118,6 +118,17 @@ from the footer partial's direction.
     <script src="{% static 'js/likes.js' %}" defer></script>
   {% endif %}
   <script src="{% static 'js/feed.js' %}" defer></script>
+  {% comment %}
+  ``share.js`` goes to everyone, on the same reasoning as ``feed.js`` just above:
+  the share button is the one control in the row a signed-out reader gets (D5),
+  so withholding it would leave a stranger's feed with an inert icon.
+
+  It ships unconditionally rather than only when this page happens to hold a
+  shareable row, because of the endless scroll: later pages are appended into
+  THIS document, and a row that arrives on page 3 with a button and no script
+  bound to it is dead. Page 1 cannot know what the next cursor holds.
+  {% endcomment %}
+  <script src="{% static 'js/share.js' %}" defer></script>
 
   {% comment %}
   D8 (moderation/notifications arc M4): for a member the rail is a desktop

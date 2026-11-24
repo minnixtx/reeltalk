@@ -196,9 +196,18 @@ def test_the_reply_control_still_opens_the_composer(review):
 
 
 @pytest.mark.django_db
-def test_a_stranger_gets_the_count_and_no_controls(review):
+def test_a_stranger_gets_the_count_and_no_member_controls(review):
+    """The counts stay, the member's controls do not.
+
+    This used to assert that the action row was absent altogether for a reader
+    with no account. The share arc (S2, owner ruling 2026-11-23) changed that on
+    purpose: a stranger now gets that row holding exactly one control, the share
+    button, and ``test_share_control.py`` counts it. What this page still owes is
+    that nothing a member acts on is offered here.
+    """
     article = _article(_page(None, review))
-    assert '<div class="row-actions">' not in article
+    assert "applaud-btn" not in article
+    assert "reply-btn" not in article
     assert 'class="review-head"' in article
 
 

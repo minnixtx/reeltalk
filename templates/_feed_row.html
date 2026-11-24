@@ -131,8 +131,27 @@ a second channel to say so.
   {# Mastodon draws between a post's facts and its actions. The wrapper is one #}
   {# element at every width on purpose: a control cannot live in two places, and #}
   {# a second copy would be a second click target to keep honest. #}
-  {% if user.is_authenticated %}
-    {% if entry.interactive or entry.replyable %}
+  {% comment %}
+  The row used to be gated twice: once on the reader having an account and once
+  on the row carrying a control. The first of those was the accidental guard —
+  ``interactive`` and ``replyable`` are facts about the row, not about the
+  reader, so the wrapper was the only thing keeping applaud and reply off a
+  stranger's feed, which is what the N6 comment inside the row says outright.
+  The share control has to reach that stranger (D5), so un-gating the wrapper
+  means those two controls each take the auth clause the wrapper was carrying,
+  in the same change. The owner's ruling is the one the post page got: a
+  logged-out reader sees exactly one icon in this row and it is the share
+  button, not two and not zero.
+
+  ``replayable`` needs no clause of its own. It is ``may_replay`` asked of the
+  row, and that function answers False for an anonymous reader, so the page
+  still withholds exactly what the route refuses (R85).
+
+  The wrapper's own test keeps an empty bar off the page: a member gets it when
+  the row can carry a control at all (``replyable`` implies ``interactive``, so
+  the one covers both), and anybody gets it when there is a share address.
+  {% endcomment %}
+  {% if entry.share_url or user.is_authenticated and entry.interactive %}
     <div class="row-actions">
       {# The control takes the *narrower* flag (R84): "may I put a control here", never "may I open this". Since increment 5 that set includes mirrors — an Applaud now reaches their home instance. #}
       {# Icon-only, no text: the accessible name and the tooltip both come from #}
@@ -177,7 +196,7 @@ a second channel to say so.
           <span class="replay-count" aria-live="polite">{{ entry.replay_count }}</span>
         </span>
       {% endif %}
-      {% if entry.interactive %}
+      {% if user.is_authenticated and entry.interactive %}
         <span class="applaud">
           <button type="button" class="applaud-btn" data-url="{% url 'status-like' entry.status_id %}" data-state="{% if entry.liked_by_viewer %}mine{% else %}idle{% endif %}" aria-pressed="{% if entry.liked_by_viewer %}true{% else %}false{% endif %}" title="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}" aria-label="{% if entry.liked_by_viewer %}Applauded — click to remove{% else %}Applaud{% endif %}"></button>
           <span class="applaud-count" aria-live="polite">{{ entry.like_count }}</span>
@@ -220,13 +239,35 @@ a second channel to say so.
       an anonymous reader gets neither button, because the reply route is
       ``login_required`` too.
       {% endcomment %}
-      {% if entry.replyable %}
+      {% if user.is_authenticated and entry.replyable %}
         <span class="reply">
           <a class="reply-btn" href="{% url 'status' entry.status_id %}?reply=1" data-state="{% if entry.replied_by_viewer %}mine{% else %}idle{% endif %}" title="{% if entry.replied_by_viewer %}You replied — reply again{% elif entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply{% else %}Reply{% endif %}" aria-label="{% if entry.replied_by_viewer %}You replied — reply again to this post{% elif entry.reply_count %}{{ entry.reply_count }} repl{{ entry.reply_count|pluralize:'y,ies' }} — reply to this post{% else %}Reply to this post{% endif %}"></a>
           <span class="reply-count" aria-live="polite">{{ entry.reply_count }}</span>
         </span>
       {% endif %}
+      {% comment %}
+      The share control (share arc S2), last in the bar after reply, so the row
+      reads replay, applaud, reply, share here exactly as it does on the post
+      page. Gated on ``entry.share_url`` and nothing else: the address is minted
+      in ``_attach_share_addresses`` through the same ``share_address`` a post
+      page uses, and it is empty for anything a stranger could not open — a
+      followers-only or private row, a mirror whose stored home URL is not an
+      http address, a row whose author is suspended or banned. The row is a
+      stretched anchor, and this is a button inside ``.row-actions``, which is
+      the selector the stylesheet raises above the overlay (and the one
+      test_feed_click_target.py holds).
+
+      It carries no notice of its own. What the press did goes in the floating
+      pill share.js raises (owner ruling, 2026-11-23): a line beside the icon
+      would widen the group inside a right-aligned bar and slide the icon out
+      from under a second press, and on this row the thing underneath is the
+      link that opens the post.
+      {% endcomment %}
+      {% if entry.share_url %}
+        <span class="share">
+          <button type="button" class="share-btn" data-share-url="{{ entry.share_url }}" title="Share" aria-label="Share"></button>
+        </span>
+      {% endif %}
     </div>
-    {% endif %}
   {% endif %}
 </li>

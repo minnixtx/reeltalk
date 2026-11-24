@@ -46,4 +46,14 @@ the home feed.
 {% if user.is_authenticated %}
 <script src="{% static 'js/likes.js' %}" defer></script>
 {% endif %}
+{% comment %}
+share.js binds .share-btn document-wide, so the same rule applies: it follows
+the control. The row mints the share address per row (an empty one means a
+stranger could not open that post), so the view says whether this page holds
+one, and the script ships only when it does. Unlike the home feed, this page
+is re-rendered whole per page rather than appended to, so it can afford that.
+{% endcomment %}
+{% if has_share %}
+<script src="{% static 'js/share.js' %}" defer></script>
+{% endif %}
 {% endblock %}

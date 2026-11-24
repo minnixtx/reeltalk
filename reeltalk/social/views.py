@@ -984,7 +984,15 @@ def user_profile(request, localname):
     # Feed rows, not raw Statuses: the template draws the home feed's card
     # (D6), and status_feed_entries is what fills the flags and tallies that
     # make the row's controls real rather than decorative.
-    data["reviews"] = status_feed_entries(page_obj.object_list, viewer)
+    entries = status_feed_entries(page_obj.object_list, viewer)
+    data["reviews"] = entries
+    # Whether any row on THIS page carries an address the share control may
+    # point at (share arc S2), which is what gates the script below. The home
+    # feed ships share.js unconditionally because its endless scroll appends
+    # rows this render cannot see; this page is a whole document per page, so it
+    # can keep the rule the home feed has to break — do not ship a script for a
+    # control the page did not draw (the mirror image of R85).
+    data["has_share"] = any(entry.share_url for entry in entries)
     data["page_obj"] = page_obj
     return render(request, "social/profile.html", data)
 

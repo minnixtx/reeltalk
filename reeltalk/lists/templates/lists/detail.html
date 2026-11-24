@@ -61,6 +61,25 @@
         <span class="reply-count" aria-live="polite">{{ replies|length }}</span>
       </span>
       {% endif %}
+      {% comment %}
+      The share control (share arc S2). This page has no action row, so the
+      control joins the head line after the two it sits beside on a post:
+      replay, applaud, reply, share, in that order wherever they appear. The
+      Save and Edit controls that follow are a different weight of control
+      (the lit pill, R135) and only some readers are offered them, so the icon
+      group stays together rather than being split by them.
+
+      Gated on ``share_url`` and nothing else: the view asks the face's own
+      ``Status.share_url``, which is empty unless a stranger could open the list
+      (D4), so a private list renders this page for its maker and carries no
+      control. A deleted list never reaches this page at all, and a face with no
+      live list behind it gets an empty address for the same reason.
+      {% endcomment %}
+      {% if share_url %}
+      <span class="share">
+        <button type="button" class="share-btn" data-share-url="{{ share_url }}" title="Share" aria-label="Share"></button>
+      </span>
+      {% endif %}
       {% if is_owner %}
         {# The maker's way into increment 3. A link rather than a button: #}
         {# this only navigates, and `button, .btn` is the lit crimson #}
@@ -155,5 +174,10 @@
   <script src="{% static 'js/likes.js' %}" defer></script>
   <script src="{% static 'js/comments.js' %}" defer></script>
   <script src="{% static 'js/list_save.js' %}" defer></script>
+{% endif %}
+{% if share_url %}
+  {# Outside the gate above: the share button is the one control on this line a
+     signed-out reader gets, so its script has to reach them too (share arc S2). #}
+  <script src="{% static 'js/share.js' %}" defer></script>
 {% endif %}
 {% endblock %}

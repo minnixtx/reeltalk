@@ -1643,6 +1643,131 @@ button.replay-btn:hover {
   color: var(--white);
 }
 
+/* Share control (share arc S2). It sits LAST in the action row, after reply, and
+   copies the applaud contract exactly: a 26px icon, no border, ``center /
+   contain``, and a uniform scale(1.08) on hover.
+
+   Two things it deliberately does NOT copy. There is no count beside it, because
+   a share has no tally — D1 is that sharing means handing out the link and
+   nothing about it is recorded — and there is no second drawing, because the
+   control has no state to show: one file serves every reader, which is also why
+   the ink rule (red means *I* did this) has nothing to mean here.
+
+   The glyph is the owner's own ``~/design-elements/share-icon.svg``, byte for
+   byte, on the same 24-unit square canvas the other three use. Measured at this
+   box it is 22x24 ink at 27.2% coverage: the lightest of the four in the row,
+   but 3.6 points under the reply bubble it sits beside rather than a different
+   weight class, which is what put it in the row at all.
+
+   What the press leaves behind is a floating pill (owner ruling, 2026-11-23), not
+   a line beside the icon: the inline version pushed the icon 59px along the bar
+   while the word was up, so a second press landed on whatever the row does
+   instead. ``position: fixed`` takes no space anywhere, so nothing can move. */
+.share {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+}
+
+.share-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: url("../images/share-icon.svg") center / contain no-repeat;
+  background-color: transparent;
+  box-shadow: none;
+  text-shadow: none;
+  margin-top: 0;
+  cursor: pointer;
+}
+
+/* The element name is load-bearing for the same reason it is on
+   ``button.applaud-btn:hover``: ``button:hover, .btn:hover`` outspecs a plain
+   class, so without the fill reset here a red plate arrives behind the artwork
+   the moment the cursor does. */
+button.share-btn:hover {
+  background-color: transparent;
+  transform: scale(1.08);
+  box-shadow: none;
+  filter: none;
+}
+
+/* The notice ``share.js`` leaves after a press. One element, created by the
+   script and appended to ``body``, so it is the same shape on the feed row, the
+   post page and the list page and never belongs to any of their layouts.
+
+   Cream paper on near-black ink, which is the inversion the reference carries and
+   the house's own ticket-stub colour at the same time; the mono is the treatment
+   every count in the row already uses, so the notice reads as machine-spoken
+   rather than as prose. It rests at ``opacity: 0`` rather than ``display: none``
+   on purpose: the element is the page's live region (``role="status"``) and a
+   screen reader only announces a region it can still see laid out.
+
+   ``z-index`` clears the finish-flow modal at 100 because a toast that arrives
+   behind the dialog you just pressed inside is a toast nobody reads. */
+.share-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  transform: translateX(-50%) translateY(6px);
+  z-index: 200;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--cream);
+  color: var(--black);
+  font-family: ui-monospace, "DejaVu Sans Mono", "Liberation Mono", monospace;
+  font-weight: 700;
+  font-size: 1rem;
+  white-space: nowrap;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.share-toast.is-up {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Same measurement keeps the notice off the phone navigation bar, which is what
+   occupies the bottom of the viewport there. It sits here rather than in the
+   ``max-width: 1023px`` block above because both rules are a single class: the
+   later one wins, and the base rule is down here with the rest of the share
+   group. Measured on a 390px viewport before this was moved: the pill's bottom
+   landed 31px inside the bar. ``--bottom-nav-row`` is declared on ``body`` in
+   that block, and the pill is a body child, so the custom property is in scope
+   wherever this rule lives. */
+@media (max-width: 1023px) {
+  .share-toast {
+    bottom: calc(var(--bottom-nav-row) + 1px + 20px + env(safe-area-inset-bottom));
+  }
+}
+
+/* The last rung of ``share.js``'s ladder needs something it can select, and these
+   pages carry no field the way the invite box does. Fixed rather than
+   ``display: none``, because a browser will not select what it never laid out;
+   opacity keeps it off the page and ``pointer-events`` keeps it out of the way. */
+.share-field {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  /* 16px is the phone rule: below it a mobile browser zooms the page to focus a
+     field, which a control nobody asked to see must never do. */
+  font-size: 16px;
+}
+
 /* The replay byline on a feed row (replay arc P3), measured in the rendered mock
    at ~/design-elements/replay-mock/ and ruled from it.
 

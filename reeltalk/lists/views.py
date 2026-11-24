@@ -95,7 +95,9 @@ def list_detail(request, list_id):
     1, 2, 4 while the list has three films.
     """
     film_list = get_object_or_404(
-        FilmList.objects.select_related("user", "status"),
+        # ``status__user`` because the share address below reads the face's author
+        # for its suspension clause; without it that one property costs one query.
+        FilmList.objects.select_related("user", "status__user"),
         pk=list_id,
         deleted=False,
     )
@@ -148,6 +150,14 @@ def list_detail(request, list_id):
             # the reply icon carries on the post page — no second state to
             # keep in step, and it works with JavaScript switched off.
             "reply_open": request.GET.get("reply") == "1",
+            # The share control's address (share arc S2), asked of the face
+            # rather than built here: a list shares ``/list/<id>/``, its canonical
+            # human page (L10), and ``Status.share_url`` is the one place that
+            # shape is decided. Empty unless a stranger could open the list, so
+            # the template has nothing to build a control from in that case --
+            # including when this very page is rendering for the maker, who can
+            # read their own private list.
+            "share_url": face.share_url,
             # Whose list this is, decided once here rather than re-derived in
             # the template: the edit link is the only owner-only thing on
             # this page, and the routes it leads to do this same check again
