@@ -176,8 +176,7 @@
   <script src="{% static 'js/list_save.js' %}" defer></script>
 {% endif %}
 {% if share_url %}
-  {# Outside the gate above: the share button is the one control on this line a
-     signed-out reader gets, so its script has to reach them too (share arc S2). #}
+  {# Outside the gate above: the share button is the one control on this line that a signed-out reader gets, so its script has to reach them too (share arc S2). #}
   <script src="{% static 'js/share.js' %}" defer></script>
 {% endif %}
 {% endblock %}
