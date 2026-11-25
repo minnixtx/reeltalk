@@ -129,6 +129,19 @@ def _mirror(film, localname="carol@remote.example"):
     return carol, mirror
 
 
+# A reply row carries the author's delete form since the author edit/delete arc,
+# and a form carries the per-request CSRF nonce: two clients rendering the same
+# row differ in exactly that attribute value. An equality test masks it out of
+# both sides first, so "identical" means the row and not the nonce.
+_CSRF_NONCE = re.compile(
+    r'<input type="hidden" name="csrfmiddlewaretoken" value="[^"]*"'
+)
+
+
+def _no_nonce(rendered: str) -> str:
+    return _CSRF_NONCE.sub("", rendered)
+
+
 def _login(localname):
     client = Client()
     assert client.login(username=localname, password="s3cretpass")
@@ -470,7 +483,7 @@ def test_reply_endpoint_returns_the_row_rendered_by_the_pages_own_partial(
     assert "review reply-row" in data["html"]
     assert "Agreed." in data["html"]
     page = _login("bob").get(f"/status/{parent.pk}/").content.decode()
-    assert data["html"].strip() in page
+    assert _no_nonce(data["html"]).strip() in _no_nonce(page)
 
 
 @pytest.mark.django_db

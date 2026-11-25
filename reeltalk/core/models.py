@@ -1982,6 +1982,55 @@ def may_replay(user, status) -> bool:
     return author.suspended_at is None and author.banned_at is None
 
 
+def may_delete(user, status) -> bool:
+    """Whether ``user`` may delete ``status`` — the single home of the rule.
+
+    The instance twin of the scope ``delete_review`` used to carry in its own
+    ``get_object_or_404`` filters, lifted out for the same reason
+    :func:`may_replay` exists: the route and the page both answer this one
+    question, and two answers is how R85's bug — a control whose POST lands
+    nowhere, or a write the page never offers — comes back.
+
+    Four clauses, mirroring the author's own delete:
+
+    * **not authenticated** — False. An anonymous reader gets no control on a
+      page that is otherwise public to them.
+    * **not the author** — False. Someone else's post is a moderator's
+      decision, and that is a different route with a different gate
+      (``moderation``'s ``delete_reported_status``). The two must not merge.
+    * **a mirror** (``local=False``) — False. Another instance owns that row;
+      deleting it here would only ever be a local edit of a copy, which is not
+      a thing this app pretends to do.
+    * **already deleted** — False. The tombstone is the record that this
+      happened; a second delete has nothing to do.
+
+    The fifth clause is the LIST refusal, and it is a refusal of the *status*
+    route rather than of deleting a list. A list's face is a ``Status``, so this
+    route's lookup admits it, and ``status.delete()`` would take the face down
+    while the ``FilmList`` above it stayed ``deleted=False`` — a live list with
+    no social half, readable but impossible to applaud, reply to, or see in
+    anybody's feed, and unreachable by the list's own delete because that delete
+    had already been satisfied by half of it happening here. No link ever
+    pointed a list's face at this form, but "the UI does not offer it" is not a
+    guard. A list is deleted through ``POST /list/<id>/delete/``, which takes
+    both halves down together in one transaction.
+
+    It checks **no suspension or block clause**, and that is a consequence rather
+    than an omission: both hide the page (R102, R56), so no control renders for
+    an author the server has hidden, and a gate that invents its own suspension
+    rule is a second place for that model to drift.
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if status.user_id != user.pk:
+        return False
+    if not status.local:
+        return False
+    if status.deleted:
+        return False
+    return status.status_type != Status.Type.LIST
+
+
 def readable_statuses(viewer):
     """Every status ``viewer`` may read, before any other filter (V1)."""
     return Status.objects.filter(audience_q(viewer))

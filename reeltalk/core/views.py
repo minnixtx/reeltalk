@@ -56,6 +56,7 @@ from .models import (
     genre_from_slug,
     live_reviews,
     mark_watched,
+    may_delete,
     may_read,
     may_replay,
     popular_genres,
@@ -174,7 +175,7 @@ def _reply_to_label(parent, root, blocked_ids) -> str:
     return parent.user.localname
 
 
-def _thread_rows(root, blocked_ids) -> list[tuple[Status, str]]:
+def _thread_rows(root, blocked_ids, viewer) -> list[tuple[Status, str]]:
     """The thread as the post page renders it: live, flat, labelled.
 
     ``(reply, reply_to)`` pairs in conversation order. Blocking is applied
@@ -190,12 +191,24 @@ def _thread_rows(root, blocked_ids) -> list[tuple[Status, str]]:
     through hidden nodes on purpose. That is the correct outcome — hiding
     the whole subtree would let one suspension erase conversations other
     people are still having, which is more deletion than a hide decided.
+
+    Each row also carries its own ``deletable`` flag, asked of
+    :func:`may_delete` — the same predicate the delete route refuses with.
+    It rides on the row rather than the page because the answer is per-reply:
+    a thread is several members' rows, and the page-level flag on the post
+    above says nothing about who wrote this one. Computing it here is what
+    makes the rule hold in every render of ``_reply.html`` at once — the
+    post page and the list page both build their thread through this helper,
+    so neither can grow a reply row whose control was forgotten.
     """
-    return [
+    rows = [
         (reply, _reply_to_label(parent, root, blocked_ids))
         for reply, parent in conversation(root)
         if reply.user_id not in blocked_ids and reply.user.suspended_at is None
     ]
+    for reply, _label in rows:
+        reply.deletable = may_delete(viewer, reply)
+    return rows
 
 
 def status_detail(request, status_id):
@@ -304,7 +317,7 @@ def status_detail(request, status_id):
     # order. The depth policy is written out on ``conversation``; the short
     # form is that the data keeps its real nesting (so inReplyTo stays
     # honest) and the page refuses to render it as indentation.
-    replies = _thread_rows(status, blocked_ids)
+    replies = _thread_rows(status, blocked_ids, request.user)
     can_report, already_reported = report_state(request.user, target_status=status)
     return render(
         request,
@@ -379,6 +392,13 @@ def status_detail(request, status_id):
             # card either -- there is no second gate to keep honest, and a card
             # that promises a page which 404s is the one failure this has.
             "preview": status_preview(status),
+            # Whether this reader may delete this post (author edit/delete arc
+            # I1). ``may_delete`` is the same predicate ``delete_review`` refuses
+            # with — author, local, live, not a list's face — so the control
+            # renders on exactly the posts its POST will land on (R85). The
+            # route's fourth clause is ``deleted``, and this page needs no twin:
+            # a tombstone 404s here before the context is ever built.
+            "deletable": may_delete(request.user, status),
             # The report control (moderation increment 2). Both halves come
             # from one helper shared with the profile so the post page and
             # the profile cannot drift on who may report what.
@@ -497,6 +517,11 @@ def reply_to_status(request, status_id):
     # mirror of a remote post has a remote author for exactly that reason.
     notify(parent.user, request.user, Notification.Kind.REPLY, reply)
     blocked_ids = set(request.user.blocks.values_list("id", flat=True))
+    # The row is handed to the page's own partial, so it has to arrive wearing
+    # the same flag the thread loop's rows get from ``_thread_rows`` — otherwise
+    # a reply you just posted would render without the delete control its own
+    # route accepts, and grow one only on the next reload.
+    reply.deletable = may_delete(request.user, reply)
     return JsonResponse(
         {
             "html": render_to_string(
@@ -509,7 +534,7 @@ def reply_to_status(request, status_id):
             ),
             # The number the heading has to show after this row lands —
             # counted the same way the page counts it, not guessed here.
-            "count": len(_thread_rows(parent, blocked_ids)),
+            "count": len(_thread_rows(parent, blocked_ids, request.user)),
         }
     )
 
@@ -747,29 +772,19 @@ def mark_watched_view(request, film_id):
 def delete_review(request, status_id):
     """Delete the user's own review (M5 increment 4).
 
-    Author-only: the lookup is scoped to the requesting user's local,
-    non-deleted statuses, so someone else's review, a remote mirror, or an
-    already-deleted tombstone all 404. Soft-delete keeps the row as a
+    Author-only: :func:`may_delete` is the single home of the rule — someone
+    else's row, a remote mirror, an already-deleted tombstone, and a list's
+    post face all 404 — and it is the same predicate the post page asks before
+    it renders the Delete control, so the page cannot offer a delete this route
+    would refuse (R85). Soft-delete keeps the row as a
     tombstone with its identity intact (§3.2) and clears its content; the
     film stays on the Watched shelf (v0.1 has no unwatch — R19), so the feed
     shows a bare "watched" entry (R35). The deletion is broadcast to the
     author's remote followers (M4 increment 6); local followers read the
     local tombstone their feed query already filters on ``deleted=False``.
     """
-    status = get_object_or_404(
-        Status, id=status_id, user=request.user, local=True, deleted=False
-    )
-    # A list's post face is a ``Status``, so this route's own lookup used to
-    # admit it — and ``status.delete()`` would take the face down while the
-    # ``FilmList`` above it stayed ``deleted=False``. That is a live list with
-    # no social half: readable, but impossible to applaud, reply to, or see in
-    # anybody's feed, and unreachable by the list's own delete because that
-    # delete had already been satisfied by half of it happening here. No link
-    # ever pointed a list's face at this form, but "the UI does not offer it"
-    # is not a guard, so the route refuses a LIST outright. Deleting a list
-    # goes through ``POST /list/<id>/delete/``, which takes both halves down
-    # together in one transaction.
-    if status.status_type == Status.Type.LIST:
+    status = get_object_or_404(Status, id=status_id)
+    if not may_delete(request.user, status):
         raise Http404
     film_id = status.film_id
     status.delete()
@@ -777,7 +792,16 @@ def delete_review(request, status_id):
     # A dead follower drops its send — this request must not fail because of
     # one unreachable instance.
     broadcast_status_delete(request, status)
-    messages.success(request, "Your review has been deleted.")
+    # The notice names what was actually deleted (author edit/delete arc, D7).
+    # The control no longer sits only on reviews, so "your review" reads wrong
+    # on a reply; the split is "a review of a film" against everything else,
+    # which is exactly what ``REVIEW_TYPES`` already means for D5. A film-less
+    # reply carries no ``status_type`` at all (L13) and is a reply in every
+    # sense the reader can see, so it falls on the reply side of the branch.
+    if status.is_review:
+        messages.success(request, "Your post has been deleted.")
+    else:
+        messages.success(request, "Your reply has been deleted.")
     if film_id is not None:
         return redirect("film", film_id=film_id)
     return redirect("index")
