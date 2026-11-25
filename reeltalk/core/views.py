@@ -12,6 +12,7 @@ from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from reeltalk.activitypub import read_auth
@@ -57,6 +58,7 @@ from .models import (
     live_reviews,
     mark_watched,
     may_delete,
+    may_edit,
     may_read,
     may_replay,
     popular_genres,
@@ -175,7 +177,9 @@ def _reply_to_label(parent, root, blocked_ids) -> str:
     return parent.user.localname
 
 
-def _thread_rows(root, blocked_ids, viewer) -> list[tuple[Status, str]]:
+def _thread_rows(
+    root, blocked_ids, viewer, editing_id=None
+) -> list[tuple[Status, str]]:
     """The thread as the post page renders it: live, flat, labelled.
 
     ``(reply, reply_to)`` pairs in conversation order. Blocking is applied
@@ -192,14 +196,28 @@ def _thread_rows(root, blocked_ids, viewer) -> list[tuple[Status, str]]:
     the whole subtree would let one suspension erase conversations other
     people are still having, which is more deletion than a hide decided.
 
-    Each row also carries its own ``deletable`` flag, asked of
-    :func:`may_delete` — the same predicate the delete route refuses with.
-    It rides on the row rather than the page because the answer is per-reply:
-    a thread is several members' rows, and the page-level flag on the post
-    above says nothing about who wrote this one. Computing it here is what
+    Each row also carries its own ``deletable`` and ``editable`` flags, asked of
+    :func:`may_delete` and :func:`may_edit` — the same predicates the two routes
+    refuse with. They ride on the row rather than the page because the answer is
+    per-reply: a thread is several members' rows, and the page-level flag on the
+    post above says nothing about who wrote this one. Computing them here is what
     makes the rule hold in every render of ``_reply.html`` at once — the
-    post page and the list page both build their thread through this helper,
-    so neither can grow a reply row whose control was forgotten.
+    post page and the list page both build their thread through this helper, so
+    neither can grow a reply row whose control was forgotten.
+
+    ``editing_id`` is the reply this URL asks to be rewritten (``?edit=<id>``,
+    read by the view that owns the page). It is stamped on the matching row
+    rather than compared in the template because the partial has three renderers
+    and only the page ones have a query string: the row ``comments.js`` appends
+    arrives with no such question asked of it, and an unstamped attribute reads
+    false there, which is exactly right — a row that has just been written is not
+    a row being edited.
+
+    It is stamped **through** ``editable`` and not beside it, so that naming a row
+    in the URL is never what makes it yours: the flag means "this row is yours and
+    this URL asked for it", and the partial has one condition to trust rather than
+    two to remember together. The route checks ``may_edit`` again on the POST, as
+    it must — a flag that hides a form is not a permission.
     """
     rows = [
         (reply, _reply_to_label(parent, root, blocked_ids))
@@ -208,7 +226,26 @@ def _thread_rows(root, blocked_ids, viewer) -> list[tuple[Status, str]]:
     ]
     for reply, _label in rows:
         reply.deletable = may_delete(viewer, reply)
+        reply.editable = may_edit(viewer, reply)
+        reply.editing = reply.editable and reply.pk == editing_id
     return rows
+
+
+def _editing_id(request):
+    """The reply this URL asks to be rewritten (``?edit=<id>``), or ``None``.
+
+    Read straight off the query string for the same reason ``reply_open`` is:
+    the Edit link's href *is* the flag, so there is no second piece of state to
+    keep in step, and a member with JavaScript disabled gets a working editor
+    because the server put the textarea in the HTML rather than a script
+    deciding whether to show it. A value that is not a number answers ``None``
+    rather than guessing; whether the row opens at all is the row's own
+    ``editable`` flag's decision, and this only names which row was asked for.
+    """
+    try:
+        return int(request.GET.get("edit", ""))
+    except ValueError:
+        return None
 
 
 def status_detail(request, status_id):
@@ -317,7 +354,7 @@ def status_detail(request, status_id):
     # order. The depth policy is written out on ``conversation``; the short
     # form is that the data keeps its real nesting (so inReplyTo stays
     # honest) and the page refuses to render it as indentation.
-    replies = _thread_rows(status, blocked_ids, request.user)
+    replies = _thread_rows(status, blocked_ids, request.user, _editing_id(request))
     can_report, already_reported = report_state(request.user, target_status=status)
     return render(
         request,
@@ -518,10 +555,11 @@ def reply_to_status(request, status_id):
     notify(parent.user, request.user, Notification.Kind.REPLY, reply)
     blocked_ids = set(request.user.blocks.values_list("id", flat=True))
     # The row is handed to the page's own partial, so it has to arrive wearing
-    # the same flag the thread loop's rows get from ``_thread_rows`` — otherwise
-    # a reply you just posted would render without the delete control its own
-    # route accepts, and grow one only on the next reload.
+    # the same flags the thread loop's rows get from ``_thread_rows`` — otherwise
+    # a reply you just posted would render without the controls its own routes
+    # accept, and grow them only on the next reload.
     reply.deletable = may_delete(request.user, reply)
+    reply.editable = may_edit(request.user, reply)
     return JsonResponse(
         {
             "html": render_to_string(
@@ -537,6 +575,97 @@ def reply_to_status(request, status_id):
             "count": len(_thread_rows(parent, blocked_ids, request.user)),
         }
     )
+
+
+def _reply_page(status):
+    """The URL of the page whose thread shows ``status``, or ``None``.
+
+    A reply is rendered on its parent's page and never on one of its own, so the
+    parent is the page a reader is standing on when they act on a reply row. A
+    reply whose parent is a tombstone has no such page: a deleted post 404s on its
+    own URL, which is why the orphan rule hands that reply a page of its own
+    instead (increment 4).
+
+    The edit and the delete both land here, for one reason they share. A control
+    on a reply row that throws the reader onto a page which does not show that row
+    reads as the row having taken something else with it: a reply inherits its
+    film from the review above it, so a delete that routed off ``film_id`` sent
+    the reader to the film page, which shows no replies at all, and the replies
+    still standing looked like they had been deleted too.
+    """
+    parent = status.reply_parent
+    if parent is None or parent.deleted:
+        return None
+    return reverse("status", kwargs={"status_id": parent.pk})
+
+
+@login_required
+@require_POST
+def edit_reply(request, status_id):
+    """Rewrite the text of your own reply (author edit/delete arc I2).
+
+    The arc's one new route. :func:`may_edit` is the single home of who may —
+    author, local, live, a reply — and it is the same predicate a reply row asks
+    before it renders its Edit link, so the page offers exactly the edits this
+    route takes (R85). A review, a rating-only row, a list's face and someone
+    else's reply all 404: their doors are the film page's modal, nothing, and the
+    list editor (D2, D4).
+
+    What is written is the text and nothing else. ``content`` is re-rendered from
+    the new source through ``render_markdown`` rather than patched into the stored
+    HTML — the stored half is already sanitized, and re-running the sanitizer over
+    escaped markup cannot heal it. ``visibility`` stays out of the update set,
+    following the review path's ruling that an audience is fixed at writing.
+    ``edited_date`` is stamped only when the text actually changed, the way
+    ``mark_watched`` stamps it, so pressing Save on an untouched reply neither
+    marks it edited nor puts a no-op ``Update`` on the wire.
+
+    Mention rows are re-synced before the broadcast, so a dropped ``@name`` stops
+    being delivered to and a new one arrives and is notified once (M-e).
+    """
+    status = get_object_or_404(Status, id=status_id)
+    if not may_edit(request.user, status):
+        raise Http404
+    raw_content = request.POST.get("content", "")
+    # Where the reader lands: the parent's page, because that is the thread the
+    # Edit link was clicked in. The fallback is the reply's own page, which is the
+    # only place an orphan (a reply under a tombstone) can be read at all, and
+    # landing on a 404 after a saved edit would read as the edit having deleted
+    # the reply.
+    back = _reply_page(status) or reverse("status", kwargs={"status_id": status.pk})
+    # Both refusals check before anything is written, and both leave the editor
+    # open — the reader's place in the page is unchanged, so there is no reason to
+    # close the thing they were using. The empty rule is ``reply_to_status``'s
+    # own, worded the same: clearing the text is not a way to delete a reply,
+    # which is what the Delete button beside it is for (D5).
+    if not raw_content.strip():
+        messages.error(request, "A reply needs some text.")
+        return redirect(f"{back}?edit={status.pk}")
+    # The same cap and the same sentence ``add_reply`` refuses with, so the two
+    # doors that write a reply body cannot disagree about its limit.
+    if len(raw_content) > REPLY_MAX_LENGTH:
+        messages.error(
+            request, f"Replies are limited to {REPLY_MAX_LENGTH:,} characters."
+        )
+        return redirect(f"{back}?edit={status.pk}")
+    if raw_content == status.raw_content:
+        # Nothing changed, so nothing is written, stamped, or broadcast. The
+        # notice says so rather than claiming an update that did not happen.
+        messages.info(request, "Your reply is unchanged.")
+        return redirect(back)
+    status.content = render_markdown(raw_content, mentions=True)
+    status.raw_content = raw_content
+    status.edited_date = timezone.now()
+    status.save(update_fields=["content", "raw_content", "edited_date"])
+    # Written before the broadcast so the tag array and the delivery audience are
+    # read from the same rows (mentions increment 3), and notified after the sync
+    # so the set told and the set on the wire are one list.
+    mentioned = mentions_from_text(raw_content)
+    sync_status_mentions(status, mentioned)
+    record_mentions(status, mentioned)
+    broadcast_status_update(request, status)
+    messages.success(request, "Your reply has been updated.")
+    return redirect(back)
 
 
 @login_required
@@ -802,6 +931,19 @@ def delete_review(request, status_id):
         messages.success(request, "Your post has been deleted.")
     else:
         messages.success(request, "Your reply has been deleted.")
+    # A reply goes back to the thread it was just in, which is where its own
+    # notice belongs; a review goes to the film page, whose shelf entry survives
+    # it (R19). Reading the film off the row is not enough for a reply: it
+    # inherits the film from the review above it, and the film page shows no
+    # replies, so the reader who deleted one reply landed somewhere the surviving
+    # replies were not.
+    page = _reply_page(status)
+    if page is not None:
+        return redirect(page)
+    if status.reply_parent_id is not None:
+        # An orphan reply. Its parent was already a tombstone and now it is one
+        # too, so no page on this instance shows it any more.
+        return redirect("index")
     if film_id is not None:
         return redirect("film", film_id=film_id)
     return redirect("index")
