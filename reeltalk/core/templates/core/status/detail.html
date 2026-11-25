@@ -42,6 +42,11 @@
     <a class="review-author" href="{% url 'user-profile' status.user.localname %}">{{ status.user.localname }}</a>
     {% if status.rating %}<span class="rating" title="{{ status.rating|floatformat:'-1' }} / 5">{{ status.rating|stars }}</span>{% endif %}
     <span class="post-date">{{ status.published_date|date:"Y-m-d" }}</span>
+    {# The edited marker (I3 ruling 2): the bare word, no date, no tooltip, and #}
+    {# only where an edit was actually recorded. ``edited_date`` is stamped on a #}
+    {# text change and never for a stars-only re-finish (ruling 4), so the word #}
+    {# appears exactly when the prose moved. Everyone sees it (ruling 5). #}
+    {% if status.edited_date %}<span class="edited-marker">edited</span>{% endif %}
     {# The audience marker (visibility V1). This page 404s for anyone who may not #}
     {# read the post, so a marker here is the author (or a follower) seeing which #}
     {# audience a post went to - never a hint about something withheld. Public #}
@@ -209,6 +214,23 @@
       soft-delete: the tombstone keeps its identity, so the cost is a re-write,
       not a lost object.
       {% endcomment %}
+      {% comment %}
+      The author's own edit door (author edit/delete arc I3, ruling 1). It adds
+      no editor: the film page already carries a mark-watched modal that opens
+      prefilled with this review's text and stars, so this link is that door
+      with the handle on this side — it lands on the film page with
+      ``?edit-review=1``, which renders the modal already open.
+
+      ``review_editable`` is ``may_edit_review`` asked of this post in the view:
+      author, local, live, a review type, and a film to land on. That is exactly
+      the set whose deep link opens a prefilled editor, so the link never
+      promises a modal the page cannot prefill (R85). A reply gets no link here
+      — its door is the inline editor on its own row, and the two doors are
+      disjoint because a reply is not a review type.
+      {% endcomment %}
+      {% if review_editable %}
+        <a class="review-edit-link" href="{% url 'film' status.film.id %}?edit-review=1">Edit</a>
+      {% endif %}
       {% if deletable %}
         <form method="post" action="{% url 'status-delete' status.id %}" class="inline status-delete">
           {% csrf_token %}
