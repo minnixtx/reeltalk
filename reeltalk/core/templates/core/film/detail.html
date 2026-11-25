@@ -92,7 +92,14 @@
 </section>
 
 {% if user.is_authenticated %}
-<div class="modal" id="mark-watched-modal" hidden>
+{# The modal renders already open when the post page's Edit link arrived with #}
+{# ``?edit-review=1`` (I3 ruling 1): dropping the ``hidden`` attribute here is #}
+{# the server putting the form in the HTML, not a script deciding to show it, #}
+{# so the deep link works with JavaScript switched off — the ``?reply=1`` #}
+{# pattern on the post page, one window later. The view only sets the flag #}
+{# when this member has a review here, so an open modal is always a prefilled #}
+{# one and never a blank form under an edit promise. #}
+<div class="modal" id="mark-watched-modal" {% if not edit_review_open %}hidden{% endif %}>
   <div class="modal-backdrop"></div>
   <div class="modal-dialog">
     <h2>{% if user_review %}Edit your review of “{{ film.title }}”{% else %}Mark “{{ film.title }}” as watched{% endif %}</h2>

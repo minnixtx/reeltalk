@@ -2073,6 +2073,43 @@ def may_edit(user, status) -> bool:
     return status.reply_parent_id is not None
 
 
+def may_edit_review(user, status) -> bool:
+    """Whether ``user`` may rewrite ``status`` through the film page's modal.
+
+    The review twin of :func:`may_edit`, and the mirror image of it: that
+    predicate covers replies, this one covers the rows an edit reaches through
+    the existing mark-watched modal rather than a new editor (I3 ruling 1 — the
+    film page already re-renders and re-broadcasts a changed review, so this
+    increment adds a door, not a second writer of the same field).
+
+    The first four clauses are ``may_edit``'s — not authenticated, not the
+    author, a mirror, already deleted — because the door is the author's own and
+    no more. The last two are where this door's handle actually lives:
+
+    * **not a review type** — False. A reply has its inline editor, a list's
+      face has the list editor, and a rating-only row has no text to rewrite;
+      the modal that would open for any of them is about a review.
+    * **no film** — False. The door is ``/film/<id>/`` with the modal open, and
+      a status with no film has no such address to link to. A review always
+      carries one (``Status.save`` refuses a typed status without a film), so
+      this clause only ever refuses the shapes that were never reviews.
+
+    No suspension or block clause, for the standing reason both siblings give:
+    both hide the page, so no control renders where the row is hidden anyway.
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if status.user_id != user.pk:
+        return False
+    if not status.local:
+        return False
+    if status.deleted:
+        return False
+    if status.status_type not in Status.REVIEW_TYPES:
+        return False
+    return status.film_id is not None
+
+
 def readable_statuses(viewer):
     """Every status ``viewer`` may read, before any other filter (V1)."""
     return Status.objects.filter(audience_q(viewer))

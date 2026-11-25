@@ -59,6 +59,7 @@ from .models import (
     mark_watched,
     may_delete,
     may_edit,
+    may_edit_review,
     may_read,
     may_replay,
     popular_genres,
@@ -143,6 +144,17 @@ def film_detail(request, film_id):
             )
             .order_by("id")
             .first()
+        )
+        # Whether the modal renders already open (author edit/delete arc I3,
+        # ruling 1). The post page's Edit link lands here with ``?edit-review=1``
+        # and the server removes the modal's ``hidden`` rather than a script
+        # adding it back — the same shape ``?reply=1`` gives the composer, so the
+        # deep link works with JavaScript switched off. The param alone is not
+        # enough: opening the mark-watched modal on a film this member never
+        # reviewed would offer a blank form under an "edit" promise, so the flag
+        # is the param AND an existing review, and nothing else decides.
+        data["edit_review_open"] = request.GET.get("edit-review") == "1" and (
+            data["user_review"] is not None
         )
         # The block-film control's state (R55).
         data["is_film_blocked"] = request.user.blocked_films.filter(pk=film.id).exists()
@@ -436,6 +448,14 @@ def status_detail(request, status_id):
             # route's fourth clause is ``deleted``, and this page needs no twin:
             # a tombstone 404s here before the context is ever built.
             "deletable": may_delete(request.user, status),
+            # Whether this reader may edit this post through the film page's
+            # modal (author edit/delete arc I3, ruling 1). ``may_edit_review``
+            # is the door's own rule — author, local, live, a review type, and a
+            # film to land on — so the Edit link renders on exactly the posts
+            # whose deep link opens a prefilled editor (R85). A reply gets this
+            # False and keeps its inline editor instead; the two doors are
+            # disjoint by construction, because a reply is not a review type.
+            "review_editable": may_edit_review(request.user, status),
             # The report control (moderation increment 2). Both halves come
             # from one helper shared with the profile so the post page and
             # the profile cannot drift on who may report what.

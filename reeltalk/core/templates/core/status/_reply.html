@@ -35,6 +35,12 @@ by document order, not by construction.
     <a class="review-author" href="{% url 'user-profile' reply.user.localname %}">{{ reply.user.localname }}</a>
     {% if reply_to %}<span class="reply-to muted">replying to {{ reply_to }}</span>{% endif %}
     <span class="post-date">{{ reply.published_date|date:"Y-m-d" }}</span>
+    {# The edited marker (I3 ruling 3): a reply carries the bare word too, #}
+    {# beside the date, wherever this partial renders — the post page and a #}
+    {# list's thread are both ruled surfaces, and this row is never drawn on #}
+    {# the feed or a list face, which are the two places that must stay clean. #}
+    {# ``edited_date`` is stamped by the edit route only on a real text change. #}
+    {% if reply.edited_date %}<span class="edited-marker">edited</span>{% endif %}
     {% comment %}
     The author's own controls on their own reply (author edit/delete arc I1 and
     I2). ``reply.deletable`` and ``reply.editable`` are set by whoever renders

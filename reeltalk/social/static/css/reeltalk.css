@@ -1347,6 +1347,21 @@ ul.errorlist {
   color: var(--white);
 }
 
+/* The edited marker (author edit/delete arc I3, ruling 2 as revised in live
+   review): the bare word "edited" beside a post's date, on the post page only
+   — the post and its reply rows, wherever the thread renders. The film page's
+   review list and a profile's review list were ruled off because a review list
+   reads as a feed and the feed is kept clean on purpose. No date, no time, no
+   tooltip — the word is the whole marker, and it renders only where an edit was
+   actually recorded, so an untouched post never grows a second date to compare
+   against the first. Muted brown is the ink every other small fact on these
+   rows already uses (the audience drawing above, the caveats below); the word
+   is a footnote to the date, not a second opinion about it, and nothing here
+   underlines or caps it for the same reason. */
+.edited-marker {
+  color: var(--muted);
+}
+
 /* The audience marker (visibility V1). A member has to be able to tell at a
    glance which audience a post went to, and a drawing is the cheapest way to
    say it without a sentence. Only rows the reader is allowed to read ever
@@ -1461,8 +1476,13 @@ ul.errorlist {
    which is also why the older ``.list-edit-link`` rule below renders red despite
    what it says. The size, tracking and caps are this control's own, and the
    no-underline is what keeps a metadata row from turning into a hedge of rules:
-   that one the author sheet does win over the browser default. */
-.reply-edit-link {
+   that one the author sheet does win over the browser default.
+
+   ``.review-edit-link`` is the same control on the post page's action row
+   (author edit/delete arc I3, ruling 1) — same offer, so same voice, one rule
+   rather than two that can drift. */
+.reply-edit-link,
+.review-edit-link {
   font-family: var(--ui);
   font-size: 0.82rem;
   letter-spacing: 0.05em;
@@ -1471,7 +1491,8 @@ ul.errorlist {
   white-space: nowrap;
 }
 
-.reply-edit-link:hover {
+.reply-edit-link:hover,
+.review-edit-link:hover {
   color: var(--accent);
 }
 
