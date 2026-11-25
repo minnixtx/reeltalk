@@ -192,6 +192,29 @@
           <button type="button" class="share-btn" data-share-url="{{ share_url }}" title="Share" aria-label="Share"></button>
         </span>
       {% endif %}
+      {% comment %}
+      The author's own delete (author edit/delete arc I1). Last in the row,
+      after the four interaction controls, because it is not from that family:
+      replay, applaud, reply and share all act on the post as a reader, this
+      one takes it away.
+
+      ``deletable`` is ``may_delete`` asked of this post in the view — the same
+      predicate the route refuses with — so the control is offered on exactly
+      the posts whose POST lands (R85): your own, local, live, and not a list's
+      face. A mirror gets nothing, and neither does anyone but the author.
+
+      No confirm step and no explanatory caption (D5, and the owner's ruling of
+      2026-11-17 that took the captions off delete controls). The app's two
+      existing deletes are direct POSTs, and the net under a misclick is the
+      soft-delete: the tombstone keeps its identity, so the cost is a re-write,
+      not a lost object.
+      {% endcomment %}
+      {% if deletable %}
+        <form method="post" action="{% url 'status-delete' status.id %}" class="inline status-delete">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger cinema-button">Delete</button>
+        </form>
+      {% endif %}
     </div>
   {% endif %}
 </article>

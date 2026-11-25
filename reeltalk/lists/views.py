@@ -146,7 +146,7 @@ def list_detail(request, list_id):
             # The thread on the list's face. Flat, labelled and block-filtered
             # by the post page's own helper, so a reply under a list reads
             # exactly as a reply under a review does.
-            "replies": _thread_rows(face, blocked_ids),
+            "replies": _thread_rows(face, blocked_ids, request.user),
             # The composer opens off the query string, the same single flag
             # the reply icon carries on the post page — no second state to
             # keep in step, and it works with JavaScript switched off.

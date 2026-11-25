@@ -10,7 +10,9 @@ client inserts what the server rendered instead of rebuilding it.
 ``reply`` is the reply Status; ``reply_to`` is who it answers, already
 resolved to display text by the view: "" for a direct reply to the post,
 "a hidden reply" or "a deleted reply" when naming the author would name
-something this viewer is not shown.
+something this viewer is not shown. The caller also stamps
+``reply.deletable``, the same flag both of its callers can set — see the
+delete control below.
 
 The row wears ``reply-row``, **not** ``reply``. ``.reply`` is the reply
 *control's* class (``reeltalk.css`` — ``display: inline-flex``), and the
@@ -32,6 +34,24 @@ by document order, not by construction.
     <a class="review-author" href="{% url 'user-profile' reply.user.localname %}">{{ reply.user.localname }}</a>
     {% if reply_to %}<span class="reply-to muted">replying to {{ reply_to }}</span>{% endif %}
     <span class="post-date">{{ reply.published_date|date:"Y-m-d" }}</span>
+    {% comment %}
+    The author's own delete on their own reply (author edit/delete arc I1).
+    ``reply.deletable`` is set by whoever renders this — ``_thread_rows`` for
+    the page's loop, ``reply_to_status`` for the row comments.js appends — and
+    it is ``may_delete``, the predicate the route itself refuses with, so a row
+    never carries a control whose POST lands nowhere (R85). The flag rides on
+    the row rather than the page because a thread is several members' rows: the
+    post above says nothing about who wrote this one.
+    Right-aligned by the sheet's ``.review-head form.review-delete`` rule, the
+    same placement the film page's review delete has always had. No confirm
+    step, no caption (D5, owner's ruling of 2026-11-17).
+    {% endcomment %}
+    {% if reply.deletable %}
+      <form method="post" action="{% url 'status-delete' reply.id %}" class="inline review-delete">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger cinema-button">Delete</button>
+      </form>
+    {% endif %}
   </div>
   {% if reply.content %}<div class="review-body">{{ reply.content|safe }}</div>{% endif %}
 </li>
