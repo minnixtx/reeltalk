@@ -1440,6 +1440,41 @@ ul.errorlist {
   margin-left: auto;
 }
 
+/* The reply row's control cluster (author edit/delete arc I2): Edit beside
+   Delete, the pair right-aligned in the head. The auto margin above belongs to
+   a head that carries one control; with two it would strand the Edit link back
+   with the date and row the Delete out alone, so the wrapper carries it here.
+   The wrapper shrink-wraps to its contents, which leaves the form's own auto
+   margin no free space to spend inside it — the pair stays together. */
+.review-head .row-controls {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* The "Edit" on your own reply, in the quiet voice the list page's "Edit list"
+   has always used: an offer to go edit something, not a command. No colour here
+   on purpose. ``a[href]`` paints every real link the link red (owner ruling,
+   2026-11-22) at a specificity a single class cannot beat, so a colour on this
+   rule would be a declaration that never wins and a reader the sheet lies to —
+   which is also why the older ``.list-edit-link`` rule below renders red despite
+   what it says. The size, tracking and caps are this control's own, and the
+   no-underline is what keeps a metadata row from turning into a hedge of rules:
+   that one the author sheet does win over the browser default. */
+.reply-edit-link {
+  font-family: var(--ui);
+  font-size: 0.82rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.reply-edit-link:hover {
+  color: var(--accent);
+}
+
 /* The notifications ledger (M3, owner ruling D6). An unseen row is one newer
    than the member's mark-read timestamp — the same comparison the bell counts
    with, drawn here as an amber left rule and brighter text, so "new since you
@@ -2014,7 +2049,8 @@ button.share-btn:hover {
 }
 
 .modal-dialog textarea,
-.reply-form textarea {
+.reply-form textarea,
+.reply-edit textarea {
   width: 100%;
   padding: 0.45rem 0.6rem;
   font: inherit;
@@ -2031,6 +2067,37 @@ button.share-btn:hover {
 
 .reply-form button {
   margin-top: 0.75rem;
+}
+
+/* The inline editor an Edit link opens in place of a reply's own text (author
+   edit/delete arc I2). It takes the composer's field treatment by sharing its
+   textarea rule above rather than by sharing its class: ``comments.js`` claims
+   every ``form.reply-form`` and answers it with a JSON fetch, so an editor in
+   that class would have its submit swallowed and never navigate. What it needs
+   of its own is a smaller top gap, since it sits inside a row that already has
+   its own spacing rather than under a page heading, the submit's gap the
+   composer's rule gives by the same route, and the Cancel link the composer has
+   no use for. Placed after ``.reply-form`` above at the same specificity, which
+   is what makes the tighter gap win rather than lose quietly. */
+.reply-edit {
+  margin-top: 0.5rem;
+}
+
+.reply-edit button {
+  margin-top: 0.75rem;
+}
+
+/* Cancel beside Save, the same shape the list editor's Cancel has: red like
+   every other clickable thing on this theme (see the ``a[href]`` note above),
+   sentence case, and its own hover. */
+.reply-edit-cancel {
+  margin-left: 0.75rem;
+  font-family: var(--ui);
+  font-size: 0.9rem;
+}
+
+.reply-edit-cancel:hover {
+  color: var(--accent);
 }
 
 /* "replying to @x" on a flat thread row, and the orphan line on a reply

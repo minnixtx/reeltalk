@@ -36,12 +36,19 @@ from reeltalk.activitypub.broadcast import (
     broadcast_list_update,
 )
 from reeltalk.core.catalog import create_or_match_film, search_local
-from reeltalk.core.models import Film, Visibility, audience_q, may_read
+from reeltalk.core.models import (
+    REPLY_MAX_LENGTH,
+    Film,
+    Visibility,
+    audience_q,
+    may_read,
+)
 from reeltalk.core.preview import list_preview
 from reeltalk.core.tmdb import TmdbError, is_configured, search_films
 from reeltalk.core.views import (
     SUGGEST_LIMIT,
     _blocked_tmdb_ids,
+    _editing_id,
     _local_film_ids,
     _local_rows,
     _thread_rows,
@@ -145,8 +152,16 @@ def list_detail(request, list_id):
             ).exists(),
             # The thread on the list's face. Flat, labelled and block-filtered
             # by the post page's own helper, so a reply under a list reads
-            # exactly as a reply under a review does.
-            "replies": _thread_rows(face, blocked_ids, request.user),
+            # exactly as a reply under a review does — including its Edit link,
+            # which opens off the same ``?edit=<id>`` flag the post page reads.
+            "replies": _thread_rows(
+                face, blocked_ids, request.user, _editing_id(request)
+            ),
+            # The reply composer's maxlength comes from the same constant
+            # ``add_reply`` refuses with. The composer here carries no maxlength
+            # (it never did), but the inline editor this page can open does, and
+            # the partial is shared with the post page.
+            "reply_max_length": REPLY_MAX_LENGTH,
             # The composer opens off the query string, the same single flag
             # the reply icon carries on the post page — no second state to
             # keep in step, and it works with JavaScript switched off.

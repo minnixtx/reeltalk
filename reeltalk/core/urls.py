@@ -54,6 +54,14 @@ urlpatterns = [
         views.reply_to_status,
         name="status-reply",
     ),
+    # Edit the text of your own reply (author edit/delete arc I2): re-render,
+    # stamp, re-sync mentions, broadcast the Update. Replies only — a review is
+    # edited through the film page's modal.
+    path(
+        "status/<int:status_id>/edit/",
+        views.edit_reply,
+        name="status-edit",
+    ),
     path("film/<int:film_id>/edit/", views.film_edit, name="film-edit"),
     path("film/<int:film_id>/shelve/", views.shelve, name="film-shelve"),
     path("film/<int:film_id>/unshelve/", views.unshelve, name="film-unshelve"),

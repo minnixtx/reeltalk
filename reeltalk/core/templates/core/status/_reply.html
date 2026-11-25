@@ -10,9 +10,10 @@ client inserts what the server rendered instead of rebuilding it.
 ``reply`` is the reply Status; ``reply_to`` is who it answers, already
 resolved to display text by the view: "" for a direct reply to the post,
 "a hidden reply" or "a deleted reply" when naming the author would name
-something this viewer is not shown. The caller also stamps
-``reply.deletable``, the same flag both of its callers can set — see the
-delete control below.
+something this viewer is not shown. The caller also stamps ``reply.deletable``
+and ``reply.editable``, the flags both of its callers can set, and the page's
+view stamps ``reply.editing`` on the one row this URL asked to rewrite — see
+the controls and the editor below.
 
 The row wears ``reply-row``, **not** ``reply``. ``.reply`` is the reply
 *control's* class (``reeltalk.css`` — ``display: inline-flex``), and the
@@ -35,23 +36,69 @@ by document order, not by construction.
     {% if reply_to %}<span class="reply-to muted">replying to {{ reply_to }}</span>{% endif %}
     <span class="post-date">{{ reply.published_date|date:"Y-m-d" }}</span>
     {% comment %}
-    The author's own delete on their own reply (author edit/delete arc I1).
-    ``reply.deletable`` is set by whoever renders this — ``_thread_rows`` for
-    the page's loop, ``reply_to_status`` for the row comments.js appends — and
-    it is ``may_delete``, the predicate the route itself refuses with, so a row
-    never carries a control whose POST lands nowhere (R85). The flag rides on
-    the row rather than the page because a thread is several members' rows: the
-    post above says nothing about who wrote this one.
-    Right-aligned by the sheet's ``.review-head form.review-delete`` rule, the
-    same placement the film page's review delete has always had. No confirm
-    step, no caption (D5, owner's ruling of 2026-11-17).
+    The author's own controls on their own reply (author edit/delete arc I1 and
+    I2). ``reply.deletable`` and ``reply.editable`` are set by whoever renders
+    this — ``_thread_rows`` for the page's loop, ``reply_to_status`` for the row
+    comments.js appends — and they are ``may_delete`` and ``may_edit``, the
+    predicates the two routes refuse with, so a row never carries a control whose
+    POST lands nowhere (R85). The flags ride on the row rather than the page
+    because a thread is several members' rows: the post above says nothing about
+    who wrote this one.
+
+    Both sit in one right-aligned cluster. The sheet's ``.review-head
+    form.review-delete`` rule puts the auto margin on the delete form alone,
+    which is right while it is the only control here and would otherwise strand
+    the Edit link back with the date; the wrapper carries the auto margin instead
+    and shrink-wraps, so the two read as the pair they are. No confirm step and
+    no explanatory caption on the delete (D5, owner's ruling of 2026-11-17).
+
+    The Edit link carries ``?edit=<this row's id>``, not ``?edit=1``: a member
+    with two replies in one thread has to be able to open one of them, and the id
+    is the only thing that says which. ``reply.editing`` is the answer coming
+    back the other way — the row this URL asked for renders its editor in place
+    of its text, and loses its Edit link while it does.
     {% endcomment %}
-    {% if reply.deletable %}
-      <form method="post" action="{% url 'status-delete' reply.id %}" class="inline review-delete">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-danger cinema-button">Delete</button>
-      </form>
+    {% if reply.editable or reply.deletable %}
+      <span class="row-controls">
+        {% if reply.editable and not reply.editing %}
+          <a class="reply-edit-link" href="?edit={{ reply.id }}">Edit</a>
+        {% endif %}
+        {% if reply.deletable %}
+          <form method="post" action="{% url 'status-delete' reply.id %}" class="inline review-delete">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger cinema-button">Delete</button>
+          </form>
+        {% endif %}
+      </span>
     {% endif %}
   </div>
-  {% if reply.content %}<div class="review-body">{{ reply.content|safe }}</div>{% endif %}
+  {% if reply.editing %}
+    {% comment %}
+    The inline editor (I2). It replaces the row's text rather than opening over
+    it, and it is on the page because the URL said so — the same server-rendered
+    shape ``?reply=1`` gives the composer, so it works with JavaScript switched
+    off. It pre-fills from ``raw_content``, never the rendered HTML: the stored
+    half is already sanitized and re-running the sanitizer over escaped markup
+    cannot heal it, so the source is the only honest thing to hand back.
+    ``maxlength`` comes from the constant the route refuses with, and the form
+    carries nothing a script could be waiting for.
+
+    Which is the point of the class name. It deliberately does **not** carry
+    ``reply-form``, the composer's class: ``comments.js`` claims every
+    ``form.reply-form`` on the page, calls ``preventDefault`` and answers it with
+    a fetch that expects JSON. An editor wearing that class never navigates — the
+    submit is swallowed, the ``Update`` goes out as a fetch nobody reads, and the
+    page sits unchanged under the member's own click. Found by clicking it in a
+    real browser with the suite green, and pinned in ``test_reply_edit.py``.
+    {% endcomment %}
+    <form class="reply-edit" method="post" action="{% url 'status-edit' reply.id %}">
+      {% csrf_token %}
+      <label for="id_reply_edit_{{ reply.id }}">Edit your reply</label>
+      <textarea name="content" id="id_reply_edit_{{ reply.id }}" rows="3" maxlength="{{ reply_max_length }}" autofocus>{{ reply.raw_content }}</textarea>
+      <button type="submit" class="btn cinema-button cinema-button--primary">Save</button>
+      <a class="reply-edit-cancel" href="?">Cancel</a>
+    </form>
+  {% elif reply.content %}
+    <div class="review-body">{{ reply.content|safe }}</div>
+  {% endif %}
 </li>

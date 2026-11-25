@@ -2031,6 +2031,48 @@ def may_delete(user, status) -> bool:
     return status.status_type != Status.Type.LIST
 
 
+def may_edit(user, status) -> bool:
+    """Whether ``user`` may rewrite ``status``'s text — the single home of the rule.
+
+    The reply twin of :func:`may_delete`, built the same way for the same reason:
+    the route and the page both answer this one question, and two answers is how
+    R85's bug comes back — a control whose POST lands nowhere, or a write the
+    page never offered.
+
+    The first four clauses are ``may_delete``'s: not authenticated, not the
+    author, a mirror, already deleted. The fifth is where the two part, and it is
+    the whole reason this is a second predicate rather than a call to the first.
+    Delete covers every author-owned local row that is not a list's face (D4);
+    an edit covers **replies only**:
+
+    * a review's door is the film page's mark-watched modal, which already
+      re-renders and re-broadcasts a changed review (D2), so a second review
+      editor here would be a second writer of the same field;
+    * a rating-only row has no text to rewrite at all;
+    * a list's face is edited through the list editor, which owns both halves.
+
+    "is a reply" is read off ``reply_parent``, not off ``status_type``, and that
+    is a correction rather than a loose reading of the plan. L13 made the type
+    follow the film, so a reply under a film-less face — a list's post row —
+    carries no ``status_type`` at all while being a reply in every way a reader
+    can see: it threads, it federates, it is deletable. Testing the type would
+    refuse exactly the replies the list page renders, which is the half the owner
+    ruled gets the control too.
+
+    No suspension or block clause, for the reason ``may_delete`` gives: both hide
+    the page, so no control renders where the row is hidden anyway.
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if status.user_id != user.pk:
+        return False
+    if not status.local:
+        return False
+    if status.deleted:
+        return False
+    return status.reply_parent_id is not None
+
+
 def readable_statuses(viewer):
     """Every status ``viewer`` may read, before any other filter (V1)."""
     return Status.objects.filter(audience_q(viewer))

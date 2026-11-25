@@ -345,24 +345,61 @@ def test_deleting_a_reply_says_reply(alice, bob, dune):
 
 
 @pytest.mark.django_db
-def test_a_film_anchored_reply_lands_on_the_film(alice, bob, dune):
-    # A reply inherits the film (increment 4), so its delete lands where the
-    # review's does. Exact Location, not "a 302".
+def test_a_review_delete_lands_on_the_film(alice, dune):
     post = _review(alice, dune)
-    mine = _reply(bob, post)
-    resp = _login("bob").post(f"/status/{mine.pk}/delete/")
+    resp = _login("alice").post(f"/status/{post.pk}/delete/")
     assert resp.status_code == 302
     assert resp["Location"] == f"/film/{dune.pk}/"
 
 
 @pytest.mark.django_db
-def test_a_film_less_reply_lands_on_the_index(alice, dune, alien):
+def test_a_reply_delete_lands_back_on_the_thread_it_came_from(alice, bob, dune):
+    # The delete used to pick its page off ``film_id``, and a reply inherits its
+    # film from the review above it, so deleting one reply landed on the film
+    # page — a page that shows no replies at all. Exact Location, not "a 302".
+    post = _review(alice, dune)
+    mine = _reply(bob, post)
+    resp = _login("bob").post(f"/status/{mine.pk}/delete/")
+    assert resp.status_code == 302
+    assert resp["Location"] == f"/status/{post.pk}/"
+
+
+@pytest.mark.django_db
+def test_the_surviving_replies_are_on_the_page_the_delete_lands_on(alice, bob, dune):
+    # The shape the bad redirect hid: two replies of your own, one deleted, and
+    # the page you arrive on shows neither of them. Following the redirect is the
+    # whole assertion — the notice belongs on the page that still has the thread.
+    post = _review(alice, dune)
+    mine = _reply(bob, post)
+    _reply(bob, post, text="<p>Still here.</p>", raw="Still here.")
+    client = _login("bob")
+    resp = client.post(f"/status/{mine.pk}/delete/")
+    body = _body(client, resp["Location"])
+    assert "Still here." in body
+    assert "Agreed." not in body
+    assert "Your reply has been deleted." in body
+
+
+@pytest.mark.django_db
+def test_a_reply_under_a_list_lands_back_on_the_list(alice, dune, alien):
     # A reply under a list's face has no film to inherit (L13), so the film page
-    # is not a destination for its delete. This is the row that answers
-    # ``redirect("index")``, and the only one.
+    # was never even a candidate for its delete: it went to the feed instead. The
+    # face's own URL answers with the list page's redirect.
     listing = create_list(alice, title="Cold War Sci-Fi", films=[dune, alien])
     mine = _reply(alice, listing.status)
     resp = _login("alice").post(f"/status/{mine.pk}/delete/")
+    assert resp.status_code == 302
+    assert resp["Location"] == f"/status/{listing.status.pk}/"
+
+
+@pytest.mark.django_db
+def test_deleting_an_orphan_reply_lands_on_the_index(alice, bob, dune):
+    # Its parent was already a tombstone, so the reply's own page was the only one
+    # that showed it, and this delete makes that one a tombstone too.
+    post = _review(alice, dune)
+    mine = _reply(bob, post)
+    _login("alice").post(f"/status/{post.pk}/delete/")
+    resp = _login("bob").post(f"/status/{mine.pk}/delete/")
     assert resp.status_code == 302
     assert resp["Location"] == reverse("index")
 

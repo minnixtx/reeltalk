@@ -50,3 +50,6 @@ SHARE_PROPOSAL.md
 SHARE_PLAN.md
 POST_EDIT_DELETE_PROPOSAL.md
 POST_EDIT_DELETE_PLAN.md
+# Agent-facing working rules. Carries our LAN address and local toolchain detail, and it is
+# context for the assistant rather than documentation for a deployer or a user.
+QWEN.md
